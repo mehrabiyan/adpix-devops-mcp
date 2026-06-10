@@ -1,0 +1,35 @@
+{
+  "name": "adpix-devops-mcp",
+  "version": "0.1.0",
+  "description": "MCP server that acts as a DevOps / SysAdmin / SRE for AdPix Analytics: installs, maintains, monitors, secures and keeps AdPix up on remote servers over SSH.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "adpix-devops-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepare": "npm run build",
+    "dev": "tsx src/index.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "ssh2": "^1.16.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/ssh2": "^1.15.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
