@@ -4,9 +4,12 @@ An [MCP](https://modelcontextprotocol.io) server that acts as a **DevOps / SysAd
 
 - **Install** AdPix on a fresh server — preflight checks, then AdPix's idempotent one-command deploy (Docker, secrets, build, migrations, automatic HTTPS via Caddy/Let's Encrypt)
 - **Maintain** it — safe updates (backup → pull → redeploy → health-gate → **auto-rollback** on failure), restarts, logs, backups, restores
+- **Continuously deploy** the latest GitHub version — a pull-based CI/CD timer on the server ships every new commit through the same backup → deploy → health-gate → rollback pipeline, with webhook alerts and a deploy history
 - **Monitor** security, uptime and loading speed — container + front-door health, system metrics, TTFB/TLS timing reports, certificate expiry, security audits
 - **Keep it up 24/7** — installs an on-server **watchdog** (systemd timer) that checks every service each minute, auto-restarts anything unhealthy, records per-check uptime data, and fires webhook alerts on outage/recovery — protection that keeps running after you close your MCP client
-- Reach servers over **SSH** as `root` or a passwordless-`sudo` user, with private keys that never leave your machine
+- **Self-heal with AI** — when an outage survives auto-restarts (or you ask), headless **Claude Code** runs on the server under hard guardrails to diagnose and fix it; the hosted MCP service can even repair *itself* via a systemd OnFailure hook
+- Reach servers over **SSH** as `root` or a passwordless-`sudo` user, with private keys that never leave the MCP host
+- Run **locally over stdio** or **hosted on its own Ubuntu server** (HTTP transport + Bearer token, HTTPS via Caddy — one-line installer included)
 
 ## Quick start
 
@@ -81,11 +84,59 @@ Then just talk to it:
 
 | Tool | What it does |
 | --- | --- |
-| `watchdog_install` | Installs a systemd timer **on the server**: each interval it verifies every container + the front door (HTTP and HTTPS), auto-restarts unhealthy services, appends per-check records + incident JSONL, and POSTs `{"text": …}` webhook alerts (Slack/Discord/generic) on down/recovery |
+| `watchdog_install` | Installs a systemd timer **on the server**: each interval it verifies every container + the front door (HTTP and HTTPS), auto-restarts unhealthy services, appends per-check records + incident JSONL, and POSTs `{"text": …}` webhook alerts (Slack/Discord/generic) on down/recovery. With `aiEscalate:true` it hands outages that survive restarts to Claude Code |
 | `watchdog_status` | Timer schedule, last check, recent incidents |
 | `uptime_report` | Uptime % per day computed from the watchdog's per-check records, plus the incident history (what broke, what got restarted, when it recovered) |
 
 Watchdog data lives on the server under `/var/log/adpix-watchdog/` (`checks-YYYYMM.log`, `incidents.jsonl`, `state.json`).
+
+**Continuous deployment (CI/CD)**
+
+| Tool | What it does |
+| --- | --- |
+| `cicd_enable` | Pull-based CD on the server: a systemd timer polls GitHub (default every 5 min); when the tracked branch moves it runs **backup → reset to origin → deploy → health gate → automatic rollback**, alerts the webhook, and appends to a deploy history. Private repos get a dedicated **read-only deploy key** (the tool prints the exact GitHub setup). No SSH keys ever live in GitHub |
+| `cicd_status` | Timer schedule, last pass result, commits behind origin, recent deploy/rollback history |
+| `cicd_run_now` | Trigger a deploy pass immediately and wait for the outcome |
+| `cicd_disable` | Stop auto-deploys (history kept; re-enable any time) |
+
+Deploy history lives at `/var/log/adpix-autodeploy/deploys.jsonl`, full build logs next to it. Anything that lands on the tracked branch ships to production — protect the branch and let AdPix's CI gate merges. (AdPix also ships a push-based GitHub Actions workflow, `.github/workflows/deploy-vm.yml`, if you prefer GitHub-driven deploys.)
+
+**AI self-healing (Claude Code)**
+
+| Tool | What it does |
+| --- | --- |
+| `ai_setup` | Installs the Claude Code CLI on the server, stores the Anthropic API key in a root-only env file (`/etc/adpix-ai/env`, mode 600), and installs the escalation fixer (lockfile + 30-min cooldown so a flapping outage can't burn API spend) |
+| `ai_fix` | Points headless Claude Code at a problem **on the server**: it gets the gathered evidence (containers, incidents, deploy history, resources, logs) plus hard guardrails — never delete volumes/databases/backups, never touch secrets, never push, least-invasive fix first, stop and report when unsure. `mode:"diagnose"` investigates without changing anything. Returns the report, turn count and cost; transcripts stay in `/var/log/adpix-ai/` |
+
+Three escalation layers once `ai_setup` has run:
+1. **On demand** — you (or Claude in chat) call `ai_fix`.
+2. **Watchdog escalation** — `watchdog_install` with `aiEscalate:true`: when an outage survives auto-restarts for N consecutive checks (default 5), the watchdog launches the fixer once per outage and announces it on the webhook.
+3. **MCP self-repair** (hosted mode) — if the MCP service itself crash-loops, systemd's `OnFailure` hook runs Claude Code against the MCP's own install dir (journal, recent git changes, rebuild, restart, verify `/healthz`) with a 60-min cooldown.
+
+**Hosted-mode maintenance**
+
+| Tool | What it does |
+| --- | --- |
+| `mcp_self_update` | The hosted MCP updates **itself**: pulls its own repo, rebuilds, and restarts the service 2 s after replying. Refuses on local modifications (e.g. unreviewed AI self-heal patches) |
+
+## Hosting the MCP server on its own Ubuntu server
+
+Instead of running locally over stdio, host it as an HTTPS service:
+
+```bash
+# on the MCP host (fresh Ubuntu/Debian), as root:
+MCP_DOMAIN=mcp.example.com ANTHROPIC_API_KEY=sk-... \
+  bash -c "$(curl -fsSL https://raw.githubusercontent.com/mehrabiyan/adpix-devops-mcp/main/scripts/install-server.sh)"
+```
+
+The idempotent installer sets up: Node 22 (if needed), a system user, the build, a root-only env file with a **generated Bearer token** (preserved across re-runs), a hardened systemd service (`Restart=always` + AI `OnFailure` self-heal hook), an **SSH identity** for reaching your AdPix servers (it prints the public key to authorize on each target), Caddy with automatic Let's Encrypt TLS for `MCP_DOMAIN`, and ufw rules. It finishes by printing the exact connect command:
+
+```bash
+claude mcp add --transport http adpix-devops https://mcp.example.com/mcp \
+  --header "Authorization: Bearer <token>"
+```
+
+Without `MCP_DOMAIN` it serves plain HTTP on port 8930 (token-protected — only use on a trusted network, or keep `MCP_HTTP_HOST=127.0.0.1` and connect through an SSH tunnel). Update later by re-running the installer or calling the `mcp_self_update` tool. The server **refuses to start** on a non-loopback address without `MCP_AUTH_TOKEN`.
 
 ## Configuration
 
@@ -102,12 +153,18 @@ Servers normally come from the registry (`server_add`). For a single-server setu
 | `ADPIX_SSH_PASSPHRASE` | Key passphrase (if any) | — |
 | `ADPIX_SSH_PASSWORD` | Password auth fallback (keys are strongly preferred) | — |
 | `ADPIX_DEVOPS_HOME` | Registry location | `~/.adpix-devops` |
+| `ANTHROPIC_API_KEY` | Used by `ai_setup`/`ai_fix` when no key is given/stored | — |
+| `MCP_TRANSPORT` | `http` switches to hosted mode (same as `--http`) | stdio |
+| `MCP_HTTP_HOST` / `MCP_HTTP_PORT` | Hosted-mode bind address | `127.0.0.1` / `8930` |
+| `MCP_AUTH_TOKEN` | Bearer token for `/mcp` (required off-loopback) | — |
 
 ## Security model
 
 - **Keys stay put.** The registry stores a *path* to your private key, never the key. Passwords/passphrases are env-only and never written to disk.
 - **Secrets are redacted** from tool output (deploy logs, `.env`-style values, the generated admin password — it stays in `.env` on the server).
 - **Guardrails, not a sandbox.** `run_command` refuses known-catastrophic patterns without `confirm:true`; destructive purpose-tools (`adpix_restore`, reboots) carry their own confirm flags; `harden_server` is dry-run by default. Your MCP client's human-approval prompt remains the primary control.
+- **AI runs are bounded.** Every Claude Code run is turn-limited, lock-filed, cooled down (30 min between automatic fixes, 60 min for MCP self-heal), prompt-forbidden from touching data/secrets/git-push, and fully transcripted on the server. Use an API key with a spend limit.
+- **Hosted mode**: Bearer token compared in constant time, TLS via Caddy, and a hard refusal to bind beyond loopback without a token.
 - **Non-root users** must have passwordless sudo (`NOPASSWD`) — commands are wrapped with `sudo -n`.
 - Host keys are not pinned (typical for MCP SSH tooling) — point this at servers you trust on networks you trust.
 
@@ -120,4 +177,4 @@ npm run build
 npm run dev     # run from source over stdio
 ```
 
-Layout: `src/ssh.ts` (ssh2 wrapper: sudo, timeouts, keepalive) · `src/registry.ts` · `src/guard.ts` · `src/adpix.ts` (deploy/compose/health specifics) · `src/remote/watchdog.ts` (bash + systemd templates) · `src/tools/*` (one file per tool group; handlers take a `Deps` seam so tests run without a network).
+Layout: `src/ssh.ts` (ssh2 wrapper: sudo, timeouts, keepalive) · `src/registry.ts` · `src/guard.ts` · `src/http.ts` (Streamable HTTP + Bearer auth) · `src/adpix.ts` (deploy/compose/health specifics) · `src/remote/*` (bash + systemd templates: watchdog, autodeploy, AI fixer — all `bash -n`-tested) · `src/tools/*` (one file per tool group; handlers take a `Deps` seam so tests run without a network) · `scripts/` (Ubuntu installer + MCP self-heal hook).

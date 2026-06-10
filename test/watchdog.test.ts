@@ -44,6 +44,25 @@ describe("watchdog script template", () => {
     execFileSync("bash", ["-n", tmp]);
     fs.rmSync(path.dirname(tmp), { recursive: true, force: true });
   });
+
+  it("AI escalation is off by default and renders correctly when enabled", () => {
+    const off = renderWatchdogScript(opts);
+    expect(off).toContain("AI_ESCALATE=0");
+
+    const on = renderWatchdogScript({ ...opts, aiEscalate: true, escalateAfter: 7 });
+    expect(on).toContain("AI_ESCALATE=1");
+    expect(on).toContain("ESCALATE_AFTER=7");
+    // fires once per outage via the flag file, detached via systemd-run
+    expect(on).toContain("ai-escalation.active");
+    expect(on).toContain("systemd-run --collect");
+    expect(on).toContain("adpix-ai-fix.sh");
+    expect(on).toContain('\\"event\\":\\"ai_escalation\\"'.replace(/\\\\/g, "\\"));
+
+    const tmp = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "wd-")), "watchdog-ai.sh");
+    fs.writeFileSync(tmp, on);
+    execFileSync("bash", ["-n", tmp]);
+    fs.rmSync(path.dirname(tmp), { recursive: true, force: true });
+  });
 });
 
 describe("systemd units", () => {

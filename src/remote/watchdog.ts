@@ -21,6 +21,10 @@ export interface WatchdogOpts {
   httpPath: string;
   /** While down, re-alert every N consecutive failed checks. */
   realertEvery: number;
+  /** Escalate to Claude Code (adpix-ai-fix.sh, installed by ai_setup) when an outage survives restarts. */
+  aiEscalate?: boolean;
+  /** Escalate after this many consecutive failed checks. */
+  escalateAfter?: number;
 }
 
 export function renderWatchdogScript(o: WatchdogOpts): string {
@@ -39,6 +43,8 @@ WEBHOOK_URL='${clean(o.webhookUrl ?? "")}'
 AUTO_RESTART=${o.autoRestart ? 1 : 0}
 HTTP_PATH='${clean(o.httpPath)}'
 REALERT_EVERY=${Math.max(2, Math.floor(o.realertEvery))}
+AI_ESCALATE=${o.aiEscalate ? 1 : 0}
+ESCALATE_AFTER=${Math.max(2, Math.floor(o.escalateAfter ?? 5))}
 PROJECT=adanalytics
 LOG_DIR=/var/log/adpix-watchdog
 STATE_FILE="$LOG_DIR/state.json"
@@ -131,6 +137,18 @@ if [ -n "$alert" ] && [ -n "$WEBHOOK_URL" ]; then
   payload="{\\"text\\":\\"$msg\\",\\"content\\":\\"$msg\\",\\"host\\":\\"$host\\",\\"status\\":\\"$status\\",\\"services\\":\\"$bad\\",\\"ts\\":\\"$TS\\"}"
   curl -ksS -m 10 -X POST -H 'Content-Type: application/json' -d "$payload" "$WEBHOOK_URL" >/dev/null 2>&1 || true
 fi
+
+# --- AI escalation: outage survived auto-restarts -> hand off to Claude Code -----
+# (once per outage; adpix-ai-fix.sh is installed by ai_setup and is a silent no-op
+#  without an API key. systemd-run detaches it so this oneshot pass isn't blocked.)
+if [ "$status" = fail ] && [ "$AI_ESCALATE" -eq 1 ] && [ "$consec" -ge "$ESCALATE_AFTER" ] && [ ! -f "$LOG_DIR/ai-escalation.active" ]; then
+  if [ -x /usr/local/bin/adpix-ai-fix.sh ] && command -v systemd-run >/dev/null 2>&1; then
+    touch "$LOG_DIR/ai-escalation.active"
+    echo "{\\"ts\\":\\"$TS\\",\\"event\\":\\"ai_escalation\\",\\"services\\":\\"$bad\\",\\"actions\\":\\"claude-code\\",\\"consecutive\\":$consec}" >> "$INCIDENTS"
+    systemd-run --collect --unit "adpix-ai-fix-$(date +%s)" /usr/local/bin/adpix-ai-fix.sh "watchdog escalation: AdPix failing for $consec consecutive checks: $bad (auto-restarts did not recover it)" >/dev/null 2>&1 || rm -f "$LOG_DIR/ai-escalation.active"
+  fi
+fi
+if [ "$status" = ok ]; then rm -f "$LOG_DIR/ai-escalation.active"; fi
 
 # --- state + retention (keep ~4 months of per-check logs) ------------------------
 echo "{\\"ts\\":\\"$TS\\",\\"status\\":\\"$status\\",\\"consecutive_failures\\":$consec,\\"services\\":\\"$bad\\"}" > "$STATE_FILE"

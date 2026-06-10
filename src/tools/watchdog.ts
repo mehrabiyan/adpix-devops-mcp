@@ -77,21 +77,37 @@ export const watchdogTools: ToolDef[] = [
         .describe("Alert webhook (Slack/Discord/generic). Defaults to the server's registered webhookUrl."),
       httpPath: z.string().default("/_apx_health").describe("Front-door path that must answer"),
       realertEvery: z.number().int().min(2).max(1440).default(30).describe("While down, re-alert every N checks"),
+      aiEscalate: z
+        .boolean()
+        .default(false)
+        .describe("Escalate to Claude Code when an outage survives auto-restarts (requires ai_setup; costs API tokens)"),
+      escalateAfter: z.number().int().min(2).max(1440).default(5).describe("Escalate after N consecutive failed checks"),
     },
     annotations: { idempotentHint: true },
     handler: async (deps, args) => {
       const a = args as {
         server?: string; intervalSeconds: number; autoRestart: boolean;
         webhookUrl?: string; httpPath: string; realertEvery: number;
+        aiEscalate: boolean; escalateAfter: number;
       };
       return withSession(deps, a.server, async (s, srv) => {
         const webhook = a.webhookUrl ?? srv.webhookUrl;
+        if (a.aiEscalate) {
+          const ready = await s.exec(
+            `test -x /usr/local/bin/adpix-ai-fix.sh && test -f /etc/adpix-ai/env && echo yes || echo no`
+          );
+          if (ready.stdout.trim() !== "yes") {
+            return `aiEscalate:true needs the AI fixer on ${srv.name} — run ai_setup first, then re-run watchdog_install.`;
+          }
+        }
         const script = renderWatchdogScript({
           adpixDir: srv.adpixDir,
           webhookUrl: webhook,
           autoRestart: a.autoRestart,
           httpPath: a.httpPath,
           realertEvery: a.realertEvery,
+          aiEscalate: a.aiEscalate,
+          escalateAfter: a.escalateAfter,
         });
         await uploadFile(s, WATCHDOG_SCRIPT_PATH, script, "755");
         await uploadFile(s, `/etc/systemd/system/${WATCHDOG_SERVICE}`, WATCHDOG_SERVICE_UNIT, "644");
@@ -106,7 +122,8 @@ export const watchdogTools: ToolDef[] = [
         return [
           `Watchdog installed on ${srv.name} — checking every ${a.intervalSeconds}s` +
             (a.autoRestart ? ", auto-restarting unhealthy services" : " (observe-only: autoRestart:false)") +
-            (webhook ? ", alerting to the configured webhook" : ", no webhook configured (pass webhookUrl to get alerts)"),
+            (webhook ? ", alerting to the configured webhook" : ", no webhook configured (pass webhookUrl to get alerts)") +
+            (a.aiEscalate ? `, escalating to Claude Code after ${a.escalateAfter} failed checks` : ""),
           `First check result: ${en.stdout.trim() || "(state pending)"}`,
           ``,
           `Data on the server: ${WATCHDOG_LOG_DIR}/{checks-YYYYMM.log, incidents.jsonl, state.json}`,

@@ -31,7 +31,11 @@ function fakeDeps(responses: Responder[], srvOverrides: Partial<ServerConfig> = 
       return { code: 0, stdout: "", stderr: "" };
     },
   };
-  const deps: Deps = { resolve: () => server, connect: async () => session };
+  const deps: Deps = {
+    resolve: () => server,
+    connect: async () => session,
+    local: async () => ({ code: 0, stdout: "", stderr: "" }),
+  };
   return { deps, calls };
 }
 
@@ -51,6 +55,8 @@ describe("tool registration", () => {
       "health_check", "system_metrics", "performance_report", "tls_status",
       "security_audit", "harden_server", "patch_system",
       "watchdog_install", "watchdog_status", "uptime_report",
+      "cicd_enable", "cicd_status", "cicd_run_now", "cicd_disable",
+      "ai_setup", "ai_fix", "mcp_self_update",
     ]) {
       expect(names).toContain(expected);
     }

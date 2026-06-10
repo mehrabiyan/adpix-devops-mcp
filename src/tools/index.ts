@@ -4,6 +4,9 @@ import { lifecycleTools } from "./lifecycle.js";
 import { monitorTools } from "./monitor.js";
 import { securityTools } from "./security.js";
 import { watchdogTools } from "./watchdog.js";
+import { cicdTools } from "./cicd.js";
+import { aiTools } from "./ai.js";
+import { selfTools } from "./self.js";
 
 export const allTools: ToolDef[] = [
   ...serverTools,
@@ -11,4 +14,7 @@ export const allTools: ToolDef[] = [
   ...monitorTools,
   ...securityTools,
   ...watchdogTools,
+  ...cicdTools,
+  ...aiTools,
+  ...selfTools,
 ];
