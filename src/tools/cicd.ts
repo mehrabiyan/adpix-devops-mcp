@@ -12,53 +12,44 @@ import {
   renderAutodeployTimer,
 } from "../remote/autodeploy.js";
 import { shq, lastLines } from "../util.js";
+import {
+  ADPIX_DEPLOY_KEY_PATH,
+  coreSshCommand,
+  deployKeyInstructions,
+  ensureDeployKey,
+  toSshUrl,
+} from "../github.js";
 import type { ToolDef } from "./types.js";
+
+// Re-exported for callers/tests that imported it from here before the move.
+export { parseGithubRemote } from "../github.js";
 
 const serverParam = z
   .string()
   .optional()
   .describe("Registered server name. Omit to use the default server.");
 
-const DEPLOY_KEY_PATH = "/root/.ssh/adpix_deploy_ed25519";
-
-/** Parse owner/repo out of an https or ssh GitHub remote URL. */
-export function parseGithubRemote(url: string): { owner: string; repo: string } | undefined {
-  const m =
-    url.trim().match(/^https:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?$/) ||
-    url.trim().match(/^git@github\.com:([^/]+)\/([^/]+?)(?:\.git)?$/);
-  return m ? { owner: m[1], repo: m[2] } : undefined;
-}
-
 /**
- * Switch the checkout's origin to SSH with a dedicated read-only deploy key,
- * generating the key if needed. Returns the public key + setup instructions.
+ * Switch the checkout's origin to SSH with the shared read-only deploy key,
+ * generating it if needed. If adpix_install already authorized it, this just
+ * confirms access. Returns a human status / setup instructions.
  */
 async function setupDeployKey(s: Session, dir: string): Promise<string> {
   const remote = (await s.exec(`cd ${shq(dir)} && git remote get-url origin`)).stdout.trim();
-  const gh = parseGithubRemote(remote);
-  if (!gh) {
-    return (
-      `Could not parse a GitHub owner/repo from origin "${remote}". ` +
-      `Set up read access manually, then re-run cicd_enable.`
-    );
+  const sshUrl = toSshUrl(remote);
+  if (!sshUrl) {
+    return `Could not parse a GitHub owner/repo from origin "${remote}". Set up read access manually, then re-run cicd_enable.`;
   }
+  const st = await ensureDeployKey(s, sshUrl);
+  // Point origin at SSH + the key so every future fetch uses it (also scrubs a token-in-URL origin).
   await s.exec(
-    `[ -f ${DEPLOY_KEY_PATH} ] || ssh-keygen -t ed25519 -N '' -f ${DEPLOY_KEY_PATH} -C "adpix-autodeploy@$(hostname)" >/dev/null`
+    `cd ${shq(dir)} && git remote set-url origin ${shq(st.sshUrl)} && ` +
+      `git config core.sshCommand ${shq(coreSshCommand(ADPIX_DEPLOY_KEY_PATH))}`
   );
-  const pub = (await s.exec(`cat ${DEPLOY_KEY_PATH}.pub`)).stdout.trim();
-  await s.exec(
-    `cd ${shq(dir)} && git remote set-url origin git@github.com:${gh.owner}/${gh.repo}.git && ` +
-      `git config core.sshCommand "ssh -i ${DEPLOY_KEY_PATH} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"`
-  );
-  return [
-    `The repo needs authentication, so a dedicated READ-ONLY deploy key was set up:`,
-    ``,
-    `    ${pub}`,
-    ``,
-    `Add it at https://github.com/${gh.owner}/${gh.repo}/settings/keys → "Add deploy key"`,
-    `(leave "Allow write access" UNCHECKED). Auto-deploy will alert once via webhook and`,
-    `keep retrying until the key is added — no further action needed here.`,
-  ].join("\n");
+  if (st.authorized) {
+    return `Read-only deploy key already authorized for ${st.owner}/${st.repo}; origin set to SSH.`;
+  }
+  return deployKeyInstructions(st) + `\n\nAuto-deploy will keep retrying (and alert once) until the key is added.`;
 }
 
 export const cicdTools: ToolDef[] = [

@@ -56,7 +56,7 @@ Then just talk to it:
 
 | Tool | What it does |
 | --- | --- |
-| `adpix_install` | Preflight (OS/RAM/disk/ports 80+443) → clone → `scripts/deploy.sh` (Docker, `.env` secrets, build, migrate) → health gate. Domain ⇒ automatic HTTPS; no domain ⇒ HTTP on the server IP. First run ≈ 10–25 min |
+| `adpix_install` | Preflight (OS/RAM/disk/ports 80+443) → clone → `scripts/deploy.sh` (Docker, `.env` secrets, build, migrate) → health gate. Domain ⇒ automatic HTTPS; no domain ⇒ HTTP on the server IP. First run ≈ 10–25 min. **Private repo:** `deployKey:true` generates a read-only SSH deploy key on the server and prints the one line to add to GitHub |
 | `adpix_update` | Backup → `git pull` → redeploy → health gate; **rolls back to the previous commit** if the stack doesn't come back healthy |
 | `adpix_status` | Containers, deployed version, URL, Docker disk, watchdog state |
 | `adpix_restart` | One service or the whole stack, then re-check health |
@@ -119,6 +119,33 @@ Three escalation layers once `ai_setup` has run:
 | --- | --- |
 | `mcp_self_update` | The hosted MCP updates **itself**: pulls its own repo, rebuilds, and restarts the service 2 s after replying. Refuses on local modifications (e.g. unreviewed AI self-heal patches) |
 
+## Private GitHub repos
+
+Both repos can be private. Two separate auth hops are involved, and the MCP handles both via **read-only SSH deploy keys** (no tokens, no SSH keys handed to GitHub):
+
+1. **MCP host → your AdPix server** — the MCP authenticates with its own SSH key (you authorize its public key on each server; the installer prints it).
+2. **A server → GitHub, to clone a private repo** — each box that clones needs its *own* GitHub credential. The MCP's key gets it onto the server; it does **not** authenticate the server to GitHub.
+
+**Installing AdPix from a private repo** — pass `deployKey:true`:
+
+> *"Install AdPix on prod with domain analytics.example.com, deployKey true."*
+
+`adpix_install` generates a read-only key on the server and, on first run, prints one line to paste into **GitHub → the `adpix` repo → Settings → Deploy keys** (leave write access off). Re-run the same call and it clones over SSH and proceeds. The key is reused by `cicd_enable`, so continuous deploy needs no re-auth. (A `git@github.com:…` `repoUrl` turns this on automatically; if you forget the flag on a private repo, the auth error tells you to add it.)
+
+**Installing the MCP server itself from its private repo** — the `curl … | bash` bootstrap can't read a private raw URL, so get the code on the host first, then run the installer (it sets up its own read-only deploy key so re-runs and `mcp_self_update` keep working):
+
+```bash
+# clone with any credential you already have (a fine-grained PAT here), then hand the
+# installer the SSH URL — it creates a read-only deploy key and scrubs the token:
+sudo git clone https://<PAT>@github.com/mehrabiyan/adpix-devops-mcp.git /opt/adpix-devops-mcp
+sudo REPO_URL=git@github.com:mehrabiyan/adpix-devops-mcp.git \
+  MCP_DOMAIN=mcp.example.com ANTHROPIC_API_KEY=sk-... \
+  /opt/adpix-devops-mcp/scripts/install-server.sh
+# first run prints a deploy key to add to GitHub → re-run; done.
+```
+
+Deploy keys are per-repo and per-host, so AdPix and the MCP repo each get their own — which is automatic since they live on different machines.
+
 ## Hosting the MCP server on its own Ubuntu server
 
 Instead of running locally over stdio, host it as an HTTPS service:
@@ -129,7 +156,9 @@ MCP_DOMAIN=mcp.example.com ANTHROPIC_API_KEY=sk-... \
   bash -c "$(curl -fsSL https://raw.githubusercontent.com/mehrabiyan/adpix-devops-mcp/main/scripts/install-server.sh)"
 ```
 
-The idempotent installer sets up: Node 22 (if needed), a system user, the build, a root-only env file with a **generated Bearer token** (preserved across re-runs), a hardened systemd service (`Restart=always` + AI `OnFailure` self-heal hook), an **SSH identity** for reaching your AdPix servers (it prints the public key to authorize on each target), Caddy with automatic Let's Encrypt TLS for `MCP_DOMAIN`, and ufw rules. It finishes by printing the exact connect command:
+For a **private** `adpix-devops-mcp` repo this exact one-liner won't fetch the script — see [Private GitHub repos](#private-github-repos) above for the clone-then-install flow.
+
+The idempotent installer sets up: Node 22 (if needed), a system user, the build, a root-only env file with a **generated Bearer token** (preserved across re-runs), a hardened systemd service (`Restart=always` + AI `OnFailure` self-heal hook), an **SSH identity** for reaching your AdPix servers (it prints the public key to authorize on each target), optional **read-only deploy key** for a private repo (`REPO_URL=git@github.com:…`), Caddy with automatic Let's Encrypt TLS for `MCP_DOMAIN`, and ufw rules. It finishes by printing the exact connect command:
 
 ```bash
 claude mcp add --transport http adpix-devops https://mcp.example.com/mcp \

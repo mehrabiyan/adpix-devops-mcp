@@ -9,6 +9,7 @@
 #   MCP_PORT=8930                internal HTTP port (also the public port when no domain is set)
 #   ANTHROPIC_API_KEY=sk-...     enable AI self-healing of this service (Claude Code, OnFailure hook)
 #   REPO_URL / BRANCH            where to install from (default: this repo's GitHub main branch)
+#   REPO_URL=git@github.com:…    private repo: sets up a read-only deploy key (prints it on first run)
 #
 # Idempotent: re-run any time to update (it preserves the auth token and env file).
 set -euo pipefail
@@ -60,14 +61,51 @@ fi
 chown -R "$SVC_USER:$SVC_USER" "$STATE_DIR" "$LOG_DIR"
 
 # 3. code ----------------------------------------------------------------------
+# Private repo over SSH: REPO_SSH=1 (auto for git@ URLs) sets up a read-only
+# deploy key owned by the service user, so the first manual clone, this
+# installer, and the mcp_self_update tool all pull with the same key (and any
+# token in an existing origin URL gets scrubbed). git runs as the service user
+# in this mode so the key's ownership matches.
+case "$REPO_URL" in git@*|ssh://*) REPO_SSH=1 ;; esac
+DEPLOY_KEY="$STATE_DIR/.ssh/repo_deploy_ed25519"
+GIT=(git)
+if [ "${REPO_SSH:-0}" = "1" ]; then
+  case "$REPO_URL" in
+    https://github.com/*) p="${REPO_URL#https://github.com/}"; REPO_URL="git@github.com:${p%.git}.git" ;;
+  esac
+  [ -f "$DEPLOY_KEY" ] || sudo -u "$SVC_USER" ssh-keygen -t ed25519 -N "" -C "adpix-mcp-deploy@$(hostname)" -f "$DEPLOY_KEY" -q
+  SSH_CMD="ssh -i $DEPLOY_KEY -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+  GIT=(sudo -u "$SVC_USER" env GIT_SSH_COMMAND="$SSH_CMD" git)
+  if ! sudo -u "$SVC_USER" env GIT_SSH_COMMAND="$SSH_CMD -o BatchMode=yes" git ls-remote "$REPO_URL" >/dev/null 2>&1; then
+    cat <<EOF
+
+>> This private repo needs a deploy key. Add this READ-ONLY key to GitHub:
+
+    $(cat "$DEPLOY_KEY.pub")
+
+   -> https://github.com/<owner>/<repo>/settings/keys   (Add deploy key; leave write access OFF)
+
+   Then re-run this installer. Nothing else was changed.
+EOF
+    exit 0
+  fi
+  mkdir -p "$INSTALL_DIR"; chown "$SVC_USER:$SVC_USER" "$(dirname "$INSTALL_DIR")" 2>/dev/null || true
+  chown -R "$SVC_USER:$SVC_USER" "$INSTALL_DIR" 2>/dev/null || true
+fi
+
 if [ -d "$INSTALL_DIR/.git" ]; then
   say "Updating existing install…"
-  git -C "$INSTALL_DIR" fetch origin
-  if [ -n "$BRANCH" ]; then git -C "$INSTALL_DIR" checkout "$BRANCH"; fi
-  git -C "$INSTALL_DIR" pull --ff-only
+  if [ "${REPO_SSH:-0}" = "1" ]; then
+    "${GIT[@]}" -C "$INSTALL_DIR" remote set-url origin "$REPO_URL"
+    "${GIT[@]}" -C "$INSTALL_DIR" config core.sshCommand "$SSH_CMD"
+  fi
+  "${GIT[@]}" -C "$INSTALL_DIR" fetch origin
+  if [ -n "$BRANCH" ]; then "${GIT[@]}" -C "$INSTALL_DIR" checkout "$BRANCH"; fi
+  "${GIT[@]}" -C "$INSTALL_DIR" pull --ff-only
 else
   say "Cloning $REPO_URL…"
-  git clone ${BRANCH:+-b "$BRANCH"} "$REPO_URL" "$INSTALL_DIR"
+  "${GIT[@]}" clone ${BRANCH:+-b "$BRANCH"} "$REPO_URL" "$INSTALL_DIR"
+  if [ "${REPO_SSH:-0}" = "1" ]; then "${GIT[@]}" -C "$INSTALL_DIR" config core.sshCommand "$SSH_CMD"; fi
 fi
 say "Building…"
 cd "$INSTALL_DIR"

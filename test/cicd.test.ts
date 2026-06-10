@@ -76,13 +76,13 @@ describe("cicd_enable", () => {
       [/test -d .*\.git.* && echo yes/, { stdout: "yes" }],
       [/GIT_TERMINAL_PROMPT=0 timeout 30 git fetch/, { code: 128, stdout: "fatal: could not read Username for 'https://github.com'" }],
       [/git remote get-url origin/, { stdout: "https://github.com/mehrabiyan/adpix.git\n" }],
-      [/cat \/root\/\.ssh\/adpix_deploy_ed25519\.pub/, { stdout: "ssh-ed25519 AAAA-test adpix-autodeploy@host\n" }],
+      [/adpix_deploy_ed25519\.pub/, { stdout: "ssh-ed25519 AAAA-test adpix-autodeploy@host\n" }],
     ]);
     const out = await tool("cicd_enable").handler(deps, argsDefaults);
     expect(out).toContain("READ-ONLY deploy key");
     expect(out).toContain("ssh-ed25519 AAAA-test");
     expect(out).toContain("github.com/mehrabiyan/adpix/settings/keys");
-    expect(calls.some((c) => c.includes("git remote set-url origin git@github.com:mehrabiyan/adpix.git"))).toBe(true);
+    expect(calls.some((c) => c.includes("remote set-url origin") && c.includes("git@github.com:mehrabiyan/adpix.git"))).toBe(true);
     expect(calls.some((c) => c.includes("core.sshCommand"))).toBe(true);
     expect(out).toContain("Continuous deployment ENABLED");
   });

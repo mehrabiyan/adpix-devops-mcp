@@ -8,6 +8,14 @@ import {
   readSiteAddress,
   waitHealthyCmd,
 } from "../adpix.js";
+import {
+  ADPIX_DEPLOY_KEY_PATH,
+  coreSshCommand,
+  deployKeyInstructions,
+  ensureDeployKey,
+  gitSshEnv,
+  toSshUrl,
+} from "../github.js";
 import { shq, redactSecrets, lastLines, parseComposePs, table } from "../util.js";
 import type { ToolDef } from "./types.js";
 
@@ -101,6 +109,13 @@ export const lifecycleTools: ToolDef[] = [
       adminEmail: z.string().optional().describe("Admin login email (default admin@example.com)"),
       branch: z.string().default("main"),
       repoUrl: z.string().default(ADPIX_REPO_URL),
+      deployKey: z
+        .boolean()
+        .default(false)
+        .describe(
+          "Private repo: generate a read-only SSH deploy key on the server and clone over SSH. " +
+            "On first run it prints the one key line to add to GitHub, then re-run. Auto-on for git@ URLs."
+        ),
       skipPreflight: z.boolean().default(false),
       timeoutSeconds: z.number().int().min(60).max(7200).default(2400),
     },
@@ -108,7 +123,7 @@ export const lifecycleTools: ToolDef[] = [
     handler: async (deps, args) => {
       const a = args as {
         server?: string; domain?: string; adminEmail?: string; branch: string;
-        repoUrl: string; skipPreflight: boolean; timeoutSeconds: number;
+        repoUrl: string; deployKey: boolean; skipPreflight: boolean; timeoutSeconds: number;
       };
       return withSession(deps, a.server, async (s, srv) => {
         const dir = srv.adpixDir;
@@ -122,23 +137,53 @@ export const lifecycleTools: ToolDef[] = [
           }
         }
 
-        // git + curl present (deploy.sh installs Docker itself).
+        // git + curl present (deploy.sh installs Docker itself). git is also needed
+        // for the deploy-key ls-remote probe below.
         await s.exec(
           "command -v git >/dev/null && command -v curl >/dev/null || " +
             "(apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git curl ca-certificates)",
           { timeoutMs: 300_000 }
         );
 
-        // Clone or fast-forward the checkout.
+        // Private repo: set up a read-only deploy key and clone over SSH. The
+        // canonical key path is shared with cicd_enable, so enabling CD later
+        // needs no re-auth. First run prints the key and stops (idempotent).
+        const useKey = a.deployKey || /^(git@|ssh:\/\/)/.test(a.repoUrl);
+        let cloneUrl = a.repoUrl;
+        let keyEnv = "";
+        let postCloneCfg = "";
+        if (useKey) {
+          const st = await ensureDeployKey(s, toSshUrl(a.repoUrl) ?? a.repoUrl);
+          if (!st.authorized) {
+            sections.push(`## Repo access — action needed\n${deployKeyInstructions(st)}`);
+            return sections.join("\n\n") + "\n\n(Nothing installed yet — re-run adpix_install after adding the key.)";
+          }
+          cloneUrl = st.sshUrl;
+          keyEnv = gitSshEnv(ADPIX_DEPLOY_KEY_PATH);
+          postCloneCfg = ` && git -C ${shq(dir)} config core.sshCommand ${shq(coreSshCommand(ADPIX_DEPLOY_KEY_PATH))}`;
+          sections.push(`## Repo access\nRead-only deploy key ${ADPIX_DEPLOY_KEY_PATH} authorized for ${st.owner}/${st.repo}; cloning over SSH.`);
+        }
+
+        // Clone or fast-forward the checkout (keyEnv is empty for public repos).
         const clone = await s.exec(
-          `if [ -d ${shq(dir + "/.git")} ]; then cd ${shq(dir)} && git fetch origin ${shq(a.branch)} && git checkout ${shq(a.branch)} && git pull --ff-only origin ${shq(a.branch)}; ` +
-            `else mkdir -p $(dirname ${shq(dir)}) && git clone -b ${shq(a.branch)} ${shq(a.repoUrl)} ${shq(dir)}; fi`,
+          `if [ -d ${shq(dir + "/.git")} ]; then cd ${shq(dir)} && ${keyEnv}git fetch origin ${shq(a.branch)} && git checkout ${shq(a.branch)} && ${keyEnv}git pull --ff-only origin ${shq(a.branch)}; ` +
+            `else mkdir -p $(dirname ${shq(dir)}) && ${keyEnv}git clone -b ${shq(a.branch)} ${shq(cloneUrl)} ${shq(dir)}${postCloneCfg}; fi`,
           { timeoutMs: 300_000 }
         );
         if (clone.code !== 0) {
-          return `Repo checkout failed (exit ${clone.code}):\n${lastLines(clone.stderr || clone.stdout, 40)}`;
+          const authish = /could not read Username|Authentication failed|terminal prompts disabled|repository not found|Permission denied|fatal: Could not read/i.test(
+            clone.stderr + clone.stdout
+          );
+          return (
+            sections.join("\n\n") +
+            `\n\n## Checkout FAILED (exit ${clone.code})\n${lastLines(clone.stderr || clone.stdout, 40)}` +
+            (authish && !useKey
+              ? `\n\nThis looks like a private repo that needs authentication. Re-run adpix_install with deployKey:true — ` +
+                `the MCP will generate a read-only deploy key and tell you the one line to add to GitHub.`
+              : "")
+          );
         }
-        sections.push(`## Checkout\n${a.repoUrl} @ ${a.branch} → ${dir}`);
+        sections.push(`## Checkout\n${cloneUrl} @ ${a.branch} → ${dir}`);
 
         // deploy.sh: non-interactive (no TTY over exec). DOMAIN= empty selects HTTP-on-IP mode.
         const env = `DOMAIN=${shq(a.domain ?? "")}${a.adminEmail ? ` ADMIN_EMAIL=${shq(a.adminEmail)}` : ""}`;
