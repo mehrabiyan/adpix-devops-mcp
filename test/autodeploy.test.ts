@@ -70,9 +70,17 @@ describe("autodeploy systemd units", () => {
 });
 
 describe("static host scripts", () => {
-  it("install-server.sh and selfheal.sh are valid bash", () => {
-    for (const f of ["scripts/install-server.sh", "scripts/selfheal.sh"]) {
+  it("installer + selfheal scripts are valid bash", () => {
+    for (const f of ["scripts/install-server.sh", "scripts/selfheal.sh", "scripts/install-dev-adpix.sh"]) {
       execFileSync("bash", ["-n", path.resolve(f)]);
     }
+  });
+
+  it("the dev.adpix.io installer pins the right deployment", () => {
+    const s = fs.readFileSync(path.resolve("scripts/install-dev-adpix.sh"), "utf8");
+    expect(s).toContain('MCP_DOMAIN="${MCP_DOMAIN:-dev.adpix.io}"');
+    expect(s).toContain('EXPECTED_IP="${EXPECTED_IP:-167.233.101.248}"');
+    expect(s).toContain("install-server.sh");
+    expect(s).toContain("claude mcp add --transport http");
   });
 });

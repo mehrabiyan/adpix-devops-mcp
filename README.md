@@ -132,7 +132,7 @@ Both repos can be private. Two separate auth hops are involved, and the MCP hand
 
 `adpix_install` generates a read-only key on the server and, on first run, prints one line to paste into **GitHub → the `adpix` repo → Settings → Deploy keys** (leave write access off). Re-run the same call and it clones over SSH and proceeds. The key is reused by `cicd_enable`, so continuous deploy needs no re-auth. (A `git@github.com:…` `repoUrl` turns this on automatically; if you forget the flag on a private repo, the auth error tells you to add it.)
 
-**Installing the MCP server itself from its private repo** — the `curl … | bash` bootstrap can't read a private raw URL, so get the code on the host first, then run the installer (it sets up its own read-only deploy key so re-runs and `mcp_self_update` keep working):
+**Installing the MCP server itself from a private repo** — this repo is public, so the `curl … | bash` one-liners above just work. If you ever take it private, the bootstrap can't read a private raw URL: get the code onto the host first, then run the installer (it sets up its own read-only deploy key so re-runs and `mcp_self_update` keep working):
 
 ```bash
 # clone with any credential you already have (a fine-grained PAT here), then hand the
@@ -148,10 +148,20 @@ Deploy keys are per-repo and per-host, so AdPix and the MCP repo each get their 
 
 ## Hosting the MCP server on its own Ubuntu server
 
-Instead of running locally over stdio, host it as an HTTPS service:
+Instead of running locally over stdio, host it as an HTTPS service.
+
+**This deployment (dev.adpix.io)** — on the MCP host (`167.233.101.248`), as root:
 
 ```bash
-# on the MCP host (fresh Ubuntu/Debian), as root:
+ANTHROPIC_API_KEY=sk-... \
+  bash -c "$(curl -fsSL https://raw.githubusercontent.com/mehrabiyan/adpix-devops-mcp/main/scripts/install-dev-adpix.sh)"
+```
+
+`scripts/install-dev-adpix.sh` is pinned to this deployment: it checks it's running on the right box, checks the `dev.adpix.io` A-record points at `167.233.101.248`, runs the generic installer with those settings, and then verifies `https://dev.adpix.io/healthz` end to end before printing the ready-to-paste connect command. DNS prerequisite: `dev.adpix.io  A  167.233.101.248` (Caddy retries issuance automatically if you add it later); ports 80 + 443 open.
+
+**Any other deployment** — same thing, parameterized:
+
+```bash
 MCP_DOMAIN=mcp.example.com ANTHROPIC_API_KEY=sk-... \
   bash -c "$(curl -fsSL https://raw.githubusercontent.com/mehrabiyan/adpix-devops-mcp/main/scripts/install-server.sh)"
 ```
