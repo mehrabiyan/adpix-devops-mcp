@@ -1,6 +1,6 @@
 {
   "name": "adpix-devops-mcp",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "MCP server that acts as a DevOps / SysAdmin / SRE for AdPix Analytics: installs, maintains, monitors, secures and keeps AdPix up on remote servers over SSH.",
   "license": "MIT",
   "type": "module",

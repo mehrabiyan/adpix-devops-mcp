@@ -57,6 +57,7 @@ describe("tool registration", () => {
       "watchdog_install", "watchdog_status", "uptime_report",
       "cicd_enable", "cicd_status", "cicd_run_now", "cicd_disable",
       "ai_setup", "ai_fix", "mcp_self_update",
+      "capacity_plan", "consult_topic", "scale_assessment",
     ]) {
       expect(names).toContain(expected);
     }

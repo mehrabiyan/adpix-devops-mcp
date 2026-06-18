@@ -7,6 +7,7 @@ import { watchdogTools } from "./watchdog.js";
 import { cicdTools } from "./cicd.js";
 import { aiTools } from "./ai.js";
 import { selfTools } from "./self.js";
+import { consultTools } from "./consult.js";
 
 export const allTools: ToolDef[] = [
   ...serverTools,
@@ -17,4 +18,5 @@ export const allTools: ToolDef[] = [
   ...cicdTools,
   ...aiTools,
   ...selfTools,
+  ...consultTools,
 ];

@@ -113,6 +113,18 @@ Three escalation layers once `ai_setup` has run:
 2. **Watchdog escalation** — `watchdog_install` with `aiEscalate:true`: when an outage survives auto-restarts for N consecutive checks (default 5), the watchdog launches the fixer once per outage and announces it on the webhook.
 3. **MCP self-repair** (hosted mode) — if the MCP service itself crash-loops, systemd's `OnFailure` hook runs Claude Code against the MCP's own install dir (journal, recent git changes, rebuild, restart, verify `/healthz`) with a 60-min cooldown.
 
+**Scaling & capacity consultation**
+
+Advanced infrastructure advice grounded in AdPix's *real* seams (the Kafka transport with its Postgres-outbox backstop, the frozen tenant-leading ClickHouse sort key, ADR-0012's Flink swap), not generic cloud lore. Pairs with the **`infra-consultant`** agent in the `adpix` repo, which uses these tools and delegates execution to the planner/clickhouse-dba/go-reviewer.
+
+| Tool | What it does |
+| --- | --- |
+| `capacity_plan` | Size a target scale (defaults to the 100k-sites projection): events/sec, ClickHouse shards + disk TB, ingest/worker replicas, Kafka partitions, Postgres, recommended stage + cost band — and the retention cost lever. Pure model, runs from any client (no server needed) |
+| `scale_assessment` | Inspect the **live** system over SSH (current events/sec from ClickHouse, volume, on-disk size, host resources), report which of the 5 stages you're at, headroom to the next tripwire, and the single non-disruptive next step |
+| `consult_topic` | Deep playbooks: `roadmap`, `ha-topology`, `kubernetes`, `docker`, `clickhouse-cluster`, `postgres-ha`, `kafka`, `zero-downtime-migration`, `cost-optimization`, `identity-job-ha`, `campaign-readiness` |
+
+The model is honest about uncertainty (documented, overridable constants — planning estimates, not a benchmark) and opinionated about *not over-building*: with 0 customers you belong at Stage 0, and the whole point is that reaching 100k–200k sites is a sequence of cheap, reversible steps that never touch a frozen surface or interrupt a campaign.
+
 **Hosted-mode maintenance**
 
 | Tool | What it does |
