@@ -113,6 +113,21 @@ Three escalation layers once `ai_setup` has run:
 2. **Watchdog escalation** — `watchdog_install` with `aiEscalate:true`: when an outage survives auto-restarts for N consecutive checks (default 5), the watchdog launches the fixer once per outage and announces it on the webhook.
 3. **MCP self-repair** (hosted mode) — if the MCP service itself crash-loops, systemd's `OnFailure` hook runs Claude Code against the MCP's own install dir (journal, recent git changes, rebuild, restart, verify `/healthz`) with a 60-min cooldown.
 
+**Postgres DBA**
+
+Full lifecycle management of the AdPix Postgres (the transactional truth). Acts on the live DB over SSH via `compose exec postgres psql` (local-trust socket, no password — the way `backup.sh` works), applying config with `ALTER SYSTEM` + reload. Pairs with the **`postgres-dba`** agent in the `adpix` repo. Co-location aware: on a single VM, Postgres gets a memory *budget* (~25%), never the whole host — ClickHouse needs the rest.
+
+| Tool | What it does |
+| --- | --- |
+| `pg_health` | Read-only snapshot: version, size, connections vs max, cache hit ratio, blocked/idle-in-tx sessions, long queries, autovacuum freshness + dead-tuple bloat, txid-wraparound age, replication role/lag — with a verdict |
+| `pg_tune` | pgtune-style recommendations from a memory budget + cores + disk type, diffed against live values; applies via `ALTER SYSTEM` + reload (dry-run by default; flags restart-needed settings) |
+| `pg_optimize` | Unused/invalid indexes, seq-scan-heavy tables, dead-tuple bloat, top queries (`pg_stat_statements`); `apply:true` runs an online `VACUUM (ANALYZE)`. Index drops/REINDEX are advised, never auto-run |
+| `pg_harden` | Security audit + fix (scram-sha-256, SSL posture, host-port exposure, superusers, passwordless roles, public-schema CREATE, logging, idle-tx timeout). Dry-run by default |
+| `pg_backup` | On-demand **verified** logical backup: `pg_dump -Fc` + globals + `pg_restore --list` check, under `backups/pg-<ts>/` |
+| `pg_restore_db` | Restore from a `pg_dump` (destructive, `confirm:true`); health-gates afterward |
+| `pg_replication` | Streaming replication / HA: `status` · `prepare-primary` (wal_level/senders/slot/role/pg_hba) · `replica-steps` (the exact `pg_basebackup` commands) · `promote` (failover, `confirm:true`) |
+| `pg_redeploy` | `reload` (zero-downtime) · `restart` · `recreate` · `upgrade-plan` (major-version dump-&-restore plan); backs up first + health-gates |
+
 **Scaling & capacity consultation**
 
 Advanced infrastructure advice grounded in AdPix's *real* seams (the Kafka transport with its Postgres-outbox backstop, the frozen tenant-leading ClickHouse sort key, ADR-0012's Flink swap), not generic cloud lore. Pairs with the **`infra-consultant`** agent in the `adpix` repo, which uses these tools and delegates execution to the planner/clickhouse-dba/go-reviewer.

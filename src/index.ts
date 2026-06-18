@@ -7,7 +7,7 @@ import { realDeps } from "./deps.js";
 import { allTools } from "./tools/index.js";
 import { serveHttp } from "./http.js";
 
-export const VERSION = "0.3.0";
+export const VERSION = "0.4.0";
 
 // stdout is the stdio protocol channel — all logging goes to stderr.
 const log = (...a: unknown[]) => console.error("[adpix-devops-mcp]", ...a);

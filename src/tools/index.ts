@@ -8,6 +8,7 @@ import { cicdTools } from "./cicd.js";
 import { aiTools } from "./ai.js";
 import { selfTools } from "./self.js";
 import { consultTools } from "./consult.js";
+import { postgresTools } from "./postgres.js";
 
 export const allTools: ToolDef[] = [
   ...serverTools,
@@ -19,4 +20,5 @@ export const allTools: ToolDef[] = [
   ...aiTools,
   ...selfTools,
   ...consultTools,
+  ...postgresTools,
 ];

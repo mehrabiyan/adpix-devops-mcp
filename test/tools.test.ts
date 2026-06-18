@@ -58,6 +58,8 @@ describe("tool registration", () => {
       "cicd_enable", "cicd_status", "cicd_run_now", "cicd_disable",
       "ai_setup", "ai_fix", "mcp_self_update",
       "capacity_plan", "consult_topic", "scale_assessment",
+      "pg_health", "pg_tune", "pg_optimize", "pg_harden",
+      "pg_backup", "pg_restore_db", "pg_replication", "pg_redeploy",
     ]) {
       expect(names).toContain(expected);
     }
