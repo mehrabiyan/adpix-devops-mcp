@@ -14,6 +14,7 @@ import { clusterTools } from "./cluster.js";
 import { launchTools } from "./launch.js";
 import { tagmanagerTools } from "./tagmanager.js";
 import { observabilityTools } from "./observability.js";
+import { installTools } from "./install.js";
 
 export const allTools: ToolDef[] = [
   ...serverTools,
@@ -31,4 +32,5 @@ export const allTools: ToolDef[] = [
   ...launchTools,
   ...tagmanagerTools,
   ...observabilityTools,
+  ...installTools,
 ];

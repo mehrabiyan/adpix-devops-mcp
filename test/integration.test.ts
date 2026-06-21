@@ -199,6 +199,8 @@ const FIXTURES: Record<string, Record<string, unknown>> = {
   pop_add: { coreRedisHost: "10.0.0.2", objectStore: "http://10.0.0.2:9000", s3AccessKey: "k", s3SecretKey: "s", purgeToken: "p" },
   obs_deploy: {},
   obs_status: {},
+  dns_plan: {},
+  connect_configs: {},
 };
 
 describe("MCP exhaustive every-tool smoke (protocol dispatch)", () => {

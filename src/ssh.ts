@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { Client, type ConnectConfig } from "ssh2";
 import type { ServerConfig } from "./registry.js";
 import { shq } from "./util.js";
+import { makeHostVerifier, hostKeyError, type HostKeyOutcome } from "./knownhosts.js";
 
 export interface ExecResult {
   code: number;
@@ -67,16 +68,29 @@ function buildAuth(server: ServerConfig): Auth {
   );
 }
 
-export async function connect(server: ServerConfig): Promise<Session> {
+/** Per-connection host-key strictness. Strict refuses an unpinned host (used by the installer's verify-reconnect). */
+export interface ConnectOpts {
+  strictHostKey?: boolean;
+}
+
+export async function connect(server: ServerConfig, opts: ConnectOpts = {}): Promise<Session> {
   const auth = buildAuth(server);
   const conn = new Client();
+  // Host-key verification: TOFU-pin by default, strict on demand. Before this the MCP
+  // verified NOTHING and accepted any host key — MITM-able.
+  const hk: { value?: HostKeyOutcome } = {};
+  const tofu = opts.strictHostKey ? false : undefined;
 
   await new Promise<void>((resolve, reject) => {
     conn
       .once("ready", () => resolve())
-      .once("error", (err) =>
-        reject(new Error(`SSH connect to ${server.username}@${server.host}:${server.port} failed: ${err.message}`))
-      )
+      .once("error", (err) => {
+        const o = hk.value;
+        if (o && (o.status === "mismatch" || o.status === "unpinned-strict")) {
+          return reject(new Error(hostKeyError(server.host, server.port, o)));
+        }
+        reject(new Error(`SSH connect to ${server.username}@${server.host}:${server.port} failed: ${err.message}`));
+      })
       .connect({
         host: server.host,
         port: server.port,
@@ -84,6 +98,7 @@ export async function connect(server: ServerConfig): Promise<Session> {
         readyTimeout: 20_000,
         keepaliveInterval: 10_000,
         keepaliveCountMax: 12,
+        hostVerifier: makeHostVerifier(server.host, server.port, tofu === false ? { tofu: false } : {}, hk),
         ...auth.config,
       });
   });
