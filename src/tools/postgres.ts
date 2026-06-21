@@ -569,6 +569,14 @@ export const postgresTools: ToolDef[] = [
           return `Reloaded Postgres config on ${srv.name} (exit ${r.code}) — SIGHUP-context settings are now live. Restart-context settings still need action:restart.`;
         }
 
+        // Interruption guard: restarting a PRIMARY with attached standbys means write downtime
+        // for the duration. On an HA cluster, fail over first (rolling) instead of bouncing the primary.
+        const inRec = (await psql(s, dir, c, "SELECT pg_is_in_recovery()")).stdout.trim() === "t";
+        const standbys = inRec ? 0 : Number(rows((await psql(s, dir, c, "SELECT count(*) FROM pg_stat_replication")).stdout)[0]?.[0] ?? "0");
+        const downtimeWarn = !inRec && standbys > 0
+          ? `\n⚠ This node is a PRIMARY with ${standbys} standby(s). A ${a.action} stops writes for the whole platform until it's back. On HA, prefer: pg_replication mode:promote a standby (failover), repoint, then bounce this one as a standby — zero write-downtime. Proceeding anyway since you asked.\n`
+          : "";
+
         if (!a.skipBackup) {
           const bk = await s.exec(
             `cd ${shq(dir)} && O=backups/pg-$(date +%Y%m%d-%H%M%S) && mkdir -p "$O" && ${ce} exec -T postgres pg_dump -U ${shq(c.user)} -d ${shq(c.db)} -Fc > "$O/${c.db}.dump" && echo "backed up to $O"`,
@@ -584,7 +592,7 @@ export const postgresTools: ToolDef[] = [
         );
         const gate = await s.exec(waitHealthyCmd(90), { timeoutMs: 120_000 });
         return [
-          `Postgres ${a.action} on ${srv.name} (exit ${r.code}).`,
+          `Postgres ${a.action} on ${srv.name} (exit ${r.code}).${downtimeWarn}`,
           redactSecrets(lastLines(r.stdout, 12)),
           `pg_isready: ${ready.stdout.includes("ready") ? "ready" : "NOT ready — check pg_health / adpix_logs service:postgres"}`,
           `Front door: ${gate.stdout.trim()}`,

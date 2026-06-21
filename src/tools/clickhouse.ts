@@ -332,20 +332,32 @@ export const clickhouseTools: ToolDef[] = [
         out.push(`\n## Top queries by total time (24h)\n${slow.length ? table(["QUERY", "CALLS", "MEAN ms", "TOTAL ms"], slow) : "(system.query_log empty or disabled)"}`);
 
         const cap = a.maxOptimizeGB * 1024 * 1024 * 1024;
-        const candidates = pressure.filter((r) => Number(r[3]) > 30 && Number(r[4]) <= cap).map((r) => r[0]);
+        const candidates = pressure.filter((r) => Number(r[3]) > 30 && Number(r[4]) <= cap);
         const tooBig = pressure.filter((r) => Number(r[3]) > 30 && Number(r[4]) > cap).map((r) => r[0]);
         if (a.apply && candidates.length) {
+          // Safety preflight: OPTIMIZE FINAL rewrites whole partitions (~table size of extra I/O + disk).
+          // On an always-on box, refuse if disk headroom is thin or the merge pool is already busy.
+          const free = Number((await chq(s, dir, c, "SELECT min(free_space) FROM system.disks")).stdout.trim()) || 0;
+          const running = Number((await chq(s, dir, c, "SELECT count() FROM system.merges")).stdout.trim()) || 0;
+          const biggest = Math.max(...candidates.map((r) => Number(r[4])));
           const results: string[] = [];
-          for (const t of candidates.slice(0, 5)) {
-            const r = await chDDL(s, dir, c, `OPTIMIZE TABLE ${t} FINAL`, 1_800_000);
-            results.push(`  - ${t}: ${r.code === 0 ? "OPTIMIZE FINAL done" : "FAILED — " + lastLines(r.stdout, 4)}`);
+          if (running >= 8) {
+            out.push(`\n## Applied — SKIPPED\n${running} merges already in flight — not piling OPTIMIZE on top (would compound merge I/O on a live box). Re-run when the merge queue drains (ch_health).`);
+          } else if (free > 0 && free < biggest * 1.5) {
+            out.push(`\n## Applied — SKIPPED\nOnly ${formatBytes(free)} free disk; OPTIMIZE FINAL needs ~1.5× the partition size (~${formatBytes(biggest * 1.5)}) free to rewrite safely. Free space or drop retention first (ch_retention) — a full disk takes ClickHouse read-only.`);
+          } else {
+            for (const r0 of candidates.slice(0, 5)) {
+              // optimize_skip_merged_partitions avoids rewriting already-merged partitions (no-op churn).
+              const r = await chDDL(s, dir, c, `OPTIMIZE TABLE ${r0[0]} FINAL SETTINGS optimize_skip_merged_partitions=1`, 1_800_000);
+              results.push(`  - ${r0[0]}: ${r.code === 0 ? "OPTIMIZE FINAL done" : "FAILED — " + lastLines(r.stdout, 4)}`);
+            }
+            out.push(`\n## Applied (disk ${formatBytes(free)} free, ${running} merges in flight)\n${results.join("\n")}`);
           }
-          out.push(`\n## Applied\n${results.join("\n")}`);
           if (tooBig.length) out.push(`Skipped (>${a.maxOptimizeGB}GB — OPTIMIZE per-partition off-peak instead): ${tooBig.join(", ")}`);
         } else if (a.apply) {
           out.push(`\n## Applied\nNothing small + bloated enough to OPTIMIZE${tooBig.length ? ` (skipped big tables: ${tooBig.join(", ")})` : ""}.`);
         } else {
-          out.push(`\nRe-run with apply:true to OPTIMIZE FINAL the small high-part tables (≤${a.maxOptimizeGB}GB). Big tables + drops/projections are left to you.`);
+          out.push(`\nRe-run with apply:true to OPTIMIZE FINAL the small high-part tables (≤${a.maxOptimizeGB}GB; skipped if disk/merge headroom is thin). Big tables + drops/projections are left to you.`);
         }
         return out.join("\n");
       });
@@ -463,19 +475,21 @@ export const clickhouseTools: ToolDef[] = [
     name: "ch_restore_db",
     title: "Restore ClickHouse from a backup",
     description:
-      "Restore ClickHouse tables from a ch-<ts> Native backup made by ch_backup. DESTRUCTIVE — TRUNCATEs each " +
-      "target table then re-inserts (FORMAT Native) and OPTIMIZE FINAL, exactly like scripts/restore.sh. Requires " +
-      "confirm:true. Health-gates the stack afterward.",
+      "Restore ClickHouse tables from a ch-<ts> Native backup made by ch_backup — SAFELY. For each table it loads " +
+      "the Native data into a fresh staging table, verifies it came back non-empty, then ATOMICALLY swaps it with " +
+      "the live table (EXCHANGE TABLES). The live data is never destroyed before the restore is proven good, and " +
+      "the pre-restore data is kept in <table>__prev for rollback. If the backup file is empty/corrupt or restores " +
+      "0 rows, the live table is left untouched. Requires confirm:true; health-gates afterward.",
     schema: {
       server: serverParam,
       backupDir: z.string().describe('Backup dir relative to adpixDir, e.g. "backups/ch-20260615-030000"'),
       tables: z.array(z.string()).optional().describe("Subset to restore. Default: every *.native in the backup dir"),
-      confirm: z.boolean().default(false).describe("Must be true — this overwrites live ClickHouse tables"),
+      confirm: z.boolean().default(false).describe("Must be true — this swaps live ClickHouse tables for the backup"),
     },
     annotations: { destructiveHint: true },
     handler: async (deps, args) => {
       const a = args as { server?: string; backupDir: string; tables?: string[]; confirm: boolean };
-      if (!a.confirm) return "REFUSED: restore TRUNCATEs + overwrites live ClickHouse tables. Re-run with confirm:true after double-checking backupDir.";
+      if (!a.confirm) return "REFUSED: restore swaps live ClickHouse tables for the backup (live data preserved in <table>__prev, but still a production data swap). Re-run with confirm:true after double-checking backupDir.";
       return withSession(deps, a.server, async (s, srv) => {
         const dir = srv.adpixDir;
         const notInstalled = await ensureInstalled(s, dir);
@@ -494,17 +508,61 @@ export const clickhouseTools: ToolDef[] = [
 
         const results: string[] = [];
         for (const t of tables) {
-          const trunc = await chDDL(s, dir, c, `TRUNCATE TABLE IF EXISTS ${c.db}.${t}`);
+          const stg = `${t}__restore`;
+          const prev = `${t}__prev`;
+          const file = a.backupDir + "/" + t + ".native";
+
+          // 0. backup file must be non-empty (never touch live for an empty/missing export)
+          const sz = Number((await s.exec(`cd ${shq(dir)} && wc -c < ${shq(file)} 2>/dev/null || echo 0`)).stdout.trim()) || 0;
+          if (sz <= 0) { results.push(`  - ${t}: SKIPPED — backup file empty/missing; live table untouched`); continue; }
+
+          // 1. live table must exist (we swap INTO it). If missing, recreate from <t>.schema.sql first.
+          const liveExists = (await chq(s, dir, c, `SELECT count() FROM system.tables WHERE database=currentDatabase() AND name='${t}'`)).stdout.trim();
+          if (liveExists !== "1") { results.push(`  - ${t}: target table absent — recreate its schema first (${a.backupDir}/${t}.schema.sql); live untouched`); continue; }
+
+          // 2. fresh staging table cloned from the live structure (SYNC so a Replicated re-create can't collide)
+          await chDDL(s, dir, c, `DROP TABLE IF EXISTS ${c.db}.${stg} SYNC`);
+          const create = await chDDL(s, dir, c, `CREATE TABLE ${c.db}.${stg} AS ${c.db}.${t}`);
+          if (create.code !== 0) { results.push(`  - ${t}: couldn't create staging table (${lastLines(create.stdout, 3)}); live untouched`); continue; }
+
+          // 3. load the Native data into staging
           const ins = await s.exec(
-            `cd ${shq(dir)} && cat ${shq(a.backupDir + "/" + t + ".native")} | ${chClientRaw(c, `INSERT INTO ${c.db}.${t} FORMAT Native`)} 2>&1`,
+            `cd ${shq(dir)} && cat ${shq(file)} | ${chClientRaw(c, `INSERT INTO ${c.db}.${stg} FORMAT Native`)} 2>&1`,
             { timeoutMs: 3_600_000 }
           );
-          await chDDL(s, dir, c, `OPTIMIZE TABLE ${c.db}.${t} FINAL`).catch(() => undefined);
-          const cnt = (await chq(s, dir, c, `SELECT count() FROM ${c.db}.${t}`)).stdout.trim();
-          results.push(`  - ${t}: ${trunc.code === 0 && ins.code === 0 ? `restored, now ${cnt} rows` : `FAILED — ${lastLines(ins.stdout || trunc.stdout, 4)}`}`);
+          if (ins.code !== 0) {
+            await chDDL(s, dir, c, `DROP TABLE IF EXISTS ${c.db}.${stg} SYNC`);
+            results.push(`  - ${t}: restore load FAILED (${lastLines(ins.stdout, 4)}); live untouched`);
+            continue;
+          }
+
+          // 4. verify staging came back non-empty BEFORE we swap (refuse to replace live with nothing)
+          const stgCnt = (await chq(s, dir, c, `SELECT count() FROM ${c.db}.${stg}`)).stdout.trim();
+          if (!/^[1-9]/.test(stgCnt)) {
+            await chDDL(s, dir, c, `DROP TABLE IF EXISTS ${c.db}.${stg} SYNC`);
+            results.push(`  - ${t}: backup restored 0 rows — REFUSING to swap; live table untouched`);
+            continue;
+          }
+
+          // 5. atomic swap — live <-> staging — then keep the old data as <t>__prev for rollback
+          await chDDL(s, dir, c, `DROP TABLE IF EXISTS ${c.db}.${prev} SYNC`);
+          const ex = await chDDL(s, dir, c, `EXCHANGE TABLES ${c.db}.${t} AND ${c.db}.${stg}`);
+          if (ex.code !== 0) {
+            results.push(`  - ${t}: atomic EXCHANGE failed (${lastLines(ex.stdout, 3)}) — live UNTOUCHED; the verified restore is sitting in ${stg} (needs an Atomic database engine, the CH default).`);
+            continue;
+          }
+          await chDDL(s, dir, c, `RENAME TABLE ${c.db}.${stg} TO ${c.db}.${prev}`).catch(() => undefined);
+          const liveCnt = (await chq(s, dir, c, `SELECT count() FROM ${c.db}.${t}`)).stdout.trim();
+          results.push(`  - ${t}: restored ${liveCnt} rows (atomic swap; pre-restore data kept in ${prev} — DROP it once you've verified)`);
         }
         const gate = await s.exec(waitHealthyCmd(90), { timeoutMs: 120_000 });
-        return [`ClickHouse restore from ${a.backupDir} on ${srv.name}:`, results.join("\n"), `Health: ${gate.stdout.trim()}`].join("\n");
+        return [
+          `ClickHouse restore from ${a.backupDir} on ${srv.name} (safe verify-then-swap):`,
+          results.join("\n"),
+          ``,
+          `Pre-restore copies retained as <table>__prev — roll back with EXCHANGE TABLES, or drop them (... SYNC) when satisfied.`,
+          `Health: ${gate.stdout.trim()}`,
+        ].join("\n");
       });
     },
   },
@@ -678,27 +736,48 @@ export const clickhouseTools: ToolDef[] = [
           const expr = a.timeExpr ?? RETENTION_EXPR[a.table];
           if (!expr) return `Don't know the time column for ${a.table}. Pass timeExpr (e.g. toDateTime(event_time)). Known: ${Object.keys(RETENTION_EXPR).join(", ")}.`;
           const stmt = `ALTER TABLE ${c.db}.${a.table} MODIFY TTL ${expr} + INTERVAL ${a.interval} ${a.unit} DELETE SETTINGS materialize_ttl_after_modify=0`;
+
+          // Impact preview: how much data this TTL would schedule for PERMANENT deletion.
+          const cut = `${expr} < now() - INTERVAL ${a.interval} ${a.unit}`;
+          const m = tsv((await chq(s, dir, c,
+            `SELECT toString(countIf(${cut})), toString(count()) FROM ${c.db}.${a.table} SETTINGS max_execution_time=30`)).stdout)[0] ?? [];
+          const [delRows = "?", totRows = "?"] = m;
+          const measured = delRows !== "?" && totRows !== "?";
+          const pctTxt = measured && Number(totRows) > 0 ? ` (${((Number(delRows) / Number(totRows)) * 100).toFixed(1)}% of ${totRows})` : "";
+          const impact = measured
+            ? `Would PERMANENTLY delete ~${delRows} row(s)${pctTxt} of ${a.table} older than ${a.interval} ${a.unit.toLowerCase()}(s).`
+            : `Could not measure the impact (query timed out / errored) — treat this as potentially deleting a large amount.`;
+
           if (!a.confirm) {
             return [
               `# set-ttl (dry-run) — ${srv.name}`,
-              `Would run:\n  ${stmt}`,
+              impact,
               ``,
-              `This keeps ~${a.interval} ${a.unit.toLowerCase()}(s) of ${a.table} and schedules deletion of anything older.`,
-              `materialize_ttl_after_modify=0 makes it a fast metadata change (old parts drop as merges run, not in one storm).`,
-              `Re-run with confirm:true to apply. Back up first (ch_backup) if this data isn't reproducible.`,
+              `Would run:\n  ${stmt}`,
+              `materialize_ttl_after_modify=0 makes it a fast metadata change (old parts drop as merges run, not one storm).`,
+              ``,
+              `⚠ TTL deletion is IRREVERSIBLE. ${Number(delRows) > 0 ? "ch_backup the affected range first if it's not reproducible. " : ""}Re-run with confirm:true to apply.`,
             ].join("\n");
           }
+          if (!measured) return `REFUSED: couldn't measure how much ${a.table} this TTL would delete (query timed out). Investigate before forcing — run the count yourself, then apply via run_command if you're sure.`;
           const r = await chDDL(s, dir, c, stmt);
-          return `set-ttl on ${a.table} (${srv.name}): ${r.code === 0 ? `done — keeping ${a.interval} ${a.unit.toLowerCase()}(s). Old data drops as background merges run.` : `FAILED:\n${lastLines(r.stdout, 12)}`}`;
+          return `set-ttl on ${a.table} (${srv.name}): ${r.code === 0 ? `done — keeping ${a.interval} ${a.unit.toLowerCase()}(s). ~${delRows} row(s)${pctTxt} now drop as background merges run.` : `FAILED:\n${lastLines(r.stdout, 12)}`}`;
         }
 
         // drop-partition
         if (!validTable(a.table)) return "drop-partition needs a valid `table`.";
         if (!a.partition) return "drop-partition needs `partition` (e.g. '202401'). See mode:status table:<t> for the list.";
         if (!/^[0-9]+$/.test(a.partition)) return "partition must be a numeric toYYYYMM id, e.g. '202401'.";
-        if (!a.confirm) return `REFUSED: dropping partition ${a.partition} of ${a.table} permanently deletes that month. Re-run with confirm:true (ch_backup first if it's not reproducible).`;
+        const pInfo = tsv((await chq(s, dir, c,
+          `SELECT toString(sum(rows)), formatReadableSize(sum(bytes_on_disk)), toString(count()) FROM system.parts ` +
+          `WHERE active AND database=currentDatabase() AND table='${a.table}' AND partition='${a.partition}'`)).stdout)[0] ?? [];
+        const [pRows = "0", pSize = "0 B", pParts = "0"] = pInfo;
+        if (Number(pParts) === 0) return `Partition '${a.partition}' not found in ${a.table} (no active parts) — nothing to drop. mode:status table:${a.table} lists the partitions.`;
+        if (!a.confirm) {
+          return `# drop-partition (dry-run) — ${srv.name}\nWould PERMANENTLY delete partition '${a.partition}' of ${a.table} = ${pRows} row(s) / ${pSize} (${pParts} part(s)).\n\n⚠ Irreversible. ch_backup first if it's not reproducible, then re-run with confirm:true.`;
+        }
         const r = await chDDL(s, dir, c, `ALTER TABLE ${c.db}.${a.table} DROP PARTITION '${a.partition}'`);
-        return `drop-partition ${a.partition} of ${a.table} (${srv.name}): ${r.code === 0 ? "done — space reclaimed as the parts delete." : `FAILED:\n${lastLines(r.stdout, 12)}`}`;
+        return `drop-partition ${a.partition} of ${a.table} (${srv.name}): ${r.code === 0 ? `done — reclaimed ${pSize} (${pRows} rows) as the parts delete.` : `FAILED:\n${lastLines(r.stdout, 12)}`}`;
       });
     },
   },
@@ -747,6 +826,16 @@ export const clickhouseTools: ToolDef[] = [
           return `Reloaded ClickHouse config on ${srv.name} (exit ${r.code}) — config.d/users.d drop-ins are re-read. Restart-context server settings (max_server_memory_usage, background_pool_size) still need action:restart.`;
         }
 
+        // Interruption guards: a restart drops this node from the replica set + Keeper quorum
+        // briefly, and aborts any in-flight merges/mutations (they resume after). Surface it.
+        const replTables = Number((await chq(s, dir, c, "SELECT count() FROM system.replicas")).stdout.trim()) || 0;
+        const liveMerges = Number((await chq(s, dir, c, "SELECT count() FROM system.merges")).stdout.trim()) || 0;
+        const downtimeWarn =
+          (replTables > 0
+            ? `\n⚠ This node serves ${replTables} replicated table(s). A ${a.action} drops it from the replica set + Keeper quorum until it's back — on a 2-replica cluster that leaves NO quorum margin. Do it on one node at a time (bluegreen_deploy), never all at once.`
+            : `\n⚠ Single-node ClickHouse: a ${a.action} means ingest/report downtime until it's back.`) +
+          (liveMerges > 0 ? ` ${liveMerges} merge(s) in flight will be interrupted (they resume after restart).` : "") + "\n";
+
         if (!a.skipBackup) {
           // Best-effort schema snapshot (one query — all CREATE statements). The real data lives
           // in the chdata volume regardless, so unlike pg_redeploy a failure here is not fatal.
@@ -764,7 +853,7 @@ export const clickhouseTools: ToolDef[] = [
         );
         const gate = await s.exec(waitHealthyCmd(90), { timeoutMs: 120_000 });
         return [
-          `ClickHouse ${a.action} on ${srv.name} (exit ${r.code}).`,
+          `ClickHouse ${a.action} on ${srv.name} (exit ${r.code}).${downtimeWarn}`,
           redactSecrets(lastLines(r.stdout, 12)),
           `ping: ${ready.stdout.includes("ready") ? "Ok (server up)" : "NOT ready — check ch_health / adpix_logs service:clickhouse"}`,
           `Front door: ${gate.stdout.trim()}`,

@@ -249,6 +249,44 @@ describe("ch_restore_db", () => {
     expect(out).toContain("not found");
     expect(out).toContain("ch-20260615-030000");
   });
+
+  const restoreSetup: Responder[] = [
+    INSTALLED, ...ENV,
+    [/test -d .*ch-good.* && echo yes/, { stdout: "yes" }],
+    [/ls -1 \*\.native/, { stdout: "events_local" }],
+    [/wc -c </, { stdout: "123456" }],
+    [/system\.tables WHERE database=currentDatabase\(\) AND name=/, { stdout: "1" }],
+    [/DROP TABLE IF EXISTS .*SYNC/, { code: 0 }],
+    [/CREATE TABLE .*__restore AS/, { code: 0 }],
+    [/INSERT INTO .*__restore FORMAT Native/, { code: 0 }],
+    [/for i in \$\(seq 1 \d+\); do code=/, { code: 0, stdout: "healthy" }],
+  ];
+
+  it("safe-swap: verifies staging non-empty, then atomically EXCHANGEs (live kept as __prev)", async () => {
+    const { deps, calls } = fakeDeps([
+      ...restoreSetup,
+      [/events_local__restore FORMAT TabSeparated/, { stdout: "500" }], // staging count > 0
+      [/EXCHANGE TABLES .* AND .*__restore/, { code: 0 }],
+      [/RENAME TABLE .*__restore TO .*__prev/, { code: 0 }],
+      [/events_local FORMAT TabSeparated/, { stdout: "500" }], // live count after swap
+    ]);
+    const out = await tool("ch_restore_db").handler(deps, { backupDir: "backups/ch-good", confirm: true });
+    expect(out).toContain("restored 500 rows");
+    expect(out).toContain("atomic swap");
+    expect(out).toContain("__prev");
+    expect(calls.some((c) => /EXCHANGE TABLES/.test(c))).toBe(true);
+  });
+
+  it("safe-swap: REFUSES to swap when the backup restores 0 rows — live untouched", async () => {
+    const { deps, calls } = fakeDeps([
+      ...restoreSetup,
+      [/events_local__restore FORMAT TabSeparated/, { stdout: "0" }], // staging came back empty
+    ]);
+    const out = await tool("ch_restore_db").handler(deps, { backupDir: "backups/ch-good", confirm: true });
+    expect(out).toMatch(/restored 0 rows.*REFUSING to swap/);
+    expect(out).toContain("untouched");
+    expect(calls.some((c) => /EXCHANGE TABLES/.test(c))).toBe(false); // never swapped
+  });
 });
 
 // ---------------------------------------------------------------- ch_replication
@@ -291,25 +329,41 @@ describe("ch_retention", () => {
     expect(out).toContain("cost lever");
   });
 
-  it("set-ttl dry-run prints the ALTER and runs nothing", async () => {
-    const { deps, calls } = fakeDeps([INSTALLED, ...ENV]);
+  it("set-ttl dry-run previews the deletion impact and runs nothing", async () => {
+    const { deps, calls } = fakeDeps([INSTALLED, ...ENV, [/countIf/, { stdout: trow("5", "100") }]]);
     const out = await tool("ch_retention").handler(deps, { mode: "set-ttl", table: "events_local", interval: 12, unit: "MONTH", confirm: false });
     expect(out).toContain("dry-run");
+    expect(out).toMatch(/PERMANENTLY delete ~5 row\(s\) \(5\.0% of 100\)/);
     expect(out).toMatch(/MODIFY TTL toDateTime\(event_time\) \+ INTERVAL 12 MONTH/);
     expect(calls.some((c) => c.includes("ALTER TABLE"))).toBe(false);
   });
 
-  it("set-ttl with confirm applies the ALTER", async () => {
-    const { deps, calls } = fakeDeps([INSTALLED, ...ENV, [/ALTER TABLE .*MODIFY TTL/, { code: 0 }]]);
+  it("set-ttl with confirm measures impact then applies the ALTER", async () => {
+    const { deps, calls } = fakeDeps([INSTALLED, ...ENV, [/countIf/, { stdout: trow("5", "100") }], [/ALTER TABLE .*MODIFY TTL/, { code: 0 }]]);
     const out = await tool("ch_retention").handler(deps, { mode: "set-ttl", table: "events_local", interval: 12, unit: "MONTH", confirm: true });
     expect(out).toContain("done");
+    expect(out).toMatch(/~5 row\(s\)/);
     expect(calls.some((c) => c.includes("MODIFY TTL"))).toBe(true);
   });
 
-  it("drop-partition refuses without confirm", async () => {
-    const { deps } = fakeDeps([INSTALLED, ...ENV]);
-    const out = await tool("ch_retention").handler(deps, { mode: "drop-partition", table: "events_local", partition: "202401", unit: "MONTH", confirm: false });
+  it("set-ttl with confirm REFUSES if it can't measure the deletion impact", async () => {
+    const { deps, calls } = fakeDeps([INSTALLED, ...ENV, [/ALTER TABLE .*MODIFY TTL/, { code: 0 }]]); // no countIf responder → unmeasurable
+    const out = await tool("ch_retention").handler(deps, { mode: "set-ttl", table: "events_local", interval: 12, unit: "MONTH", confirm: true });
     expect(out).toContain("REFUSED");
+    expect(calls.some((c) => c.includes("MODIFY TTL"))).toBe(false);
+  });
+
+  it("drop-partition dry-run previews the size and runs nothing", async () => {
+    const { deps, calls } = fakeDeps([INSTALLED, ...ENV, [/system\.parts WHERE active.*partition=/, { stdout: trow("1000000", "500.00 MiB", "3") }]]);
+    const out = await tool("ch_retention").handler(deps, { mode: "drop-partition", table: "events_local", partition: "202401", unit: "MONTH", confirm: false });
+    expect(out).toMatch(/PERMANENTLY delete partition '202401'.*1000000 row\(s\) \/ 500\.00 MiB/);
+    expect(calls.some((c) => c.includes("DROP PARTITION"))).toBe(false);
+  });
+
+  it("drop-partition reports when the partition doesn't exist", async () => {
+    const { deps } = fakeDeps([INSTALLED, ...ENV, [/system\.parts WHERE active.*partition=/, { stdout: "" }]]);
+    const out = await tool("ch_retention").handler(deps, { mode: "drop-partition", table: "events_local", partition: "209901", unit: "MONTH", confirm: true });
+    expect(out).toMatch(/not found/);
   });
 });
 
