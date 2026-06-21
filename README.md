@@ -235,6 +235,38 @@ sudo REPO_URL=git@github.com:mehrabiyan/adpix-devops-mcp.git \
 
 Deploy keys are per-repo and per-host, so AdPix and the MCP repo each get their own — which is automatic since they live on different machines.
 
+## Guided installation (wizard)
+
+For a full server **+** fleet **+** client setup in one go, use the installer wizard instead of the bare `install-server.sh`. It installs the hosted MCP, onboards every AdPix server into the registry, verifies SSH, authorizes the MCP's key on each target (source-pinned `from="…",restrict`), and **emits the DNS plan + ready-to-paste client configs** — all idempotent and resumable (an install-state ledger; re-run to converge, never clobbers hand-added entries). See [docs/installer.md](docs/installer.md).
+
+**Shell TUI** (visual, interactive — gum if present, plain prompts otherwise):
+
+```bash
+sudo ./scripts/adpix-setup.sh          # gather fleet + domains, install, print DNS + connect
+sudo ./scripts/adpix-setup.sh --dry-run
+```
+
+**Web wizard** (browser, loopback-only — reached through an SSH tunnel, never a public port):
+
+```bash
+sudo node /opt/adpix-devops-mcp/dist/index.js --wizard
+# prints:  ssh -N -L 8931:127.0.0.1:8931 root@<server>   →   open http://127.0.0.1:8931/#t=<token>
+```
+
+The web wizard is hardened per the security review: loopback bind (refuses non-loopback without TLS), a single-use 256-bit token carried in the URL **fragment** (never logged), a strict `Host` allowlist (anti-DNS-rebind), header-token CSRF protection (no cookies), `Origin`/`Sec-Fetch` checks, JSON-only mutations, a full security-header set, and idle + max-lifetime auto-shutdown. SSH bootstrap keys/passwords are one-shot (never persisted); the registry stores key **paths**, never bytes.
+
+**Non-interactive / CI** (the same core both wizards drive):
+
+```bash
+node dist/install/cli.js --answers-file answers.json   # converge
+node dist/install/cli.js --dry-run                     # show the plan, change nothing
+node dist/install/cli.js --uninstall [--purge]         # reverse it
+node dist/install/cli.js --revoke                      # strip the MCP key from every target
+node dist/install/cli.js --rollback                    # previous commit + rebuild + restart
+```
+
+Host-key verification: the MCP now TOFU-pins each target's SSH host key (`~/.adpix-devops/known_hosts.json`) and aborts on a changed key — set `ADPIX_SSH_STRICT_HOSTKEY=1` to refuse any unpinned host.
+
 ## Hosting the MCP server on its own Ubuntu server
 
 Instead of running locally over stdio, host it as an HTTPS service.

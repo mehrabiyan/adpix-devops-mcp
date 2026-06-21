@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { inspect } from "node:util";
 import { defaultAnswers, validateAnswers, Secret, secretsFromEnv, type InstallAnswers } from "../src/install/answers.js";
+import { buildFromEnv } from "../src/install/answers-build.js";
 import { emptyJournal, loadJournal, saveJournal, setStep, setTarget, journalPath } from "../src/install/journal.js";
 import { runStep, runPlan, planDryRun, type InstallStep, type InstallContext } from "../src/install/core.js";
 import type { Deps } from "../src/deps.js";
@@ -56,6 +57,28 @@ describe("install answers", () => {
     const a = goodAnswers();
     a.launchGate = { ack: true };
     expect(validateAnswers(a).errors.join()).toMatch(/requires a reference/);
+  });
+});
+
+// ---------------------------------------------------------------- answers-build (wizard env -> answers)
+describe("buildFromEnv (shell wizard)", () => {
+  it("builds valid answers from TAB-delimited fleet records + cluster env", () => {
+    const a = buildFromEnv({
+      DOMAIN: "mcp.example.com", PORT: "8930",
+      FLEET_RECORDS: "witness\t10.0.0.1\t22\troot\twitness\t/opt/adpix\tagent\nnode1\t10.0.0.2\t22\troot\tnode\t/opt/adpix\tpassword",
+      CLUSTER_NAME: "prod", CLUSTER_VIP: "10.0.0.9",
+    } as never);
+    expect(a.mcp.domain).toBe("mcp.example.com");
+    expect(a.mcp.bindHost).toBe("127.0.0.1");
+    expect(a.fleet).toHaveLength(2);
+    expect(a.fleet[0]).toMatchObject({ name: "witness", role: "witness", authorizeKey: true });
+    expect(a.fleet[1]).toMatchObject({ name: "node1", role: "node", bootstrapAuth: "password" });
+    expect(a.cluster).toMatchObject({ name: "prod", vip: "10.0.0.9" });
+    expect(a.cluster!.hosts.length).toBeGreaterThan(0);
+    expect(validateAnswers(a).ok).toBe(true);
+  });
+  it("HTTP mode (no domain) binds 0.0.0.0", () => {
+    expect(buildFromEnv({ PORT: "8930", FLEET_RECORDS: "" } as never).mcp.bindHost).toBe("0.0.0.0");
   });
 });
 

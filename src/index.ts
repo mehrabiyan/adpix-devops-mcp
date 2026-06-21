@@ -52,6 +52,14 @@ function argValue(args: string[], flag: string): string | undefined {
 
 async function main() {
   const args = process.argv.slice(2);
+
+  // Web setup wizard (loopback-only; reached via an SSH tunnel). Dynamic import keeps it off the hot path.
+  if (args.includes("--wizard")) {
+    const { launchWizard } = await import("./wizard/launch.js");
+    launchWizard();
+    return;
+  }
+
   const httpMode = args.includes("--http") || process.env.MCP_TRANSPORT === "http";
 
   if (httpMode) {
