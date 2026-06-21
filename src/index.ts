@@ -3,7 +3,7 @@ import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { realDeps } from "./deps.js";
+import { realDeps, type Deps } from "./deps.js";
 import { allTools } from "./tools/index.js";
 import { serveHttp } from "./http.js";
 
@@ -12,7 +12,12 @@ export const VERSION = "0.4.0";
 // stdout is the stdio protocol channel — all logging goes to stderr.
 const log = (...a: unknown[]) => console.error("[adpix-devops-mcp]", ...a);
 
-export function buildServer(): McpServer {
+/**
+ * Build the MCP server with every tool registered. `deps` is the dependency seam
+ * (SSH/registry/local exec) — defaults to the real implementation; integration
+ * tests pass a fake so the protocol layer can be exercised without a network.
+ */
+export function buildServer(deps: Deps = realDeps): McpServer {
   const server = new McpServer({ name: "adpix-devops-mcp", version: VERSION });
   for (const tool of allTools) {
     server.registerTool(
@@ -25,7 +30,7 @@ export function buildServer(): McpServer {
       },
       async (args: Record<string, unknown>) => {
         try {
-          const text = await tool.handler(realDeps, args ?? {});
+          const text = await tool.handler(deps, args ?? {});
           return { content: [{ type: "text" as const, text }] };
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
