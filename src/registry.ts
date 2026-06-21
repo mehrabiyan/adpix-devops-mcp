@@ -22,10 +22,41 @@ export interface ServerConfig {
   webhookUrl?: string;
 }
 
+/**
+ * A multi-VM HA cluster (the launch topology, DEPLOYMENT_SRE §4): one witness
+ * (observability + quorum 3rd-vote + this MCP, never serves traffic) + ≥1 HA
+ * serving node, reached through a floating VIP, fronting the public host list.
+ * Members are server *names* from `servers` so connection metadata isn't duplicated.
+ */
+export interface ClusterConfig {
+  name: string;
+  /** Floating VIP host/IP (keepalived/VRRP) — the single integration point. */
+  vip?: string;
+  /** Server name of the witness node (MCP/observability/quorum arbiter). */
+  witness?: string;
+  /** Server names of the active-active HA serving nodes. */
+  nodes: string[];
+  /** Public host list the front-door Caddy serves (the Caddy SITE_ADDRESS set). */
+  hosts: string[];
+  /** OIDC issuer base for the shared IdP (account.adpix.io) — the cross-product SPOF. */
+  idpIssuer?: string;
+}
+
+/** Launch go/no-go attestation (Gate 0 — the Analytics P1 blockers, DEPLOYMENT_SRE §11). */
+export interface LaunchGate {
+  resolved: boolean;
+  /** Audit commit/date or ticket proving the P1 blockers are fixed. */
+  reference?: string;
+  /** ISO timestamp the attestation was recorded. */
+  at?: string;
+}
+
 export interface RegistryFile {
   version: 1;
   defaultServer?: string;
   servers: Record<string, Omit<ServerConfig, "name">>;
+  clusters?: Record<string, Omit<ClusterConfig, "name">>;
+  launchGate?: LaunchGate;
 }
 
 export function registryDir(): string {
@@ -110,5 +141,29 @@ export function resolveServer(name?: string): ServerConfig {
     names.length === 0
       ? "No servers configured. Add one with server_add (host, username, key path), or set ADPIX_SSH_HOST env vars."
       : `Multiple servers registered (${names.join(", ")}) and no default — pass server: "<name>" or set one as default via server_add.`
+  );
+}
+
+/** Resolve a cluster by name; with no name fall back to the single defined cluster. */
+export function resolveCluster(name?: string): ClusterConfig {
+  const reg = loadRegistry();
+  const names = Object.keys(reg.clusters ?? {});
+  if (name) {
+    const c = reg.clusters?.[name];
+    if (!c) {
+      throw new Error(
+        `Unknown cluster "${name}". Defined: ${names.length ? names.join(", ") : "(none)"}. Define one with cluster_define.`
+      );
+    }
+    return { name, ...c, nodes: c.nodes ?? [], hosts: c.hosts ?? [] };
+  }
+  if (names.length === 1) {
+    const c = reg.clusters![names[0]];
+    return { name: names[0], ...c, nodes: c.nodes ?? [], hosts: c.hosts ?? [] };
+  }
+  throw new Error(
+    names.length === 0
+      ? "No clusters defined. Create one with cluster_define (witness + nodes + the public host list)."
+      : `Multiple clusters defined (${names.join(", ")}) — pass cluster: "<name>".`
   );
 }

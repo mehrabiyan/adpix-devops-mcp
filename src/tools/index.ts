@@ -9,6 +9,11 @@ import { aiTools } from "./ai.js";
 import { selfTools } from "./self.js";
 import { consultTools } from "./consult.js";
 import { postgresTools } from "./postgres.js";
+import { clickhouseTools } from "./clickhouse.js";
+import { clusterTools } from "./cluster.js";
+import { launchTools } from "./launch.js";
+import { tagmanagerTools } from "./tagmanager.js";
+import { observabilityTools } from "./observability.js";
 
 export const allTools: ToolDef[] = [
   ...serverTools,
@@ -21,4 +26,9 @@ export const allTools: ToolDef[] = [
   ...selfTools,
   ...consultTools,
   ...postgresTools,
+  ...clickhouseTools,
+  ...clusterTools,
+  ...launchTools,
+  ...tagmanagerTools,
+  ...observabilityTools,
 ];

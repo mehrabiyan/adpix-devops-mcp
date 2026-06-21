@@ -128,6 +128,22 @@ Full lifecycle management of the AdPix Postgres (the transactional truth). Acts 
 | `pg_replication` | Streaming replication / HA: `status` · `prepare-primary` (wal_level/senders/slot/role/pg_hba) · `replica-steps` (the exact `pg_basebackup` commands) · `promote` (failover, `confirm:true`) |
 | `pg_redeploy` | `reload` (zero-downtime) · `restart` · `recreate` · `upgrade-plan` (major-version dump-&-restore plan); backs up first + health-gates |
 
+**ClickHouse DBA**
+
+Full lifecycle management of the AdPix ClickHouse (the *analytical* truth — the opposite profile to Postgres: heavy, memory-hungry OLAP, and the disk/cost bottleneck at scale). Acts on the live DB over SSH via `compose exec clickhouse clickhouse-client`; the `default` user's password is read from the container's own `$CLICKHOUSE_PASSWORD` env so it **never crosses the wire** (ADR-0039). Knows AdPix's frozen `events_local` sort key, the `ReplacingMergeTree` dedup model, and the per-table retention TTLs. Pairs with the **`clickhouse-dba`** agent in the `adpix` repo. Co-location aware: on a single VM, ClickHouse gets the *lion's share* of RAM (~60%), Postgres ~25%.
+
+| Tool | What it does |
+| --- | --- |
+| `ch_health` | Read-only snapshot: version, on-disk size, active parts + per-partition part pressure (merge backlog), largest tables with rows + compression ratio, in-flight merges + pending mutations, `ReplicatedMergeTree` status (read-only replicas, replication delay, queue), memory vs the server cap, long queries, recent errors — with a verdict |
+| `ch_tune` | Analytical-workload recommendations from a memory budget + cores + disk; the headline is an **absolute `max_server_memory_usage` cap** (not the default ratio of total host RAM, which would starve Postgres). Diffs `system.server_settings`/`system.settings`; `apply:true` writes `config.d` + `users.d` drop-ins. Dry-run by default |
+| `ch_optimize` | Part pressure (merge backlog), `ReplacingMergeTree` dedup debt, low compression ratios, top queries (`system.query_log`); `apply:true` runs `OPTIMIZE … FINAL` on **small** high-part tables only (size-capped so it never rewrites `events_local`). Big-table + projection work is advised |
+| `ch_harden` | Read-only security posture: `default`-user password (prod must set `CLICKHOUSE_PASSWORD`), host-port exposure (CH stays internal-only), passwordless users, access-management grants, query logging, DoS-guard concurrency cap. Reports the out-of-band fixes (`.env`/compose/`ch_tune`) |
+| `ch_backup` | On-demand **verified** Native export of the durable tables (`events_local`, `raw_events_jsonl` = the analytical rebuild source, `distinct_id_overrides`) + schema + a row-count MANIFEST, under `backups/ch-<ts>/`. Mirrors `scripts/backup.sh`; flags zero-byte exports |
+| `ch_restore_db` | Restore tables from a `ch-<ts>` Native backup (`TRUNCATE` → `INSERT` → `OPTIMIZE FINAL`, like `restore.sh`; destructive, `confirm:true`); health-gates afterward |
+| `ch_replication` | ReplicatedMergeTree + embedded Keeper (ADR-0042): `status` (read-only/delay/queue + Keeper reachability) · `enable-plan` (the fresh-deploy conversion path — `events_local` only converts on a clean replicated deploy) · `add-replica-steps` · `sync` (`SYSTEM SYNC REPLICA`, `confirm:true`) |
+| `ch_retention` | The **disk cost lever**: `status` (partitions by month + size + current TTL) · `set-ttl` (`MODIFY TTL` to N months/days — idempotent metadata change, `confirm:true`) · `drop-partition` (reclaim one old month, `confirm:true`). Knows each table's time column; `events_local` row shape stays frozen (TTL is metadata-only, ADR-0010) |
+| `ch_redeploy` | `reload` (`SYSTEM RELOAD CONFIG`, zero-downtime) · `restart` · `recreate` (same `chdata` volume) · `upgrade-plan` (rolling image bump — CH's data dir is forward-compatible, no dump-&-restore). Snapshots schema first + waits for `/ping` + health-gates |
+
 **Scaling & capacity consultation**
 
 Advanced infrastructure advice grounded in AdPix's *real* seams (the Kafka transport with its Postgres-outbox backstop, the frozen tenant-leading ClickHouse sort key, ADR-0012's Flink swap), not generic cloud lore. Pairs with the **`infra-consultant`** agent in the `adpix` repo, which uses these tools and delegates execution to the planner/clickhouse-dba/go-reviewer.
@@ -139,6 +155,50 @@ Advanced infrastructure advice grounded in AdPix's *real* seams (the Kafka trans
 | `consult_topic` | Deep playbooks: `roadmap`, `ha-topology`, `kubernetes`, `docker`, `clickhouse-cluster`, `postgres-ha`, `kafka`, `zero-downtime-migration`, `cost-optimization`, `identity-job-ha`, `campaign-readiness` |
 
 The model is honest about uncertainty (documented, overridable constants — planning estimates, not a benchmark) and opinionated about *not over-building*: with 0 customers you belong at Stage 0, and the whole point is that reaching 100k–200k sites is a sequence of cheap, reversible steps that never touch a frozen surface or interrupt a campaign.
+
+**HA cluster topology**
+
+Models the multi-VM launch topology (the `DEPLOYMENT_SRE` 3-VM shape: 1 witness — observability + quorum 3rd-vote + this MCP, never serves — plus the active-active HA serving nodes behind a floating VIP, fronting the public host list). Stored alongside the server registry; lets the launch tools target roles and probe the right hosts.
+
+| Tool | What it does |
+| --- | --- |
+| `cluster_define` | Define/update a cluster: witness + node server names (from `server_add`), VIP, the public host list (defaults to the 8 AdPix hosts), the OIDC issuer |
+| `cluster_list` | List clusters with their witness/node roles, VIP and host count |
+| `cluster_status` | SSH-probe every member, roll up reachability + role + what each runs; flags a witness that's serving user traffic (it shouldn't) or a node that's down; probes the VIP |
+| `bluegreen_deploy` | Zero-interruption rolling deploy across the serving nodes (§8.2): one node at a time — redeploy → health-gate → next; **stops + leaves the rest on the old version** if a node fails its gate (the VIP/LB sheds the draining one). `stack: adpix|tagmanager`, `confirm:true` |
+
+**Launch readiness (the "is this safe to ship?" surface)**
+
+The coordinated-launch control plane (`DEPLOYMENT_SRE` §8/§11). Verifies the joint Tag-Manager + Analytics go-live without needing either app's source — the probes run from the MCP host against the live front door.
+
+| Tool | What it does |
+| --- | --- |
+| `launch_gate` | **Gate 0** go/no-go: the Analytics 7 P1 release-blockers must be attested resolved before go-live. `status` / `ack` (needs a reference + `confirm:true`) / `block`. Deploy tooling refuses to promote while BLOCKED |
+| `secrets_preflight` | Verify both stacks will BOOT — they fail-fast on missing/demo-default secrets in prod. Reports each required key present / MISSING / demo-default; **values are never printed** |
+| `oidc_health` | Probe the shared IdP (account.adpix.io) — the SPOF whose outage breaks login for both products: discovery, advertised-issuer match (catches split-horizon misconfig), JWKS keys, TLS |
+| `edge_validate` | The 8-host front door: TLS validity + days remaining, reachability, and the security-critical **Set-Cookie carve-out** (cdn/collect/config must not set cookies; gateway.adpix.net legitimately does — ADR-0033) |
+| `launch_smoke` | The automatable slice of the §11.8 cross-product smoke: IdP + both dashboards up, `api.adpix.io/tm/*` **rejects** an unauthenticated request, tracker/collect reachable, no Set-Cookie on the data plane — plus the credentialed checks as a manual checklist |
+| `predeploy_gate` | The §8.3 refuse-a-bad-build gate: runs typecheck + tests on a checkout (local or remote), folds in `launch_gate`, lists the remaining steps (adversarial `/code-review`, the preflights above) → GO / NO-GO |
+
+**Tag Manager (delivery core)**
+
+Lifecycle management of the AdPix Tag Manager delivery core (`deploy/docker-compose.yml`: redis + minio + `api`:8686 + `edge`:8585 + varnish + purge-bridge — also the per-PoP unit). The required secrets (`DATABASE_URL`, `AUTH_ISSUER`, `S3_*`, `PURGE_TOKEN`) go to `deploy/.env` (mode 600, never echoed). `apps/auth` (the IdP) deploys separately — check it with `oidc_health`.
+
+| Tool | What it does |
+| --- | --- |
+| `tm_install` | Clone → write `deploy/.env` secrets → build images → `up -d` → health-gate api+edge `/healthz`. Requires the secrets on first install |
+| `tm_status` | Container states + deployed git version |
+| `tm_health` | Container states + HTTP probes of api:8686, edge:8585, varnish:8080 → HEALTHY/DEGRADED/DOWN |
+| `tm_logs` | Tail the delivery core's logs (secrets redacted) |
+| `tm_restart` | Restart one service or the whole core, then re-check health |
+| `tm_update` | git pull → rebuild → `up -d` → health-gate, with **auto-rollback** to the previous commit (no data backup needed — artifacts are recomputable, control DB is external) |
+
+**Observability**
+
+| Tool | What it does |
+| --- | --- |
+| `obs_deploy` | Bring up the Analytics observability stack (Prometheus + Alertmanager + Grafana — ships in compose under the `extras` profile). Per `DEPLOYMENT_SRE` §4, run it on the **witness**, off the serving nodes |
+| `obs_status` | Component states + Prometheus readiness and **how many scrape targets are up vs down** (the real "are we observing everything" signal) + Alertmanager/Grafana health |
 
 **Hosted-mode maintenance**
 
