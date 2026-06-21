@@ -19,10 +19,14 @@ type LResp = [RegExp, Partial<ExecResult>];
 type SResp = [RegExp, Partial<ExecResult>];
 function deps(local: LResp[], ssh: SResp[] = [], sshThrows: Record<string, string> = {}): { d: Deps; sshCalls: string[] } {
   const sshCalls: string[] = [];
+  const connectCalls: { name: string; privateKeyPath?: string }[] = [];
   const d: Deps = {
-    resolve: (n) => ({ name: n!, host: "10.0.0.2", port: 22, username: "root", adpixDir: "/opt/adpix" } as never),
+    // resolve() returns the REGISTRY entry — which carries the MCP key path (as in production)
+    resolve: (n) => ({ name: n!, host: "10.0.0.2", port: 22, username: "root", adpixDir: "/opt/adpix", privateKeyPath: "/var/lib/adpix-devops-mcp/.ssh/id_ed25519" } as never),
     connect: async (srv) => {
-      if (sshThrows[(srv as { name: string }).name]) throw new Error(sshThrows[(srv as { name: string }).name]);
+      const s = srv as { name: string; privateKeyPath?: string };
+      connectCalls.push({ name: s.name, privateKeyPath: s.privateKeyPath });
+      if (sshThrows[s.name]) throw new Error(sshThrows[s.name]);
       const session: Session = {
         server: srv as never, authMethod: "publickey", close: () => {},
         exec: async (cmd) => { sshCalls.push(cmd); for (const [re, r] of ssh) if (re.test(cmd)) return { code: 0, stdout: "", stderr: "", ...r }; return { code: 0, stdout: "", stderr: "" }; },
@@ -31,7 +35,7 @@ function deps(local: LResp[], ssh: SResp[] = [], sshThrows: Record<string, strin
     },
     local: async (cmd) => { for (const [re, r] of local) if (re.test(cmd)) return { code: 0, stdout: "", stderr: "", ...r }; return { code: 0, stdout: "", stderr: "" }; },
   };
-  return { d, sshCalls };
+  return { d, sshCalls, connectCalls };
 }
 
 function answers(): InstallAnswers {
@@ -68,8 +72,8 @@ describe("install steps", () => {
     expect(c.runtime.mcpToken).toBe("deadbeef");
   });
 
-  it("authorize-key appends a SOURCE-PINNED, restricted key line idempotently", async () => {
-    const { d, sshCalls } = deps([], [[/APPENDED/, { stdout: "APPENDED" }]]);
+  it("authorize-key appends a SOURCE-PINNED key via the BOOTSTRAP cred, then reconnects with the MCP key", async () => {
+    const { d, sshCalls, connectCalls } = deps([], [[/APPENDED/, { stdout: "APPENDED" }]]);
     const c = ctx(d);
     c.runtime.mcpPubkey = "ssh-ed25519 AAAAID test";
     c.runtime.mcpHostIp = "203.0.113.7";
@@ -79,6 +83,10 @@ describe("install steps", () => {
     const appendCmd = sshCalls.find((s) => s.includes("authorized_keys"))!;
     expect(appendCmd).toMatch(/from="203\.0\.113\.7",restrict ssh-ed25519/);
     expect(appendCmd).toMatch(/grep -qxF/); // idempotent
+    // THE BUG FIX: the append connect must NOT use the MCP key (it isn't authorized yet);
+    // the verify-reconnect must use it.
+    expect(connectCalls[0].privateKeyPath).toBeUndefined(); // bootstrap = operator credential
+    expect(connectCalls.some((c) => c.privateKeyPath?.includes("id_ed25519"))).toBe(true); // reconnect = MCP key
   });
 
   it("authorize-key SKIPS a target with authorizeKey:false (no SSH)", async () => {

@@ -1,13 +1,13 @@
 import * as os from "node:os";
 import * as path from "node:path";
-import { loadRegistry, saveRegistry } from "../registry.js";
+import { loadRegistry, saveRegistry, type ServerConfig } from "../registry.js";
 import { shq, lastLines, redactSecrets } from "../util.js";
 import { setTarget } from "./journal.js";
 import type { InstallStep, InstallContext, StepResult } from "./core.js";
 import { renderDnsPlan } from "./dns.js";
 import { renderConnect } from "./connect.js";
 import { verifyInstall, renderVerify } from "./verify.js";
-import { DEFAULT_CLUSTER_HOSTS } from "./answers.js";
+import { DEFAULT_CLUSTER_HOSTS, type FleetMember, type SecretsBag } from "./answers.js";
 
 /** The MCP's own SSH identity (install-server.sh STATE_DIR/.ssh/id_ed25519). */
 function mcpKeyPath(): string {
@@ -17,6 +17,30 @@ function mcpKeyPath(): string {
 
 const ok = (detail: string): StepResult => ({ ok: true, detail });
 const fail = (detail: string, soft = false): StepResult => ({ ok: false, detail, soft });
+
+/**
+ * A bootstrap connection config for a target: the OPERATOR's own credential, NOT the MCP
+ * key. The MCP key isn't authorized on the target yet (that's what authorize-key installs),
+ * so verify-ssh + authorize-key must reach the box with the operator's existing access.
+ * Omitting privateKeyPath makes ssh buildAuth use: agent → default keys → ADPIX_SSH_PASSWORD.
+ */
+function bootstrapServer(m: FleetMember): ServerConfig {
+  return { name: m.name, host: m.host, port: m.port, username: m.username, adpixDir: m.adpixDir };
+}
+
+/** Run `fn` with this target's bootstrap password (from the SecretsBag) in env, then restore. */
+async function withBootstrapPassword<T>(m: FleetMember, secrets: SecretsBag, fn: () => Promise<T>): Promise<T> {
+  const pw = secrets.perTarget[m.name]?.password?.reveal();
+  if (!pw) return fn();
+  const prev = process.env.ADPIX_SSH_PASSWORD;
+  process.env.ADPIX_SSH_PASSWORD = pw;
+  try {
+    return await fn();
+  } finally {
+    if (prev === undefined) delete process.env.ADPIX_SSH_PASSWORD;
+    else process.env.ADPIX_SSH_PASSWORD = prev;
+  }
+}
 
 // ---------------------------------------------------------------- 01 host-install
 const hostInstall: InstallStep = {
@@ -114,7 +138,8 @@ const verifySsh: InstallStep = {
     let anyFail = false;
     for (const m of ctx.answers.fleet) {
       try {
-        const s = await ctx.deps.connect(ctx.deps.resolve(m.name));
+        // bootstrap credential (operator's), NOT the MCP key — it isn't authorized yet
+        const s = await withBootstrapPassword(m, ctx.secrets, () => ctx.deps.connect(bootstrapServer(m)));
         try {
           const r = await s.exec(". /etc/os-release 2>/dev/null; uname -s; command -v docker >/dev/null && echo docker:yes", { timeoutMs: 25_000 });
           setTarget(ctx.journal, m.name, { verified: r.code === 0, hostKeyPinned: true, detail: r.stdout.trim().replace(/\n/g, " ").slice(0, 60) });
@@ -127,7 +152,7 @@ const verifySsh: InstallStep = {
         anyFail = true;
       }
     }
-    return anyFail ? fail("one or more targets unreachable (see per-target status)", true) : ok("all targets reachable");
+    return anyFail ? fail("one or more targets unreachable with the bootstrap credential (agent / ADPIX_SSH_PASSWORD / a key on the targets)", true) : ok("all targets reachable");
   },
   async verify(ctx) {
     const reachable = ctx.answers.fleet.filter((m) => ctx.journal.targets[m.name]?.verified).length;
@@ -155,22 +180,41 @@ const authorizeKey: InstallStep = {
         continue;
       }
       try {
-        const s = await ctx.deps.connect(ctx.deps.resolve(m.name)); // bootstrap session (front-end set bootstrap creds via env)
+        // 1. append the restricted MCP key using the OPERATOR's bootstrap credential (not the MCP key)
+        const append = `umask 077; mkdir -p ~/.ssh; touch ~/.ssh/authorized_keys; grep -qxF ${shq(restricted)} ~/.ssh/authorized_keys || echo ${shq(restricted)} >> ~/.ssh/authorized_keys; echo APPENDED`;
+        const appended = await withBootstrapPassword(m, ctx.secrets, async () => {
+          const s = await ctx.deps.connect(bootstrapServer(m));
+          try {
+            const r = await s.exec(append, { timeoutMs: 25_000 });
+            return /APPENDED/.test(r.stdout) ? "ok" : `append failed: ${lastLines(r.stdout, 2)}`;
+          } finally {
+            s.close();
+          }
+        });
+        if (appended !== "ok") {
+          setTarget(ctx.journal, m.name, { authorized: false, detail: appended });
+          anyFail = true;
+          continue;
+        }
+        // 2. verify-reconnect WITH THE MCP KEY (the registry entry) — proves the key now works
         try {
-          const append = `umask 077; mkdir -p ~/.ssh; touch ~/.ssh/authorized_keys; grep -qxF ${shq(restricted)} ~/.ssh/authorized_keys || echo ${shq(restricted)} >> ~/.ssh/authorized_keys; echo APPENDED`;
-          const r = await s.exec(append, { timeoutMs: 25_000 });
-          const good = /APPENDED/.test(r.stdout);
-          setTarget(ctx.journal, m.name, { authorized: good, detail: good ? "MCP key authorized (restricted)" : `append failed: ${lastLines(r.stdout, 2)}` });
-          if (!good) anyFail = true;
-        } finally {
-          s.close();
+          const v = await ctx.deps.connect(ctx.deps.resolve(m.name));
+          try {
+            await v.exec("true", { timeoutMs: 15_000 });
+            setTarget(ctx.journal, m.name, { authorized: true, detail: "MCP key authorized (restricted) + reconnect verified" });
+          } finally {
+            v.close();
+          }
+        } catch (e) {
+          setTarget(ctx.journal, m.name, { authorized: false, detail: `appended but the MCP-key reconnect failed: ${(e as Error).message.split("\n")[0]}` });
+          anyFail = true;
         }
       } catch (e) {
-        setTarget(ctx.journal, m.name, { authorized: false, detail: (e as Error).message.split("\n")[0] });
+        setTarget(ctx.journal, m.name, { authorized: false, detail: `bootstrap connect failed (operator credential): ${(e as Error).message.split("\n")[0]}` });
         anyFail = true;
       }
     }
-    return anyFail ? fail("one or more targets not authorized (see per-target status)", true) : ok("MCP key authorized on all opted-in targets");
+    return anyFail ? fail("one or more targets not authorized (see per-target status)", true) : ok("MCP key authorized + verified on all opted-in targets");
   },
   async verify(ctx) {
     const want = ctx.answers.fleet.filter((m) => m.authorizeKey);
