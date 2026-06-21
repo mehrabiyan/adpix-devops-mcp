@@ -250,4 +250,40 @@ describe("predeploy_gate", () => {
     const { deps } = fakeDeps();
     expect(await tool("predeploy_gate").handler(deps, { stack: "tagmanager" })).toContain("needs either repoPath");
   });
+
+  it("runs the embedded adversarial review and stays GO when it returns VERDICT: GO", async () => {
+    saveRegistry({ version: 1, servers: {}, launchGate: { resolved: true } });
+    const { deps } = fakeDeps([
+      [/run typecheck/, { code: 0 }],
+      [/run test/, { code: 0 }],
+      [/claude -p --output-format json/, { code: 0, stdout: JSON.stringify({ result: "Looks clean.\nVERDICT: GO", is_error: false, total_cost_usd: 0.12, num_turns: 4 }) }],
+    ]);
+    const out = await tool("predeploy_gate").handler(deps, { stack: "tagmanager", repoPath: "/repo", adversarialReview: true });
+    expect(out).toContain("GO");
+    expect(out).toMatch(/\[PASS\] adversarial review/);
+  });
+
+  it("goes NO-GO when the adversarial review finds launch-blockers", async () => {
+    saveRegistry({ version: 1, servers: {}, launchGate: { resolved: true } });
+    const { deps } = fakeDeps([
+      [/run typecheck/, { code: 0 }],
+      [/run test/, { code: 0 }],
+      [/claude -p --output-format json/, { code: 0, stdout: JSON.stringify({ result: "Found an auth bypass.\nVERDICT: NO-GO auth bypass in callback", is_error: false }) }],
+    ]);
+    const out = await tool("predeploy_gate").handler(deps, { stack: "tagmanager", repoPath: "/repo", adversarialReview: true });
+    expect(out).toContain("NO-GO");
+    expect(out).toMatch(/\[FAIL\] adversarial review/);
+  });
+
+  it("skips (does not block) the adversarial review when the claude CLI is absent", async () => {
+    saveRegistry({ version: 1, servers: {}, launchGate: { resolved: true } });
+    const { deps } = fakeDeps([
+      [/run typecheck/, { code: 0 }],
+      [/run test/, { code: 0 }],
+      [/claude -p --output-format json/, { code: 0, stdout: "NO_CLAUDE_CLI" }],
+    ]);
+    const out = await tool("predeploy_gate").handler(deps, { stack: "tagmanager", repoPath: "/repo", adversarialReview: true });
+    expect(out).toContain("GO");
+    expect(out).toMatch(/\[SKIP\] adversarial review.*no .claude. CLI/);
+  });
 });

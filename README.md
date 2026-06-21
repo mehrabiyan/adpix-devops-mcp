@@ -166,6 +166,7 @@ Models the multi-VM launch topology (the `DEPLOYMENT_SRE` 3-VM shape: 1 witness 
 | `cluster_list` | List clusters with their witness/node roles, VIP and host count |
 | `cluster_status` | SSH-probe every member, roll up reachability + role + what each runs; flags a witness that's serving user traffic (it shouldn't) or a node that's down; probes the VIP |
 | `bluegreen_deploy` | Zero-interruption rolling deploy across the serving nodes (§8.2): one node at a time — redeploy → health-gate → next; **stops + leaves the rest on the old version** if a node fails its gate (the VIP/LB sheds the draining one). `stack: adpix|tagmanager`, `confirm:true` |
+| `ha_quorum` | The witness-anchored stateful-tier quorum (§4): `status` probes every member's Postgres role / Redis role+link+Sentinel / ClickHouse replica state → quorum verdict (catches split-brain, missing primary, read-only replicas); `plan` prints the Patroni/Sentinel/Keeper standup; `keeper-config` generates the 3-node ClickHouse Keeper `replication.xml` with the witness as the tie-break vote. Read-only / config-generating — no auto-failover |
 
 **Launch readiness (the "is this safe to ship?" surface)**
 
@@ -178,7 +179,7 @@ The coordinated-launch control plane (`DEPLOYMENT_SRE` §8/§11). Verifies the j
 | `oidc_health` | Probe the shared IdP (account.adpix.io) — the SPOF whose outage breaks login for both products: discovery, advertised-issuer match (catches split-horizon misconfig), JWKS keys, TLS |
 | `edge_validate` | The 8-host front door: TLS validity + days remaining, reachability, and the security-critical **Set-Cookie carve-out** (cdn/collect/config must not set cookies; gateway.adpix.net legitimately does — ADR-0033) |
 | `launch_smoke` | The automatable slice of the §11.8 cross-product smoke: IdP + both dashboards up, `api.adpix.io/tm/*` **rejects** an unauthenticated request, tracker/collect reachable, no Set-Cookie on the data plane — plus the credentialed checks as a manual checklist |
-| `predeploy_gate` | The §8.3 refuse-a-bad-build gate: runs typecheck + tests on a checkout (local or remote), folds in `launch_gate`, lists the remaining steps (adversarial `/code-review`, the preflights above) → GO / NO-GO |
+| `predeploy_gate` | The §8.3 refuse-a-bad-build gate: runs typecheck + tests on a checkout (local or remote), folds in `launch_gate`, and — with `adversarialReview:true` — runs an **embedded headless Claude Code** security/correctness review of the changes (the same `claude` CLI `ai_fix` uses; a `VERDICT: NO-GO` blocks) → GO / NO-GO |
 
 **Tag Manager (delivery core)**
 
@@ -192,6 +193,7 @@ Lifecycle management of the AdPix Tag Manager delivery core (`deploy/docker-comp
 | `tm_logs` | Tail the delivery core's logs (secrets redacted) |
 | `tm_restart` | Restart one service or the whole core, then re-check health |
 | `tm_update` | git pull → rebuild → `up -d` → health-gate, with **auto-rollback** to the previous commit (no data backup needed — artifacts are recomputable, control DB is external) |
+| `pop_add` | Provision a delivery PoP (§8.1): edge + varnish + purge-bridge + a Redis **replica** of the core (pointer + purge replication); edge reads artifacts from the central object store. Verifies the replication link, health-gates, prints the DNS/CDN behavior to add. Additive + safe — cold-fills from the object store, never mutates truth |
 
 **Observability**
 

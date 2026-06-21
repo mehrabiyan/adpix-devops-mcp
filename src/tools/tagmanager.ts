@@ -34,6 +34,23 @@ export function tmHealthGate(timeoutSec = 150): string {
   );
 }
 
+/** PoP compose: the delivery core + a PoP override (redis replicates the core, edge points at the central object store). */
+export function tmPopCompose(dir: string): string {
+  return `cd ${shq(dir)} && docker compose -p ${TM_PROJECT} -f deploy/docker-compose.yml -f deploy/docker-compose.pop.yml --env-file deploy/.env`;
+}
+
+/** Wait for a PoP's edge (8585 /healthz) + varnish (8080) to answer. Varnish 404 at / is fine — it's up. */
+function popHealthGate(timeoutSec = 120): string {
+  const tries = Math.max(1, Math.floor(timeoutSec / 5));
+  return (
+    `e=000; v=000; for i in $(seq 1 ${tries}); do ` +
+    `e=$(curl -fsS -o /dev/null -m 5 -w '%{http_code}' http://localhost:8585/healthz 2>/dev/null || echo 000); ` +
+    `v=$(curl -sS -o /dev/null -m 5 -w '%{http_code}' http://localhost:8080/ 2>/dev/null || echo 000); ` +
+    `if [ "$e" = 200 ] && [ "$v" != 000 ]; then echo "healthy after ~$((i*5))s (edge=$e varnish=$v)"; exit 0; fi; sleep 5; done; ` +
+    `echo "NOT healthy (edge=$e varnish=$v)"; exit 1`
+  );
+}
+
 async function tmInstalled(s: Session, dir: string): Promise<boolean> {
   return (await s.exec(`test -d ${shq(dir + "/.git")} && echo yes || echo no`)).stdout.trim() === "yes";
 }
@@ -314,6 +331,93 @@ export const tagmanagerTools: ToolDef[] = [
         } else {
           sections.push(`## Result\nUnhealthy and rollback disabled/not possible — investigate (tm_logs).`);
         }
+        return sections.join("\n\n");
+      });
+    },
+  },
+
+  {
+    name: "pop_add",
+    title: "Add a delivery PoP",
+    description:
+      "Provision a delivery Point-of-Presence (DEPLOYMENT_SRE §8.1): the edge + varnish + purge-bridge + a Redis " +
+      "REPLICA of the core's pointer KV — so the PoP serves immutable artifacts from the central object store and " +
+      "rolls forward on publish via replicated purge pub/sub. Clones the repo, writes deploy/.env + a PoP compose " +
+      "override (redis replicaof the core, edge → central object store), brings the four services up, verifies the " +
+      "Redis replication link is up, health-gates edge+varnish, and prints the DNS/CDN behavior to add. The object " +
+      "store stays central; no api/minio runs on a PoP.",
+    schema: {
+      server: serverParam,
+      dir: dirParam,
+      coreRedisHost: z.string().describe("Host/IP of the core (origin) Redis to replicate pointers + purge from"),
+      objectStore: z.string().describe("Central object-store endpoint the edge reads artifacts from, e.g. https://cdn-origin.adpix.net or http://10.0.0.2:9000"),
+      s3AccessKey: z.string().describe("Object-store access key (read the private artifacts bucket)"),
+      s3SecretKey: z.string().describe("Object-store secret key"),
+      purgeToken: z.string().describe("PURGE token shared with varnish.vcl"),
+      s3Bucket: z.string().default("adpix-tags"),
+      repoUrl: z.string().default(TM_REPO_URL),
+      branch: z.string().default("main"),
+      timeoutSeconds: z.number().int().min(60).max(7200).default(1800),
+    },
+    annotations: { idempotentHint: true, openWorldHint: true },
+    handler: async (deps, args) => {
+      const a = args as {
+        server?: string; dir: string; coreRedisHost: string; objectStore: string;
+        s3AccessKey: string; s3SecretKey: string; purgeToken: string; s3Bucket: string;
+        repoUrl: string; branch: string; timeoutSeconds: number;
+      };
+      return withSession(deps, a.server, async (s, srv) => {
+        const dir = a.dir;
+        const sections: string[] = [];
+
+        const docker = await s.exec("command -v docker >/dev/null && docker compose version >/dev/null 2>&1 && echo ok || echo no");
+        if (docker.stdout.trim() !== "ok") return `Docker (with the compose plugin) isn't available on ${srv.name}. Install Docker first, then re-run pop_add.`;
+        await s.exec("command -v git >/dev/null || (apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git ca-certificates)", { timeoutMs: 300_000 });
+
+        const clone = await s.exec(
+          `if [ -d ${shq(dir + "/.git")} ]; then cd ${shq(dir)} && git fetch origin ${shq(a.branch)} && git checkout ${shq(a.branch)} && git pull --ff-only origin ${shq(a.branch)}; ` +
+            `else mkdir -p $(dirname ${shq(dir)}) && git clone -b ${shq(a.branch)} ${shq(a.repoUrl)} ${shq(dir)}; fi`,
+          { timeoutMs: 300_000 }
+        );
+        if (clone.code !== 0) return `## Checkout FAILED (exit ${clone.code})\n${lastLines(clone.stderr || clone.stdout, 25)}`;
+
+        // .env: api-only keys (DATABASE_URL/AUTH_ISSUER) get placeholders — the api/minio services aren't started
+        // on a PoP, but compose still parses their `:?`-required vars, so they must be present.
+        const envBody =
+          `DATABASE_URL=postgres://pop-unused\nAUTH_ISSUER=https://pop-unused\n` +
+          `S3_ACCESS_KEY=${a.s3AccessKey}\nS3_SECRET_KEY=${a.s3SecretKey}\nS3_BUCKET=${a.s3Bucket}\nPURGE_TOKEN=${a.purgeToken}\n`;
+        await uploadFile(s, `${dir}/deploy/.env`, envBody, "600");
+
+        const popOverride =
+          `services:\n` +
+          `  redis:\n` +
+          `    command: ["redis-server","--save","","--maxmemory-policy","noeviction","--replicaof","${a.coreRedisHost}","6379"]\n` +
+          `  edge:\n` +
+          `    environment:\n` +
+          `      S3_ENDPOINT: "${a.objectStore}"\n`;
+        await uploadFile(s, `${dir}/deploy/docker-compose.pop.yml`, popOverride, "644");
+        sections.push(`## PoP config\nWrote deploy/.env (mode 600) + deploy/docker-compose.pop.yml (redis replicaof ${a.coreRedisHost}, edge → ${a.objectStore}). Secrets kept off this transcript.`);
+
+        const up = await s.exec(`${tmPopCompose(dir)} up -d redis edge varnish purge-bridge 2>&1`, { timeoutMs: a.timeoutSeconds * 1000 });
+        sections.push(`## Bring-up (exit ${up.code})\n${redactSecrets(lastLines(up.stdout, 20))}`);
+        if (up.code !== 0) return sections.join("\n\n") + `\n\nPoP bring-up FAILED — see above (tm_logs).`;
+
+        // verify the redis replication link to the core is up
+        const repl = await s.exec(`${tmPopCompose(dir)} exec -T redis redis-cli info replication 2>/dev/null | tr -d '\\r'`, { timeoutMs: 30_000 });
+        const role = (repl.stdout.match(/role:(\w+)/) || [])[1] ?? "?";
+        const link = (repl.stdout.match(/master_link_status:(\w+)/) || [])[1] ?? "?";
+        const replOk = role === "slave" && link === "up";
+        sections.push(`## Redis replication\nrole=${role} master_link_status=${link} → ${replOk ? "replicating the core's pointers + purge ✅" : "NOT linked — check coreRedisHost reachability + the core redis bind/protected-mode"}`);
+
+        const gate = await s.exec(popHealthGate(120), { timeoutMs: 150_000 });
+        sections.push(`## Health gate\n${gate.stdout.trim()}`);
+        sections.push(
+          `## DNS / CDN — add these to cut traffic in\n` +
+            `  1. Point a regional CDN behavior (or the PoP's hostname) at this host: edge :8585 behind varnish :8080 (front with TLS — deploy/nginx.conf).\n` +
+            `  2. Cache rules: /a/* immutable (max-age=31536000), /c/* + config 60s + stale-while-revalidate. Strip Set-Cookie (cookieless delivery).\n` +
+            `  3. Only route real traffic here AFTER edge /healthz is 200 and a synthetic /c/<id>/<env>.js + /a/<id>/<hash>.js fetch succeed through varnish.\n` +
+            `  4. The PoP cold-fills from the central object store on first miss and never mutates truth — it is purely additive.`
+        );
         return sections.join("\n\n");
       });
     },

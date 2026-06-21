@@ -170,3 +170,77 @@ describe("bluegreen_deploy", () => {
     expect(out).toContain("Roll STOPPED");
   });
 });
+
+function threeMemberCluster() {
+  saveRegistry({
+    version: 1,
+    servers: {
+      w1: { host: "10.0.0.1", port: 22, username: "root", adpixDir: "/opt/adpix" },
+      n1: { host: "10.0.0.2", port: 22, username: "root", adpixDir: "/opt/adpix" },
+      n2: { host: "10.0.0.3", port: 22, username: "root", adpixDir: "/opt/adpix" },
+    },
+  });
+  const reg = loadRegistry();
+  reg.clusters = { prod: { witness: "w1", nodes: ["n1", "n2"], hosts: [], idpIssuer: "https://account.adpix.io" } };
+  saveRegistry(reg);
+}
+
+/** Deps for ha_quorum status: per-member datastore probe answers keyed by server name. */
+function haDeps(map: Record<string, { pg: string; redis: string; sentinel: string; ch: string }>) {
+  const deps: Deps = {
+    resolve: resolveServer,
+    connect: async (srv) => ({
+      server: srv as never, authMethod: "publickey", close: () => {},
+      exec: async (cmd: string) => {
+        const m = map[srv.name] ?? { pg: "?", redis: "?", sentinel: "none", ch: "?" };
+        if (/pg_is_in_recovery/.test(cmd)) return { code: 0, stdout: m.pg, stderr: "" };
+        if (/redis-cli info replication/.test(cmd)) return { code: 0, stdout: m.redis, stderr: "" };
+        if (/-p 26379 ping/.test(cmd)) return { code: 0, stdout: m.sentinel, stderr: "" };
+        if (/system\.replicas/.test(cmd)) return { code: 0, stdout: m.ch, stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    }),
+    local: async () => ({ code: 0, stdout: "", stderr: "" }),
+  };
+  return deps;
+}
+
+describe("ha_quorum", () => {
+  it("plan prints the witness-anchored standup playbook", async () => {
+    threeMemberCluster();
+    const out = await tool("ha_quorum").handler(haDeps({}), { cluster: "prod", mode: "plan" });
+    expect(out).toMatch(/witness/);
+    expect(out).toMatch(/Patroni|repmgr/);
+    expect(out).toMatch(/Sentinel/);
+    expect(out).toMatch(/Keeper/);
+  });
+
+  it("keeper-config generates a 3-node raft XML with member hosts", async () => {
+    threeMemberCluster();
+    const out = await tool("ha_quorum").handler(haDeps({}), { cluster: "prod", mode: "keeper-config" });
+    expect(out).toContain("keeper_server");
+    expect(out).toContain("10.0.0.1");
+    expect(out).toContain("10.0.0.3");
+  });
+
+  it("status is HEALTHY with one primary, a redis master + replica, and 3 sentinels", async () => {
+    threeMemberCluster();
+    const out = await tool("ha_quorum").handler(haDeps({
+      w1: { pg: "?", redis: "?", sentinel: "PONG", ch: "?" },
+      n1: { pg: "f", redis: "role:master connected_slaves:1", sentinel: "PONG", ch: "0\t5" },
+      n2: { pg: "t", redis: "role:slave master_link_status:up", sentinel: "PONG", ch: "0\t5" },
+    }), { cluster: "prod", mode: "status" });
+    expect(out).toContain("HEALTHY");
+  });
+
+  it("status flags split-brain when two primaries are seen", async () => {
+    threeMemberCluster();
+    const out = await tool("ha_quorum").handler(haDeps({
+      w1: { pg: "?", redis: "?", sentinel: "PONG", ch: "?" },
+      n1: { pg: "f", redis: "role:master", sentinel: "PONG", ch: "0\t5" },
+      n2: { pg: "f", redis: "role:master", sentinel: "PONG", ch: "0\t5" },
+    }), { cluster: "prod", mode: "status" });
+    expect(out).toContain("NEEDS ATTENTION");
+    expect(out).toMatch(/SPLIT-BRAIN/);
+  });
+});

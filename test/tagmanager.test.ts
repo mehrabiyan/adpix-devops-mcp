@@ -122,6 +122,48 @@ describe("tm_update", () => {
   });
 });
 
+// ---------------------------------------------------------------- pop_add
+describe("pop_add", () => {
+  it("deploys the PoP, verifies the redis replica link, and prints DNS steps", async () => {
+    const { deps, calls } = fakeDeps([
+      [/docker compose version/, { stdout: "ok" }],
+      [/command -v git/, { code: 0 }],
+      [/git clone -b/, { code: 0 }],
+      [/base64 -d/, { code: 0 }],
+      [/up -d redis edge varnish/, { code: 0, stdout: "Started" }],
+      [/redis-cli info replication/, { stdout: "role:slave\nmaster_link_status:up\nmaster_host:10.0.0.2\n" }],
+      [/8585\/healthz/, { code: 0, stdout: "healthy after ~5s (edge=200 varnish=200)" }],
+    ]);
+    const out = await tool("pop_add").handler(deps, {
+      dir: "/opt/adpix-tagmanager", coreRedisHost: "10.0.0.2", objectStore: "http://10.0.0.2:9000",
+      s3AccessKey: "k", s3SecretKey: "s", purgeToken: "p", s3Bucket: "adpix-tags",
+      repoUrl: "https://github.com/mehrabiyan/AdpixTagManager.git", branch: "main", timeoutSeconds: 1800,
+    });
+    expect(out).toContain("PoP config");
+    expect(out).toMatch(/replicating the core/);
+    expect(out).toContain("DNS / CDN");
+    expect(calls.filter((c) => c.includes("base64 -d")).length).toBe(2); // .env + pop override
+  });
+
+  it("flags a broken redis replication link", async () => {
+    const { deps } = fakeDeps([
+      [/docker compose version/, { stdout: "ok" }],
+      [/command -v git/, { code: 0 }],
+      [/git clone -b/, { code: 0 }],
+      [/base64 -d/, { code: 0 }],
+      [/up -d redis edge varnish/, { code: 0 }],
+      [/redis-cli info replication/, { stdout: "role:slave\nmaster_link_status:down\n" }],
+      [/8585\/healthz/, { code: 1, stdout: "NOT healthy" }],
+    ]);
+    const out = await tool("pop_add").handler(deps, {
+      dir: "/opt/adpix-tagmanager", coreRedisHost: "10.0.0.2", objectStore: "http://x:9000",
+      s3AccessKey: "k", s3SecretKey: "s", purgeToken: "p", s3Bucket: "adpix-tags",
+      repoUrl: "x", branch: "main", timeoutSeconds: 1800,
+    });
+    expect(out).toMatch(/NOT linked/);
+  });
+});
+
 // ---------------------------------------------------------------- observability
 describe("obs_deploy / obs_status", () => {
   it("obs_deploy brings up the extras profile", async () => {

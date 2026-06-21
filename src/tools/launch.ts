@@ -2,6 +2,7 @@ import { z } from "zod";
 import { loadRegistry, saveRegistry, resolveCluster } from "../registry.js";
 import { withSession, type Deps } from "../deps.js";
 import { readEnvVar } from "../adpix.js";
+import { parseClaudeResult } from "../remote/aifix.js";
 import { shq, lastLines, table } from "../util.js";
 import {
   DEFAULT_LAUNCH_HOSTS,
@@ -346,9 +347,11 @@ export const launchTools: ToolDef[] = [
       dir: z.string().optional().describe("Checkout dir on that server"),
       typecheckCmd: z.string().optional().describe("Override the typecheck command"),
       testCmd: z.string().optional().describe("Override the test command"),
+      adversarialReview: z.boolean().default(false).describe("Also run a headless Claude Code security/correctness review of the changes (needs the `claude` CLI + ANTHROPIC_API_KEY on the target; costs API spend)"),
+      model: z.string().optional().describe("Model for the adversarial review (e.g. claude-opus-4-8)"),
     },
     handler: async (deps, args) => {
-      const a = args as { stack: string; repoPath?: string; server?: string; dir?: string; typecheckCmd?: string; testCmd?: string };
+      const a = args as { stack: string; repoPath?: string; server?: string; dir?: string; typecheckCmd?: string; testCmd?: string; adversarialReview: boolean; model?: string };
       const defaults = a.stack === "tagmanager"
         ? { tc: "pnpm -r run typecheck", test: "pnpm -r run test" }
         : { tc: "echo '(analytics: typecheck is per-service)'", test: "make verify-prod-config" };
@@ -373,24 +376,51 @@ export const launchTools: ToolDef[] = [
       const tc = await run("typecheck", tcCmd);
       const test = await run("test", testCmd);
 
+      // Optional headless Claude Code adversarial review — embedded via the `claude` CLI
+      // (the same mechanism ai_fix uses), NOT the harness Workflow which a tool can't call.
+      let adv: { ran: boolean; pass: boolean; line: string } | null = null;
+      if (a.adversarialReview) {
+        const model = a.model ? ` --model '${a.model.replace(/'/g, "")}'` : "";
+        const prompt =
+          "You are a release auditor. Review the uncommitted changes (git diff HEAD) and the code they touch for " +
+          "LAUNCH-BLOCKING bugs ONLY: auth bypass/takeover, privilege escalation, data loss, consent/PII leaks that " +
+          "fail open, and injection. Ignore style/nits. Be terse. End with EXACTLY one line: 'VERDICT: GO' if you " +
+          "found no launch-blockers, or 'VERDICT: NO-GO' followed by a one-line list if you did.";
+        const cmd =
+          `command -v claude >/dev/null 2>&1 || { echo NO_CLAUDE_CLI; exit 0; }; ` +
+          `claude -p --output-format json --max-turns 16${model} --allowedTools "Bash,Read,Grep,Glob" <<'ADPIXPROMPT'\n${prompt}\nADPIXPROMPT`;
+        const r = await run("adversarial", cmd);
+        if (/NO_CLAUDE_CLI/.test(r.out)) adv = { ran: false, pass: true, line: "skipped — no `claude` CLI on the target (install it / run ai_setup)" };
+        else {
+          const res = parseClaudeResult(r.out);
+          if (!res || res.is_error) adv = { ran: false, pass: true, line: "skipped — review did not complete (missing ANTHROPIC_API_KEY, or it errored)" };
+          else {
+            const text = res.result ?? "";
+            const nogo = /VERDICT:\s*NO-?GO/i.test(text);
+            const cost = res.total_cost_usd ? ` ($${res.total_cost_usd.toFixed(2)}, ${res.num_turns ?? "?"} turns)` : "";
+            adv = { ran: true, pass: !nogo, line: `${nogo ? "found launch-blockers" : "no launch-blockers"}${cost}\n${lastLines(text, 12)}` };
+          }
+        }
+      }
+
       const reg = loadRegistry();
       const gate = reg.launchGate?.resolved ? "CLEARED" : "BLOCKED 🚩 (run launch_gate)";
 
-      const deterministicPass = tc.ok && test.ok;
+      const deterministicPass = tc.ok && test.ok && (!adv || !adv.ran || adv.pass);
       const verdict = deterministicPass && reg.launchGate?.resolved ? "GO" : "NO-GO";
       return [
         `# Pre-deploy gate (${a.stack})  —  ${verdict}`,
         ``,
         `[${tc.ok ? "PASS" : "FAIL"}] typecheck (${tcCmd})${tc.ok ? "" : `\n${lastLines(tc.out, 15)}`}`,
         `[${test.ok ? "PASS" : "FAIL"}] tests (${testCmd})${test.ok ? "" : `\n${lastLines(test.out, 15)}`}`,
+        adv ? `[${adv.ran ? (adv.pass ? "PASS" : "FAIL") : "SKIP"}] adversarial review: ${adv.line}` : `[SKIP] adversarial review (pass adversarialReview:true to run headless Claude Code; or /code-review ultra)`,
         `[${reg.launchGate?.resolved ? "PASS" : "FAIL"}] Gate 0 launch_gate: ${gate}`,
         ``,
-        `## Remaining gate steps (not automated here — run them)`,
-        `  - Multi-agent adversarial review: /code-review ultra (the audit-style finder→verify pass)`,
+        `## Remaining live-front-door checks (run these too)`,
         `  - secrets_preflight (both stacks boot)`,
-        `  - oidc_health + edge_validate + launch_smoke (the live front door)`,
+        `  - oidc_health + edge_validate + launch_smoke`,
         ``,
-        verdict === "GO" ? `Deterministic checks + Gate 0 pass. Complete the manual steps above, then promote.` : `Do NOT promote — resolve the FAILs above first.`,
+        verdict === "GO" ? `Deterministic checks${adv?.ran ? " + adversarial review" : ""} + Gate 0 pass. Complete the live checks above, then promote.` : `Do NOT promote — resolve the FAILs above first.`,
       ].join("\n");
     },
   },

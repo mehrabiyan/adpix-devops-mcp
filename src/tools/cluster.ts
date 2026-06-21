@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { loadRegistry, saveRegistry, registryPath, resolveCluster } from "../registry.js";
+import { loadRegistry, saveRegistry, registryPath, resolveCluster, resolveServer } from "../registry.js";
 import { withSession } from "../deps.js";
 import { waitHealthyCmd } from "../adpix.js";
 import { shq, lastLines, redactSecrets, table } from "../util.js";
@@ -216,6 +216,142 @@ export const clusterTools: ToolDef[] = [
       }
       out.push(`\n${stopped ? "Roll STOPPED mid-way — fix the failed node, then re-run to finish the remaining ones." : "All nodes rolled to the new version and healthy."}`);
       return out.join("\n");
+    },
+  },
+
+  {
+    name: "ha_quorum",
+    title: "HA datastore quorum (PG / Redis / ClickHouse)",
+    description:
+      "Manage the witness-anchored quorum for the stateful tier (DEPLOYMENT_SRE §4) — the witness carries the 3rd " +
+      "vote so the two data nodes never split-brain. mode:status probes every member's Postgres role (primary/" +
+      "standby), Redis role + replication link + Sentinel, and ClickHouse replica/Keeper state, and rolls up a " +
+      "quorum verdict. mode:plan prints the grounded standup playbook (Patroni/repmgr + Redis Sentinel + CH Keeper). " +
+      "mode:keeper-config generates the 3-node ClickHouse Keeper replication.xml with the witness as the tie-break " +
+      "vote. Read-only / config-generating — it does not perform a failover.",
+    schema: {
+      cluster: clusterParam,
+      mode: z.enum(["status", "plan", "keeper-config"]).default("status"),
+    },
+    annotations: { readOnlyHint: true },
+    handler: async (deps, args) => {
+      const a = args as { cluster?: string; mode: string };
+      let cl;
+      try {
+        cl = resolveCluster(a.cluster);
+      } catch (e) {
+        return (e as Error).message;
+      }
+      const members: { name: string; role: string }[] = [
+        ...(cl.witness ? [{ name: cl.witness, role: "witness" }] : []),
+        ...cl.nodes.map((n) => ({ name: n, role: "node" })),
+      ];
+
+      if (a.mode === "plan") {
+        return [
+          `# HA quorum standup — ${cl.name}`,
+          `The witness (${cl.witness ?? "VM1"}) carries the 3rd vote for every quorum so the two data nodes (${cl.nodes.join(", ") || "VM2/VM3"}) never split-brain. It never serves user traffic.`,
+          ``,
+          `## Postgres (primary + sync standby + witness arbiter)`,
+          `  - Run a Patroni (or repmgr) cluster: primary on one node, SYNCHRONOUS standby on the other, the witness as the failover arbiter (a non-data Patroni/etcd member or the repmgr witness).`,
+          `  - The VIP / connection string follows the primary; the witness breaks ties so a single node loss auto-promotes without split-brain.`,
+          `  - Both product DBs (Analytics + TM) ride the same cluster (separate databases).`,
+          ``,
+          `## Redis (primary + replica + 3 Sentinels)`,
+          `  - primary + replica across the two nodes; Sentinel on BOTH nodes + a 3rd on the witness (quorum=2).`,
+          `  - This is the shared cross-replica rate-limiter (ADR-0040) + the TM pointer/purge bus — mandatory at HA scale, not optional.`,
+          ``,
+          `## ClickHouse (Replicated*MergeTree + 3-node Keeper)`,
+          `  - CH_REPLICATED=1 on a FRESH deploy (events_local only converts clean; the irreplaceable truth is raw_events_jsonl — ch_backup first).`,
+          `  - A Replicated replica per node + an embedded/standalone Keeper on each node AND the witness = a 3-node raft (mode:keeper-config generates the XML).`,
+          ``,
+          `Migrations stay expand-then-contract so old + new code run concurrently during a rolling deploy (bluegreen_deploy). Check the live state any time with mode:status.`,
+        ].join("\n");
+      }
+
+      if (a.mode === "keeper-config") {
+        const hosts = members.map((m) => {
+          try {
+            return { ...m, host: resolveServer(m.name).host };
+          } catch {
+            return { ...m, host: m.name };
+          }
+        });
+        const servers = hosts.map((h, i) =>
+          `      <server>\n        <id>${i + 1}</id>\n        <hostname>${h.host}</hostname>\n        <port>9234</port>\n      </server>`
+        ).join("\n");
+        const xml =
+          `<clickhouse>\n` +
+          `  <keeper_server>\n    <tcp_port>9181</tcp_port>\n    <server_id>REPLACE_WITH_THIS_NODES_ID</server_id>\n` +
+          `    <log_storage_path>/var/lib/clickhouse/coordination/log</log_storage_path>\n` +
+          `    <snapshot_storage_path>/var/lib/clickhouse/coordination/snapshots</snapshot_storage_path>\n` +
+          `    <raft_configuration>\n${servers}\n    </raft_configuration>\n  </keeper_server>\n` +
+          `  <zookeeper>\n` +
+          hosts.map((h) => `    <node><host>${h.host}</host><port>9181</port></node>`).join("\n") +
+          `\n  </zookeeper>\n` +
+          `  <macros>\n    <shard>01</shard>\n    <replica>REPLACE_WITH_THIS_NODES_REPLICA_NAME</replica>\n  </macros>\n` +
+          `  <default_replica_path>/clickhouse/tables/{shard}/{database}/{table}</default_replica_path>\n` +
+          `  <default_replica_name>{replica}</default_replica_name>\n</clickhouse>\n`;
+        return [
+          `# ClickHouse Keeper — 3-node raft for ${cl.name}`,
+          `Quorum members (raft ids 1..${hosts.length}): ${hosts.map((h, i) => `${i + 1}=${h.name}(${h.host},${h.role})`).join(", ")}.`,
+          ``,
+          `Write this to ops/clickhouse/config.d/replication.xml on EACH member, setting <server_id> to that node's raft id and <replica> to a DISTINCT name (e.g. replica-01/02; the witness runs Keeper-only, no CH replica). Then ch_redeploy action:recreate.`,
+          ``,
+          "```xml\n" + xml + "```",
+          ``,
+          `The witness is the 3rd Keeper vote (Keeper-only, carries no data) so a single data-node loss keeps quorum. After bring-up: ch_replication mode:status on the data nodes (total_replicas should reach ${cl.nodes.length}).`,
+        ].join("\n");
+      }
+
+      // status
+      if (!members.length) return `Cluster "${cl.name}" has no members. cluster_define witness + nodes first.`;
+      const DC = "docker compose -p adanalytics -f compose.yaml -f compose.prod.yaml";
+      const rows: string[][] = [];
+      const problems: string[] = [];
+      let primaries = 0;
+      let redisMasters = 0;
+      let sentinels = 0;
+      for (const m of members) {
+        try {
+          const probe = await withSession(deps, m.name, async (sess, srv) => {
+            const dir = srv.adpixDir;
+            const pg = (await sess.exec(`cd ${shq(dir)} && ${DC} exec -T postgres sh -c 'psql -U "\${POSTGRES_USER:-sovereign}" -tAc "SELECT pg_is_in_recovery()" 2>/dev/null' 2>/dev/null || echo "?"`, { timeoutMs: 30_000 })).stdout.trim();
+            const redis = (await sess.exec(`cd ${shq(dir)} && ${DC} exec -T redis redis-cli info replication 2>/dev/null | grep -E '^role:|^master_link_status:|^connected_slaves:' | tr '\\r\\n' '  '`, { timeoutMs: 30_000 })).stdout.trim();
+            const sentinel = (await sess.exec(`cd ${shq(dir)} && ${DC} exec -T redis redis-cli -p 26379 ping 2>/dev/null || echo none`, { timeoutMs: 20_000 })).stdout.trim();
+            const ch = (await sess.exec(`cd ${shq(dir)} && ${DC} exec -T clickhouse sh -c 'clickhouse-client --user "\${CLICKHOUSE_USER:-default}" --password "$CLICKHOUSE_PASSWORD" --query "SELECT countIf(is_readonly), count() FROM system.replicas FORMAT TabSeparated" 2>/dev/null' 2>/dev/null || echo "?"`, { timeoutMs: 30_000 })).stdout.trim();
+            return { pg, redis, sentinel, ch };
+          });
+          const pgRole = probe.pg === "f" ? "primary" : probe.pg === "t" ? "standby" : "?";
+          if (pgRole === "primary") primaries++;
+          const redisRole = (probe.redis.match(/role:(\w+)/) || [])[1] ?? "?";
+          if (redisRole === "master") redisMasters++;
+          const link = (probe.redis.match(/master_link_status:(\w+)/) || [])[1];
+          if (redisRole === "slave" && link && link !== "up") problems.push(`${m.name}: redis replica link is ${link} (not up)`);
+          const sentinelUp = /PONG/i.test(probe.sentinel);
+          if (sentinelUp) sentinels++;
+          const [chRo = "?", chTot = "?"] = probe.ch.split(/\t|\s+/);
+          if (chRo !== "?" && Number(chRo) > 0) problems.push(`${m.name}: ${chRo} ClickHouse replica(s) read-only`);
+          rows.push([m.name, m.role, pgRole, `${redisRole}${link ? "/" + link : ""}`, sentinelUp ? "yes" : "no", chTot === "?" ? "-" : `${chRo} ro/${chTot}`]);
+        } catch (e) {
+          problems.push(`${m.name} (${m.role}) UNREACHABLE: ${(e as Error).message.split("\n")[0]}`);
+          rows.push([m.name, m.role, "?", "?", "?", "?"]);
+        }
+      }
+      if (primaries === 0) problems.push("no Postgres PRIMARY found — no writer (failover stuck?)");
+      if (primaries > 1) problems.push(`${primaries} Postgres PRIMARIES — SPLIT-BRAIN risk`);
+      if (redisMasters > 1) problems.push(`${redisMasters} Redis masters — split-brain risk`);
+      if (sentinels < 3) problems.push(`only ${sentinels} Redis Sentinel(s) reachable — need 3 (one on the witness) for a safe quorum`);
+
+      const verdict = problems.length === 0 ? "HEALTHY" : problems.some((p) => /SPLIT-BRAIN|no writer|read-only/.test(p)) ? "NEEDS ATTENTION" : "OK with warnings";
+      return [
+        `# HA quorum — ${cl.name}  —  ${verdict}`,
+        problems.length ? "Findings:\n" + problems.map((p) => `  - ${p}`).join("\n") : "1 PG primary + standby, Redis master + replica, Sentinel quorum, CH replicas writable.",
+        ``,
+        table(["MEMBER", "ROLE", "POSTGRES", "REDIS", "SENTINEL", "CH(ro/total)"], rows),
+        ``,
+        `Quorum wants: exactly 1 PG primary (rest standby), 1 Redis master + replica(s), 3 Sentinels (incl. witness), 0 read-only CH replicas. mode:plan for the standup, mode:keeper-config for the CH Keeper XML.`,
+      ].join("\n");
     },
   },
 ];
