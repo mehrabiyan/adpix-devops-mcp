@@ -74,7 +74,8 @@ FLEET_RECORDS="$FLEET_RECORDS" DOMAIN="$DOMAIN" PORT="$PORT" CLUSTER_NAME="$CLUS
 
 # ---- S6 review + S7 run -----------------------------------------------------
 ui_title "Review"
-node -e "const a=require('$ANS'); console.log(JSON.stringify({...a, fleet:a.fleet.map(m=>({name:m.name,host:m.host,user:m.username,role:m.role}))}, null, 2))"
+# Read+parse the file explicitly: require() on a no-.json-extension temp file parses it as JS.
+node -e "const fs=require('fs'); const a=JSON.parse(fs.readFileSync(process.argv[1],'utf8')); console.log(JSON.stringify({...a, fleet:a.fleet.map(m=>({name:m.name,host:m.host,user:m.username,role:m.role}))}, null, 2))" "$ANS"
 ui_say "(secrets are held in environment only — not in this file)"
 PASSTHRU=""
 for arg in "$@"; do PASSTHRU+=" $arg"; done
