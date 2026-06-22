@@ -298,8 +298,9 @@ SCREENS.deploys = (c) => {
   cur.querySelector('[data-act="bg"]').onclick = () => verifyAction({ name: "bluegreen_deploy", title: "Blue-green deploy across the cluster", destructive: true }, {});
   cur.querySelector('[data-act="rb"]').onclick = () => verifyAction({ name: "adpix_update", title: "Rollback (redeploy the previous build)", destructive: false }, {});
   const cicd = el(`<div style="${cardOpen}"><div style="${cardHead};display:flex;align-items:center;justify-content:space-between">CI / CD pipeline<button class="btn btn-sm refresh">${t("refresh")}</button></div><div class="ccbody"><div class="card-pad"><div class="skel" style="width:60%"></div></div></div></div>`);
-  const stacks = el(`<div style="${cardOpen}"><div style="${cardHead}">Update from GitHub</div><div class="card-pad"><div class="muted" style="font-size:12.5px;margin-bottom:12px">Pull + rebuild + migrate, recreating <b>only stateless</b> services. Datastores (postgres / clickhouse / redis / minio) and their volumes are never recreated or deleted.</div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-sm" data-st="analytics">${ic("deploys", 14)} Update Analytics</button><button class="btn btn-sm" data-st="tagmanager">${ic("deploys", 14)} Update Tag Manager</button></div></div></div>`);
+  const stacks = el(`<div style="${cardOpen}"><div style="${cardHead}">Update from GitHub</div><div class="card-pad"><div class="muted" style="font-size:12.5px;margin-bottom:12px">Pull + rebuild + migrate, recreating <b>only stateless</b> services. Datastores (postgres / clickhouse / redis / minio) and their volumes are never recreated or deleted.</div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-sm" data-st="analytics">${ic("deploys", 14)} Update Analytics</button><button class="btn btn-sm" data-st="tagmanager">${ic("deploys", 14)} Update Tag Manager</button><button class="btn btn-sm" data-idp="1">${ic("deploys", 14)} Update IdP…</button></div></div></div>`);
   stacks.querySelectorAll("[data-st]").forEach((b) => (b.onclick = () => verifyAction({ name: "stack_update", title: `Update the ${b.dataset.st} stack — stateless-only + migrations (datastores preserved)`, destructive: true }, { stack: b.dataset.st, statelessOnly: true })));
+  stacks.querySelector("[data-idp]").onclick = idpUpdateForm;
   left.append(cur, cicd, stacks);
   const right = el(`<div></div>`);
   right.innerHTML = (S.fleet && (S.fleet.nodes.length || S.fleet.cluster.name)) ? `<div style="${cardOpen}">${topologyCard(S.fleet)}</div>` : `<div style="${cardOpen}"><div style="${cardHead}">Cluster topology</div><div class="empty">No cluster defined.</div></div>`;
@@ -573,6 +574,31 @@ function verifyAction(tool, args) {
     <div style="display:flex;justify-content:flex-end;gap:10px;padding:14px 18px;border-top:1px solid var(--c-divider);background:var(--c-sunken)"><button class="btn dc2">${t("cancel")}</button><button class="btn btn-danger run">Run action</button></div>`;
   panel.querySelector(".dc").onclick = close; panel.querySelector(".dc2").onclick = close;
   panel.querySelector(".run").onclick = async () => { if (target && panel.querySelector(".ci").value.trim() !== target) return toast(`Type "${target}" to confirm`, true); const b = panel.querySelector(".run"); b.disabled = true; b.innerHTML = `<span class="spin"></span>`; try { const r = await startDestructive(tool.name, args); toast(`Started ${tool.name}`); close(); openDrawer(r.job.id); } catch (e) { toast(e.message, true); b.disabled = false; b.textContent = "Run action"; } };
+}
+
+function idpUpdateForm() {
+  const { panel, close } = slideIn(480);
+  const servers = (S.fleet?.nodes || []).map((n) => n.name);
+  panel.innerHTML = `<div class="drawer-head"><strong style="display:flex;align-items:center;gap:8px">${ic("deploys", 17)} Update IdP · account center</strong><button class="icon-btn dc">${ic("x", 16)}</button></div>
+    <div class="drawer-body" style="padding:18px">
+      <div class="muted" style="font-size:12.5px;line-height:1.5;margin-bottom:14px"><b>apps/auth ships no compose in the repo</b> — point this at your account-center compose. Pulls + rebuilds + recreates only the auth service (<code>up -d --no-deps</code>); its database is never touched. Runs migrations only if you set a migrateCmd.</div>
+      <label class="fld"><span class="lab">server</span>${servers.length ? selField("server", servers, "(default server)") : `<input class="input" data-k="server" placeholder="(default server)">`}</label>
+      <label class="fld"><span class="lab">dir · checkout on the server</span><input class="input" data-k="dir" placeholder="/opt/adpix-auth"></label>
+      <label class="fld"><span class="lab">composeFile · required</span><input class="input" data-k="composeFile" placeholder="deploy/docker-compose.yml"></label>
+      <label class="fld"><span class="lab">project · compose -p</span><input class="input" data-k="project" placeholder="adpix-auth"></label>
+      <label class="fld"><span class="lab">service · auth service to recreate</span><input class="input" data-k="service" placeholder="auth"></label>
+      <label class="fld"><span class="lab">migrateCmd · optional</span><input class="input" data-k="migrateCmd" placeholder="(none — e.g. run --rm migrate)"></label>
+      <label class="fld"><span class="lab">branch · optional</span><input class="input" data-k="branch" placeholder="(current)"></label>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:10px;padding:14px 18px;border-top:1px solid var(--c-divider);background:var(--c-sunken)"><button class="btn dc2">${t("cancel")}</button><button class="btn btn-primary nx">Review + confirm</button></div>`;
+  panel.querySelector(".dc").onclick = close; panel.querySelector(".dc2").onclick = close;
+  panel.querySelector(".nx").onclick = () => {
+    const a = { stack: "idp", statelessOnly: true };
+    panel.querySelectorAll("[data-k]").forEach((i) => { const v = i.value.trim(); if (v) a[i.dataset.k] = v; });
+    if (!a.composeFile) return toast("composeFile is required for the IdP", true);
+    close();
+    verifyAction({ name: "stack_update", title: "Update the IdP / account center — stateless-only (database preserved)", destructive: true }, a);
+  };
 }
 
 // ============================================================ command palette

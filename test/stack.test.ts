@@ -66,6 +66,25 @@ describe("stack_update", () => {
     expect(out).toMatch(/already up to date/);
   });
 
+  it("idp: recreates only the auth service, no migrate by default, DB preserved (external)", async () => {
+    const { deps, calls } = stackDeps();
+    const out = await tool("stack_update").handler(deps, { stack: "idp", statelessOnly: true, rollbackOnFailure: true, force: false, confirm: true, timeoutSeconds: 600, service: "auth" });
+    const up = calls.find((c) => /up -d/.test(c))!;
+    expect(up).toMatch(/--no-deps/); expect(up).toMatch(/\bauth\b/);
+    expect(calls.some((c) => /run --rm migrate/.test(c))).toBe(false); // no migrate unless migrateCmd given
+    expect(calls.some((c) => /down\s+-v/.test(c))).toBe(false);
+    expect(out).toMatch(/control DB is external/);
+  });
+
+  it("idp: honors composeFile / project / service overrides + optional migrateCmd", async () => {
+    const { deps, calls } = stackDeps();
+    await tool("stack_update").handler(deps, { stack: "idp", statelessOnly: true, rollbackOnFailure: true, force: false, confirm: true, timeoutSeconds: 600, composeFile: "deploy/auth.yml", project: "acct", service: "account", migrateCmd: "run --rm dbmigrate" });
+    expect(calls.some((c) => /-p 'acct' -f 'deploy\/auth\.yml'/.test(c))).toBe(true);
+    const up = calls.find((c) => /up -d/.test(c))!;
+    expect(up).toMatch(/\baccount\b/);
+    expect(calls.some((c) => /run --rm dbmigrate/.test(c))).toBe(true);
+  });
+
   it("tagmanager: stateless = api/edge/varnish/purge-bridge; no migrate; redis/minio preserved", async () => {
     const { deps, calls } = stackDeps();
     const out = await tool("stack_update").handler(deps, { stack: "tagmanager", statelessOnly: true, rollbackOnFailure: true, force: false, confirm: true, timeoutSeconds: 600 });
