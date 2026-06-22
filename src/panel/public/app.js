@@ -140,7 +140,7 @@ SCREENS.dashboard = async (c) => {
   const sub = `cluster ${f.cluster.name || "—"} · ${f.cluster.servers} server${f.cluster.servers === 1 ? "" : "s"}${f.cluster.vip ? " · vip " + f.cluster.vip : ""}`;
   c.innerHTML = H(t("fleetOverview"), sub, bigBtn("backup", t("backupAll"), "backups") + bigBtn("deploy", t("deploy"), "deploys") + bigBtn("add", t("addServer"), "plus", true));
   c.querySelector('[data-act="backup"]').onclick = () => action("adpix_backup");
-  c.querySelector('[data-act="deploy"]').onclick = () => action("adpix_update");
+  c.querySelector('[data-act="deploy"]').onclick = async () => { const an = (await ensureStacks()).find((x) => x.stack === "analytics"); if (an && !an.installed) return installForm("analytics"); action("adpix_update"); };
   c.querySelector('[data-act="add"]').onclick = addServerWizard;
   // KPI cards
   const kpi = [["HEALTHY", f.counts.healthy, "servers", "pos"], ["DEGRADED", f.counts.degraded, "need attention", "warn"], ["DOWN", f.counts.down, "critical", "neg"], ["ACTIVE JOBS", f.counts.activeJobs, "running", "brand"]];
@@ -294,21 +294,30 @@ SCREENS.deploys = (c) => {
   const g = el(`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;align-items:start"></div>`); c.appendChild(g);
   const left = el(`<div style="display:flex;flex-direction:column;gap:16px"></div>`);
   const cur = el(`<div style="${cardOpen};padding:18px 20px"><div style="font-size:12px;color:var(--c-muted);text-transform:uppercase;letter-spacing:.5px">Current deploy</div><div class="verbody" style="margin:10px 0 14px"><div class="skel" style="width:50%"></div></div><div style="display:flex;gap:8px">${bigBtn("u", "Update", null, true)}${bigBtn("bg", "Blue-green")}${bigBtn("rb", "Rollback")}</div></div>`);
-  cur.querySelector('[data-act="u"]').onclick = () => action("adpix_update");
+  cur.querySelector('[data-act="u"]').onclick = async () => { const an = (await ensureStacks()).find((x) => x.stack === "analytics"); if (an && !an.installed) return installForm("analytics"); action("adpix_update"); };
   cur.querySelector('[data-act="bg"]').onclick = () => verifyAction({ name: "bluegreen_deploy", title: "Blue-green deploy across the cluster", destructive: true }, {});
   cur.querySelector('[data-act="rb"]').onclick = () => verifyAction({ name: "adpix_update", title: "Rollback (redeploy the previous build)", destructive: false }, {});
   const cicd = el(`<div style="${cardOpen}"><div style="${cardHead};display:flex;align-items:center;justify-content:space-between">CI / CD pipeline<button class="btn btn-sm refresh">${t("refresh")}</button></div><div class="ccbody"><div class="card-pad"><div class="skel" style="width:60%"></div></div></div></div>`);
-  const stacks = el(`<div style="${cardOpen}"><div style="${cardHead};display:flex;align-items:center;justify-content:space-between">Update from GitHub<button class="btn btn-sm refresh">${t("refresh")}</button></div><div class="card-pad"><div class="muted" style="font-size:12.5px;margin-bottom:12px">Pull + rebuild + migrate, recreating <b>only stateless</b> services. Datastores (postgres / clickhouse / redis / minio) and their volumes are never recreated or deleted.</div><div class="rows" style="margin-bottom:12px"><div class="skel" style="width:70%"></div></div><label style="display:flex;align-items:center;gap:7px;font-size:12.5px;margin-bottom:12px;cursor:pointer"><input type="checkbox" id="bkf"> Back up Analytics (pg_dump + ClickHouse) before migrating</label><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-sm" data-st="analytics">${ic("deploys", 14)} Update Analytics</button><button class="btn btn-sm" data-st="tagmanager">${ic("deploys", 14)} Update Tag Manager</button><button class="btn btn-sm" data-idp="1">${ic("deploys", 14)} Update IdP…</button></div></div></div>`);
+  const stacks = el(`<div style="${cardOpen}"><div style="${cardHead};display:flex;align-items:center;justify-content:space-between">Deploy from GitHub<button class="btn btn-sm refresh">${t("refresh")}</button></div><div class="card-pad"><div class="muted" style="font-size:12.5px;margin-bottom:12px;line-height:1.5">Fresh server? <b>Install</b> provisions the full stack (clone + .env + Docker + compose up + migrate). Already installed? <b>Update</b> recreates <b>only stateless</b> services + runs migrations — datastores (postgres / clickhouse / redis / minio) and their volumes are never touched.</div><div class="rows"><div class="skel" style="width:70%"></div></div><label style="display:flex;align-items:center;gap:7px;font-size:12px;margin-top:12px;color:var(--c-muted);cursor:pointer"><input type="checkbox" id="bkf"> Back up Analytics before migrating (updates only)</label></div></div>`);
   const stackPill = (x) => !x.installed ? pill("not installed", "idle") : x.behind === 0 ? pill("up to date", "pos") : x.behind === "?" ? pill("origin unreachable", "idle") : pill(`${x.behind} behind`, "warn");
   const loadStacks = async () => {
     try {
-      const arr = await api("/api/stacks");
-      stacks.querySelector(".rows").innerHTML = arr.map((x) => `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--c-divider)"><div style="min-width:0"><b style="text-transform:capitalize">${esc(x.stack)}</b>${x.installed ? ` <span class="mono muted" style="font-size:11.5px">${esc(x.commit)}${x.branch ? " · " + esc(x.branch) : ""}</span>` : ""}</div>${stackPill(x)}</div>`).join("");
+      const arr = await api("/api/stacks"); STACKS_STATUS = arr;
+      const rows = stacks.querySelector(".rows");
+      rows.innerHTML = arr.map((x) => {
+        const act = x.stack === "idp"
+          ? `<button class="btn btn-sm" data-idp="1">Update IdP…</button>`
+          : x.installed
+            ? `<button class="btn btn-sm" data-up="${esc(x.stack)}">${ic("deploys", 13)} Update${typeof x.behind === "number" && x.behind > 0 ? ` · ${x.behind}` : ""}</button>`
+            : `<button class="btn btn-sm btn-primary" data-inst="${esc(x.stack)}">${ic("deploys", 13)} Install</button>`;
+        return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--c-divider)"><div style="min-width:0"><b style="text-transform:capitalize">${esc(x.stack)}</b>${x.installed ? ` <span class="mono muted" style="font-size:11.5px">${esc(x.commit)}${x.branch ? " · " + esc(x.branch) : ""}</span>` : ""}</div><div style="display:flex;align-items:center;gap:10px;flex:none">${stackPill(x)}${act}</div></div>`;
+      }).join("");
+      rows.querySelectorAll("[data-up]").forEach((b) => (b.onclick = () => verifyAction({ name: "stack_update", title: `Update the ${b.dataset.up} stack — stateless-only + migrations (datastores preserved)`, destructive: true }, { stack: b.dataset.up, statelessOnly: true, ...(b.dataset.up === "analytics" && stacks.querySelector("#bkf").checked ? { backupFirst: true } : {}) })));
+      rows.querySelectorAll("[data-inst]").forEach((b) => (b.onclick = () => installForm(b.dataset.inst)));
+      const idpb = rows.querySelector("[data-idp]"); if (idpb) idpb.onclick = idpUpdateForm;
     } catch (e) { stacks.querySelector(".rows").innerHTML = `<div class="muted" style="font-size:12px">${esc(e.message)}</div>`; }
   };
   stacks.querySelector(".refresh").onclick = loadStacks;
-  stacks.querySelectorAll("[data-st]").forEach((b) => (b.onclick = () => verifyAction({ name: "stack_update", title: `Update the ${b.dataset.st} stack — stateless-only + migrations (datastores preserved)`, destructive: true }, { stack: b.dataset.st, statelessOnly: true, ...(b.dataset.st === "analytics" && stacks.querySelector("#bkf").checked ? { backupFirst: true } : {}) })));
-  stacks.querySelector("[data-idp]").onclick = idpUpdateForm;
   left.append(cur, cicd, stacks); loadStacks();
   const right = el(`<div></div>`);
   right.innerHTML = (S.fleet && (S.fleet.nodes.length || S.fleet.cluster.name)) ? `<div style="${cardOpen}">${topologyCard(S.fleet)}</div>` : `<div style="${cardOpen}"><div style="${cardHead}">Cluster topology</div><div class="empty">No cluster defined.</div></div>`;
@@ -582,6 +591,45 @@ function verifyAction(tool, args) {
     <div style="display:flex;justify-content:flex-end;gap:10px;padding:14px 18px;border-top:1px solid var(--c-divider);background:var(--c-sunken)"><button class="btn dc2">${t("cancel")}</button><button class="btn btn-danger run">Run action</button></div>`;
   panel.querySelector(".dc").onclick = close; panel.querySelector(".dc2").onclick = close;
   panel.querySelector(".run").onclick = async () => { if (target && panel.querySelector(".ci").value.trim() !== target) return toast(`Type "${target}" to confirm`, true); const b = panel.querySelector(".run"); b.disabled = true; b.innerHTML = `<span class="spin"></span>`; try { const r = await startDestructive(tool.name, args); toast(`Started ${tool.name}`); close(); openDrawer(r.job.id); } catch (e) { toast(e.message, true); b.disabled = false; b.textContent = "Run action"; } };
+}
+
+let STACKS_STATUS = [];
+async function ensureStacks() { try { STACKS_STATUS = await api("/api/stacks"); } catch { /* keep last */ } return STACKS_STATUS; }
+
+// Provision a fresh server: clone + .env + compose up + migrate (the install tools are idempotent).
+function installForm(stack) {
+  const { panel, close } = slideIn(500);
+  const servers = (S.fleet?.nodes || []).map((n) => n.name);
+  const srvField = servers.length ? selField("server", servers, "(default server)") : `<input class="input" data-k="server" placeholder="(default server)">`;
+  const isA = stack === "analytics";
+  const fields = isA
+    ? `<label class="fld"><span class="lab">server</span>${srvField}</label>
+       <label class="fld"><span class="lab">domain · optional — HTTPS via Caddy</span><input class="input" data-k="domain" placeholder="analytics.example.com (omit for HTTP-on-IP)"></label>
+       <label class="fld"><span class="lab">adminEmail · optional</span><input class="input" data-k="adminEmail" placeholder="admin@example.com"></label>
+       <label class="fld"><span class="lab">branch</span><input class="input" data-k="branch" placeholder="main"></label>
+       <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;margin:2px 0 4px;cursor:pointer"><input type="checkbox" data-k="deployKey" data-bool="1"> Private repo — generate a read-only deploy key on the server</label>`
+    : `<label class="fld"><span class="lab">server</span>${srvField}</label>
+       <label class="fld"><span class="lab">dir</span><input class="input" data-k="dir" placeholder="/opt/adpix-tagmanager"></label>
+       <label class="fld"><span class="lab">databaseUrl · required</span><input class="input" data-k="databaseUrl" placeholder="postgres://user:pass@host:5432/db"></label>
+       <label class="fld"><span class="lab">authIssuer · required</span><input class="input" data-k="authIssuer" placeholder="https://account.adpix.io"></label>
+       <label class="fld"><span class="lab">s3AccessKey · required</span><input class="input" data-k="s3AccessKey"></label>
+       <label class="fld"><span class="lab">s3SecretKey · required</span><input class="input" type="password" data-k="s3SecretKey"></label>
+       <label class="fld"><span class="lab">purgeToken · required</span><input class="input" data-k="purgeToken"></label>
+       <label class="fld"><span class="lab">s3Bucket</span><input class="input" data-k="s3Bucket" placeholder="adpix-tags"></label>`;
+  panel.innerHTML = `<div class="drawer-head"><strong style="display:flex;align-items:center;gap:8px">${ic("deploys", 17)} Install ${isA ? "AdPix Analytics" : "Tag Manager"}</strong><button class="icon-btn dc">${ic("x", 16)}</button></div>
+    <div class="drawer-body" style="padding:18px">
+      <div class="muted" style="font-size:12.5px;line-height:1.5;margin-bottom:14px">Provisions the full stack on a fresh host: clone the repo, write <code>.env</code>, install Docker, build, run migrations, bring containers up, and health-gate. ${isA ? "Secrets are auto-generated. First build takes 10–25 min." : "Provide the control-plane secrets below."} Streams in Activity.</div>
+      ${fields}
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:10px;padding:14px 18px;border-top:1px solid var(--c-divider);background:var(--c-sunken)"><button class="btn dc2">${t("cancel")}</button><button class="btn btn-primary nx">Install</button></div>`;
+  panel.querySelector(".dc").onclick = close; panel.querySelector(".dc2").onclick = close;
+  panel.querySelector(".nx").onclick = () => {
+    const a = {};
+    panel.querySelectorAll("[data-k]").forEach((i) => { if (i.dataset.bool) { if (i.checked) a[i.dataset.k] = true; } else { const v = i.value.trim(); if (v) a[i.dataset.k] = v; } });
+    if (!isA) { for (const k of ["databaseUrl", "authIssuer", "s3AccessKey", "s3SecretKey", "purgeToken"]) if (!a[k]) return toast(`${k} is required`, true); }
+    close();
+    action(isA ? "adpix_install" : "tm_install", a);
+  };
 }
 
 function idpUpdateForm() {
