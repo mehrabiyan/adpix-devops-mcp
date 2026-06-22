@@ -25,7 +25,7 @@ import { buildQuorumView } from "./aggregate/cluster.js";
 import { buildDeployView } from "./aggregate/deploy.js";
 import { classifyError } from "./errors.js";
 import { loadRegistry, saveRegistry } from "../registry.js";
-import { mcpKeyPath } from "../install/steps.js";
+import { panelMcpKeyPath, ensureMcpKey, saveUploadedKey } from "./keys.js";
 import { shq } from "../util.js";
 
 /**
@@ -201,7 +201,9 @@ export function createPanelServer(opts: PanelOpts): Server {
         if (!["owner", "operator"].includes(actor.role)) { sendJson(res, 403, { error: "owner/operator only" }); return; }
         const b = await readBody(req);
         try {
-          const diag = await diagnoseServer(deps, { host: String(b.host || ""), port: Number(b.port) || 22, username: String(b.username || "root"), password: b.password ? String(b.password) : undefined, privateKeyPath: b.privateKeyPath ? String(b.privateKeyPath) : undefined });
+          // pasted/uploaded private key → persist to a mode-600 file, use its path
+          const keyPath = b.privateKey ? saveUploadedKey(String(b.name || b.host || "server"), String(b.privateKey)) : (b.privateKeyPath ? String(b.privateKeyPath) : undefined);
+          const diag = await diagnoseServer(deps, { host: String(b.host || ""), port: Number(b.port) || 22, username: String(b.username || "root"), password: b.password ? String(b.password) : undefined, privateKeyPath: keyPath });
           sendJson(res, 200, diag);
         } catch (e) { sendJson(res, 200, { reachable: false, fingerprint: "", checks: [{ name: "Diagnose", ok: false, detail: classifyError(e).message, soft: false }], summary: classifyError(e).message, canAdd: false }); }
         return;
@@ -214,14 +216,17 @@ export function createPanelServer(opts: PanelOpts): Server {
         const role = b.role === "witness" ? "witness" : "node"; const clusterName = b.cluster ? String(b.cluster) : "";
         if (!name || !host) { sendJson(res, 400, { error: "name + host are required" }); return; }
         try {
-          let keyPath = b.privateKeyPath ? String(b.privateKeyPath) : "";
+          // pasted/uploaded key → persist to a mode-600 file; else a path; else (password) the MCP key below
+          let keyPath = b.privateKey ? saveUploadedKey(name, String(b.privateKey)) : (b.privateKeyPath ? String(b.privateKeyPath) : "");
           if (b.password) {
-            // password bootstrap: append the MCP public key to the target's authorized_keys, then forget the password
-            const pub = (await deps.local(`cat ${shq(mcpKeyPath() + ".pub")} 2>/dev/null || true`)).stdout.trim();
-            if (!pub.startsWith("ssh-")) { sendJson(res, 400, { error: `MCP public key not found at ${mcpKeyPath()}.pub — run the host installer first, or add with a key path.` }); return; }
+            // password bootstrap: generate the panel's MCP key if needed, append its pubkey to the
+            // target's authorized_keys, then store the KEY PATH (the password is never persisted)
+            const mcp = await ensureMcpKey(deps);
+            const pub = (await deps.local(`cat ${shq(mcp + ".pub")} 2>/dev/null || true`)).stdout.trim();
+            if (!pub.startsWith("ssh-")) { sendJson(res, 400, { error: `could not read the MCP public key at ${panelMcpKeyPath()}.pub` }); return; }
             const s = await deps.connect({ name, host, port, username, adpixDir: "/opt/adpix" }, { password: String(b.password) });
             try { await s.exec(`umask 077; mkdir -p ~/.ssh; touch ~/.ssh/authorized_keys; grep -qxF ${shq(pub)} ~/.ssh/authorized_keys || echo ${shq(pub)} >> ~/.ssh/authorized_keys; echo OK`, { timeoutMs: 15000 }); } finally { s.close(); }
-            keyPath = mcpKeyPath();
+            keyPath = mcp;
           }
           const addTool = toolByName.get("server_add")!;
           const result = await addTool.handler(deps, { name, host, port, username, privateKeyPath: keyPath || undefined, verify: !b.password && !keyPath ? false : true });

@@ -488,12 +488,15 @@ function addServerWizard() {
       ${field("Authentication", `<select class="input" id="w_auth"><option value="key">SSH private key (path)</option><option value="password">Root password</option></select>`)}
       <div id="w_authfield"></div>`;
       b.querySelector("#w_auth").value = ctx.authMethod || "key";
-      const drawAuth = () => { const m = b.querySelector("#w_auth").value; b.querySelector("#w_authfield").innerHTML = m === "password" ? field("Root password", `<input class="input" type="password" id="w_pw" value="${esc(ctx.password || "")}">`) : field("Private key path", `<input class="input mono" id="w_key" value="${esc(ctx.privateKeyPath || "")}" placeholder="~/.ssh/id_ed25519 (blank = MCP key / agent)">`); };
+      const drawAuth = () => { const m = b.querySelector("#w_auth").value; b.querySelector("#w_authfield").innerHTML = m === "password"
+        ? field("Root password", `<input class="input" type="password" id="w_pw" value="${esc(ctx.password || "")}"><div class="hint" style="margin-top:5px;font-size:11.5px">Used once to authorize the MCP key on the host, then discarded — never stored.</div>`)
+        : field("Private key", `<textarea class="input mono" id="w_keypaste" rows="5" placeholder="Paste the OpenSSH private key (-----BEGIN OPENSSH PRIVATE KEY----- …)" style="resize:vertical;line-height:1.4">${esc(ctx.privateKey || "")}</textarea><input class="input mono" id="w_key" value="${esc(ctx.privateKeyPath || "")}" placeholder="…or a key file path on this host (blank = MCP key / agent)" style="margin-top:8px">`); };
       drawAuth(); b.querySelector("#w_auth").onchange = drawAuth;
     }, onNext: (ctx) => {
       ctx.host = document.getElementById("w_host").value.trim(); ctx.port = document.getElementById("w_port").value.trim() || "22"; ctx.user = document.getElementById("w_user").value.trim() || "root";
       ctx.authMethod = document.getElementById("w_auth").value;
       ctx.password = ctx.authMethod === "password" ? (document.getElementById("w_pw")?.value || "") : "";
+      ctx.privateKey = ctx.authMethod === "key" ? (document.getElementById("w_keypaste")?.value.trim() || "") : "";
       ctx.privateKeyPath = ctx.authMethod === "key" ? (document.getElementById("w_key")?.value.trim() || "") : "";
       if (!ctx.host) return "Host / IP is required.";
       if (ctx.authMethod === "password" && !ctx.password) return "Enter the root password.";
@@ -502,7 +505,7 @@ function addServerWizard() {
     { label: "Diagnose", body: async (ctx, b) => {
       b.innerHTML = `<div style="font-weight:600;font-size:15px;margin-bottom:14px">Diagnosing ${esc(ctx.host)}…</div><div class="dres"><span class="spin"></span> running connectivity checks…</div>`;
       try {
-        const d = await api("/api/wizard/diagnose", { method: "POST", body: JSON.stringify({ host: ctx.host, port: Number(ctx.port), username: ctx.user, password: ctx.password || undefined, privateKeyPath: ctx.privateKeyPath || undefined }) });
+        const d = await api("/api/wizard/diagnose", { method: "POST", body: JSON.stringify({ name: ctx.name || ctx.host, host: ctx.host, port: Number(ctx.port), username: ctx.user, password: ctx.password || undefined, privateKey: ctx.privateKey || undefined, privateKeyPath: ctx.privateKeyPath || undefined }) });
         ctx.canAdd = d.canAdd;
         b.querySelector(".dres").innerHTML = `<div class="badge ${d.reachable ? (d.canAdd ? "b-pos" : "b-warn") : "b-neg"}" style="margin-bottom:12px"><span class="dot"></span>${esc(d.summary)}</div>`
           + d.checks.map((c) => `<div style="display:flex;align-items:flex-start;gap:10px;padding:9px 0;border-bottom:1px solid var(--c-divider)"><span style="color:${c.ok ? "var(--c-pos)" : c.soft ? "var(--c-warn)" : "var(--c-neg)"};flex:none;margin-top:1px">${c.ok ? ic("check", 15) : ic("warn", 15)}</span><div style="flex:1"><div style="font-size:13px;font-weight:500">${esc(c.name)}${c.soft && !c.ok ? ` <span class="hint" style="font-weight:400">(optional)</span>` : ""}</div><div class="mono muted" style="font-size:11.5px;word-break:break-word">${esc(c.detail)}</div></div></div>`).join("");
@@ -527,7 +530,7 @@ function addServerWizard() {
     } },
     { label: "Authorize", body: (ctx, b) => { b.innerHTML = `<div style="font-weight:600;font-size:15px;margin-bottom:8px">Authorize & add</div><div class="muted" style="font-size:13px;margin-bottom:14px">Add <b class="mono">${esc(ctx.name)}</b> (${esc(ctx.user)}@${esc(ctx.host)}:${esc(ctx.port)}) as a <b>${esc(ctx.role)}</b>${ctx.cluster ? ` in cluster <b>${esc(ctx.cluster)}</b>` : ""}.${ctx.authMethod === "password" ? " The MCP key will be authorized on the target, then the password is discarded." : ""}</div><pre class="out">server_add name=${esc(ctx.name)} host=${esc(ctx.host)} auth=${esc(ctx.authMethod)} role=${esc(ctx.role)}</pre>`; } },
   ], async (ctx) => {
-    const r = await api("/api/wizard/add-server", { method: "POST", body: JSON.stringify({ name: ctx.name, host: ctx.host, port: Number(ctx.port), username: ctx.user, role: ctx.role, cluster: ctx.cluster || "", authMethod: ctx.authMethod, password: ctx.password || undefined, privateKeyPath: ctx.privateKeyPath || undefined }) });
+    const r = await api("/api/wizard/add-server", { method: "POST", body: JSON.stringify({ name: ctx.name, host: ctx.host, port: Number(ctx.port), username: ctx.user, role: ctx.role, cluster: ctx.cluster || "", authMethod: ctx.authMethod, password: ctx.password || undefined, privateKey: ctx.privateKey || undefined, privateKeyPath: ctx.privateKeyPath || undefined }) });
     toast(`Added ${ctx.name}`); await loadClusters(); await loadFleet(); render();
   });
 }
