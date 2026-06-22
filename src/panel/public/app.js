@@ -64,6 +64,8 @@ const sc = (s) => SK[s] || (/heal|up|ok|pass|succ|done/i.test(s) ? "pos" : /degr
 const cvar = (k) => `var(--c-${k})`;
 function pill(label, s) { const k = sc(s || label); return `<span style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:500;padding:2px 9px;border-radius:999px;background:var(--c-${k}-bg);color:var(--c-${k})"><span style="width:6px;height:6px;border-radius:50%;background:var(--c-${k})"></span>${esc(label)}</span>`; }
 const metColor = (v) => v >= 80 ? cvar("neg") : v >= 65 ? cvar("warn") : cvar("brand");
+const cap = (s) => String(s).charAt(0).toUpperCase() + String(s).slice(1);
+const whenLabel = (s) => ({ succeeded: "just now", canceled: "cancelled", failed: "failed", running: "running", queued: "queued", interrupted: "interrupted" }[s] || s);
 
 // ============================================================ shell
 function render() {
@@ -118,7 +120,8 @@ async function loadFleet() { try { S.fleet = await api("/api/fleet"); } catch { 
 const SCREENS = {};
 SCREENS.dashboard = async (c) => {
   const f = S.fleet || { cluster: { name: "", vip: "", servers: 0 }, counts: { healthy: 0, degraded: 0, down: 0, activeJobs: 0 }, nodes: [], recentJobs: [], alerts: [] };
-  c.innerHTML = H(t("fleetOverview"), `cluster ${f.cluster.name || "—"} · ${f.cluster.servers} servers${f.cluster.vip ? " · vip " + f.cluster.vip : ""}`, bigBtn("backup", t("backupAll"), "backups") + bigBtn("deploy", t("deploy"), "deploys") + bigBtn("add", t("addServer"), "plus", true));
+  const sub = `cluster ${f.cluster.name || "—"}${f.cluster.region ? " · " + f.cluster.region : ""} · ${f.cluster.servers} servers${f.cluster.version ? " · v" + f.cluster.version : f.cluster.vip ? " · vip " + f.cluster.vip : ""}`;
+  c.innerHTML = H(t("fleetOverview"), sub, bigBtn("backup", t("backupAll"), "backups") + bigBtn("deploy", t("deploy"), "deploys") + bigBtn("add", t("addServer"), "plus", true));
   c.querySelector('[data-act="backup"]').onclick = () => action("adpix_backup");
   c.querySelector('[data-act="deploy"]').onclick = () => action("adpix_update");
   c.querySelector('[data-act="add"]').onclick = addServerWizard;
@@ -135,7 +138,7 @@ SCREENS.dashboard = async (c) => {
   const row3 = el(`<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px"></div>`); c.appendChild(row3);
   const rj = el(`<div style="${cardOpen}"><div style="${cardHead};display:flex;align-items:center;justify-content:space-between">${t("recentJobs")}<button data-go style="border:0;background:transparent;color:var(--c-brand);font:inherit;font-size:12.5px;font-weight:500;cursor:pointer">${t("viewAll")} →</button></div><div></div></div>`);
   rj.querySelector("[data-go]").onclick = () => { S.screen = "jobs"; render(); };
-  rj.lastElementChild.innerHTML = f.recentJobs.length ? f.recentJobs.map((j) => `<div style="display:flex;align-items:center;gap:11px;padding:11px 16px;border-bottom:1px solid var(--c-divider)"><span style="width:8px;height:8px;border-radius:50%;background:var(--c-${sc(j.status)});flex:none;${j.status === "running" ? "animation:pulse-dot 1.4s infinite" : ""}"></span><div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:500">${esc(j.tool)}</div><div style="font-size:11.5px;color:var(--c-muted);font-family:var(--font-mono)">${esc(j.target)}</div></div><span style="font-size:11.5px;color:var(--c-hint)">${esc(j.status)}</span></div>`).join("") : `<div class="empty">${t("noJobs")}</div>`;
+  rj.lastElementChild.innerHTML = f.recentJobs.length ? f.recentJobs.map((j) => `<div style="display:flex;align-items:center;gap:11px;padding:11px 16px;border-bottom:1px solid var(--c-divider)"><span style="width:8px;height:8px;border-radius:50%;background:var(--c-${sc(j.status)});flex:none;${j.status === "running" ? "animation:pulse-dot 1.4s infinite" : ""}"></span><div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:500">${esc(j.tool)}</div><div style="font-size:11.5px;color:var(--c-muted);font-family:var(--font-mono)">${esc(j.target)}</div></div><span style="font-size:11.5px;color:var(--c-hint)">${esc(whenLabel(j.status))}</span></div>`).join("") : `<div class="empty">${t("noJobs")}</div>`;
   const al = el(`<div style="${cardOpen}"><div style="${cardHead};display:flex;align-items:center;justify-content:space-between">${t("activeAlerts")}<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--c-warn-bg);color:var(--c-warn)">${f.alerts.length}</span></div><div></div></div>`);
   al.lastElementChild.innerHTML = f.alerts.length ? f.alerts.map((a) => `<div style="display:flex;gap:11px;padding:12px 16px;border-bottom:1px solid var(--c-divider)"><span style="width:3px;border-radius:999px;background:var(--c-${a.level});flex:none;align-self:stretch"></span><div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:500">${esc(a.title)}</div><div style="font-size:12px;color:var(--c-muted);margin-top:2px">${esc(a.why)}</div>${a.action ? `<button data-fix="${esc(a.action.tool)}" style="margin-top:7px;border:1px solid var(--c-border);background:var(--c-card);color:var(--c-text);border-radius:7px;padding:4px 10px;font:inherit;font-size:12px;font-weight:500;cursor:pointer">${esc(a.action.label)}</button>` : ""}</div></div>`).join("") : `<div class="empty">No active alerts.</div>`;
   al.querySelectorAll("[data-fix]").forEach((b) => (b.onclick = () => action(b.dataset.fix)));
@@ -143,7 +146,7 @@ SCREENS.dashboard = async (c) => {
 };
 function nodeHealthRow(n) {
   const mets = [["CPU", n.cpu], ["MEM", n.mem], ["DISK", n.disk]];
-  return `<div style="padding:12px 16px;border-bottom:1px solid var(--c-divider)"><div style="display:flex;align-items:center;gap:8px;margin-bottom:9px"><span style="font-family:var(--font-mono);font-size:13px;font-weight:500">${esc(n.name)}</span><span style="font-size:11px;color:var(--c-hint);text-transform:uppercase;letter-spacing:.4px">${esc(n.role)}</span><span style="flex:1"></span>${pill(n.status, n.status)}</div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">${mets.map(([l, v]) => `<div><div style="display:flex;justify-content:space-between;font-size:11px;color:var(--c-muted);margin-bottom:4px"><span>${l}</span><span style="font-family:var(--font-mono);color:${metColor(v)}">${v}%</span></div><div style="height:5px;border-radius:999px;background:var(--c-sunken);overflow:hidden"><div style="height:100%;width:${v}%;background:${metColor(v)};border-radius:999px"></div></div></div>`).join("")}</div></div>`;
+  return `<div style="padding:12px 16px;border-bottom:1px solid var(--c-divider)"><div style="display:flex;align-items:center;gap:8px;margin-bottom:9px"><span style="font-family:var(--font-mono);font-size:13px;font-weight:500">${esc(n.name)}</span><span style="font-size:11px;color:var(--c-hint);text-transform:uppercase;letter-spacing:.4px">${esc(n.role)}</span><span style="flex:1"></span>${pill(cap(n.status), n.status)}</div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">${mets.map(([l, v]) => `<div><div style="display:flex;justify-content:space-between;font-size:11px;color:var(--c-muted);margin-bottom:4px"><span>${l}</span><span style="font-family:var(--font-mono);color:${metColor(v)}">${v}%</span></div><div style="height:5px;border-radius:999px;background:var(--c-sunken);overflow:hidden"><div style="height:100%;width:${v}%;background:${metColor(v)};border-radius:999px"></div></div></div>`).join("")}</div></div>`;
 }
 function topologyCard(f) {
   const W = f.nodes.find((n) => n.role === "witness"), nodes = f.nodes.filter((n) => n.role === "node");
@@ -167,7 +170,7 @@ SCREENS.servers = (c) => {
   const cols = "1.4fr .8fr 1.1fr 1.1fr 1fr .8fr";
   const tbl = el(`<div style="${cardOpen}"><div style="display:grid;grid-template-columns:${cols};gap:12px;padding:11px 18px;border-bottom:1px solid var(--c-border);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--c-hint)"><span>Name</span><span>Role</span><span>Host</span><span>OS</span><span>Status</span><span style="text-align:end">Last seen</span></div><div class="rows"></div></div>`);
   c.appendChild(tbl);
-  tbl.querySelector(".rows").innerHTML = f.nodes.length ? f.nodes.map((n) => `<button class="srvrow" data-n="${esc(n.name)}" style="width:100%;display:grid;grid-template-columns:${cols};gap:12px;align-items:center;padding:13px 18px;border:0;border-bottom:1px solid var(--c-divider);background:transparent;cursor:pointer;color:inherit;font:inherit;text-align:start"><span style="display:flex;align-items:center;gap:9px"><span style="width:8px;height:8px;border-radius:50%;background:var(--c-${sc(n.status)})"></span><span style="font-family:var(--font-mono);font-size:13px;font-weight:500">${esc(n.name)}</span></span><span style="font-size:12.5px;color:var(--c-muted)">${esc(n.role)}</span><span style="font-family:var(--font-mono);font-size:12.5px;color:var(--c-muted)">${esc(n.host)}</span><span style="font-size:12.5px;color:var(--c-muted)">${esc(n.os)}</span><span>${pill(n.status, n.status)}</span><span style="text-align:end;font-size:12px;color:var(--c-hint);font-family:var(--font-mono)">${esc(n.lastSeen)}</span></button>`).join("") : `<div class="empty">No servers registered. Click “Add server”.</div>`;
+  tbl.querySelector(".rows").innerHTML = f.nodes.length ? f.nodes.map((n) => `<button class="srvrow" data-n="${esc(n.name)}" style="width:100%;display:grid;grid-template-columns:${cols};gap:12px;align-items:center;padding:13px 18px;border:0;border-bottom:1px solid var(--c-divider);background:transparent;cursor:pointer;color:inherit;font:inherit;text-align:start"><span style="display:flex;align-items:center;gap:9px"><span style="width:8px;height:8px;border-radius:50%;background:var(--c-${sc(n.status)})"></span><span style="font-family:var(--font-mono);font-size:13px;font-weight:500">${esc(n.name)}</span></span><span style="font-size:12.5px;color:var(--c-muted)">${esc(n.role)}</span><span style="font-family:var(--font-mono);font-size:12.5px;color:var(--c-muted)">${esc(n.host)}</span><span style="font-size:12.5px;color:var(--c-muted)">${esc(n.os)}</span><span>${pill(cap(n.status), n.status)}</span><span style="text-align:end;font-size:12px;color:var(--c-hint);font-family:var(--font-mono)">${esc(n.lastSeen)}</span></button>`).join("") : `<div class="empty">No servers registered. Click “Add server”.</div>`;
   tbl.querySelectorAll(".srvrow").forEach((r) => (r.onclick = () => { S.sd = r.dataset.n; S.screen = "serverDetail"; render(); }));
 };
 
@@ -175,7 +178,7 @@ SCREENS.servers = (c) => {
 SCREENS.serverDetail = (c) => {
   const name = S.sd; const n = (S.fleet?.nodes || []).find((x) => x.name === name) || { name, host: "", os: "", status: "idle", cpu: 0, mem: 0, disk: 0 };
   c.innerHTML = `<button data-back style="display:inline-flex;align-items:center;gap:6px;border:0;background:transparent;color:var(--c-muted);font:inherit;font-size:12.5px;cursor:pointer;margin-bottom:12px;padding:0">${ic("chevL", 15)} ${STR[S.lang].nav.servers}</button>`
-    + `<div style="display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:18px"><div style="flex:1;min-width:220px"><div style="display:flex;align-items:center;gap:10px"><h1 style="margin:0;font-size:22px;font-weight:500;font-family:var(--font-mono)">${esc(name)}</h1>${pill(n.status, n.status)}</div><div style="color:var(--c-muted);font-size:13px;margin-top:5px;font-family:var(--font-mono)">${esc(n.host)} · ${esc(n.os)}</div></div><div style="display:flex;gap:8px">${bigBtn("backup", "Backup now")}${bigBtn("restart", "Restart all")}</div></div>`;
+    + `<div style="display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:18px"><div style="flex:1;min-width:220px"><div style="display:flex;align-items:center;gap:10px"><h1 style="margin:0;font-size:22px;font-weight:500;font-family:var(--font-mono)">${esc(name)}</h1>${pill(cap(n.status), n.status)}</div><div style="color:var(--c-muted);font-size:13px;margin-top:5px;font-family:var(--font-mono)">${esc(n.host)} · ${esc(n.os)}</div></div><div style="display:flex;gap:8px">${bigBtn("backup", "Backup now")}${bigBtn("restart", "Restart all")}</div></div>`;
   c.querySelector("[data-back]").onclick = () => { S.screen = "servers"; S.sd = null; render(); };
   c.querySelector('[data-act="backup"]').onclick = () => action("adpix_backup", { server: name });
   c.querySelector('[data-act="restart"]').onclick = () => verifyAction({ name: "adpix_restart", title: `Restart all services on ${name}`, destructive: true }, { server: name });
@@ -400,9 +403,17 @@ function jobCard(j, open) {
     <div class="log" style="display:${open ? "block" : "none"};margin-top:10px"></div>
     <div style="margin-top:8px;display:flex;gap:6px"><button class="btn btn-sm tg">${open ? "Hide" : "Logs"}</button>${j.status === "running" ? `<button class="btn btn-sm btn-danger kl">${t("cancel")}</button>` : ""}</div></div>`);
   const log = it.querySelector(".log");
+  const logStyle = "display:block;margin-top:10px;font-family:var(--font-mono);font-size:11px;line-height:1.7;background:var(--c-code-bg);border-radius:8px;padding:10px 12px;max-height:200px;overflow:auto;white-space:pre-wrap";
+  // prefill any persisted log tail (terminal/demo jobs that won't stream)
+  if (j.logTail && j.logTail.length) {
+    log.style.cssText = logStyle; log.dataset.s = "1";
+    const bad = j.status === "failed" || j.status === "canceled";
+    log.innerHTML = j.logTail.map((l) => `<div style="color:${bad ? "var(--c-neg)" : "var(--c-pos)"}">${bad ? "× " : "✓ "}${esc(l)}</div>`).join("");
+    it.querySelector(".tg").textContent = "Hide";
+  }
   it.querySelector(".tg").onclick = () => { const sh = log.style.display === "none"; log.style.display = sh ? "block" : "none"; it.querySelector(".tg").textContent = sh ? "Hide" : "Logs"; if (sh && !log.dataset.s) liveStream(j.id, it); };
   it.querySelector(".kl")?.addEventListener("click", async () => { try { await cancelJob(j.id); toast("Canceled"); } catch (e) { toast(e.message, true); } });
-  if (open) liveStream(j.id, it);
+  if (j.status === "running" || (open && !(j.logTail && j.logTail.length))) liveStream(j.id, it);
   return it;
 }
 function liveStream(id, it) {

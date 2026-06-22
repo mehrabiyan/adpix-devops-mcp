@@ -16,6 +16,7 @@ import { appendAudit, readAudit, verifyChain } from "./audit.js";
 import { argsHash } from "./hash.js";
 import { resolveAccess, parseCookies, SESSION_COOKIE, type Actor, type AccessCtx } from "./access.js";
 import { buildFleet, verifyServer, parseTuneRows } from "./fleet.js";
+import { isDemo, DEMO_FLEET, DEMO_JOBS, demoDb } from "./demo.js";
 
 /**
  * The control-panel HTTP server. Phase 1 (loopback job engine + SPA) + Phase 2 hardening:
@@ -133,6 +134,7 @@ export function createPanelServer(opts: PanelOpts): Server {
 
       // ---- structured fleet model (dashboard + servers) ----
       if (path === "/api/fleet" && method === "GET") {
+        if (isDemo()) { sendJson(res, 200, DEMO_FLEET); return; }
         try { sendJson(res, 200, await buildFleet(deps, engine.list())); }
         catch (e) { sendJson(res, 200, { cluster: { name: "", vip: "", servers: 0 }, counts: { healthy: 0, degraded: 0, down: 0, activeJobs: 0 }, nodes: [], recentJobs: [], alerts: [], error: (e as Error).message }); }
         return;
@@ -140,6 +142,7 @@ export function createPanelServer(opts: PanelOpts): Server {
       // ---- databases view (stat cards + tune diff) ----
       if (path === "/api/db" && method === "GET") {
         const eng = url.searchParams.get("engine") === "ch" ? "ch" : "pg";
+        if (isDemo()) { sendJson(res, 200, demoDb(eng)); return; }
         const health = toolByName.get(`${eng}_health`); const tune = toolByName.get(`${eng}_tune`);
         const az = authorize(actor.role, actor.scopes, catByName.get(`${eng}_health`)!, {});
         if (!az.ok) { sendJson(res, 403, { error: az.reason }); return; }
@@ -213,7 +216,7 @@ export function createPanelServer(opts: PanelOpts): Server {
         sendJson(res, 202, { job: r });
         return;
       }
-      if (path === "/api/jobs" && method === "GET") { sendJson(res, 200, { jobs: engine.list() }); return; }
+      if (path === "/api/jobs" && method === "GET") { sendJson(res, 200, { jobs: isDemo() ? DEMO_JOBS : engine.list() }); return; }
 
       const idM = path.match(/^\/api\/jobs\/([a-f0-9-]+)(\/cancel|\/stream)?$/);
       if (idM) {

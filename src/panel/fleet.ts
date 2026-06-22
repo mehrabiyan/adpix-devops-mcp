@@ -17,7 +17,7 @@ export interface NodeInfo {
   cpu: number; mem: number; disk: number; primary: boolean;
 }
 export interface Fleet {
-  cluster: { name: string; vip: string; servers: number };
+  cluster: { name: string; vip: string; servers: number; region?: string; version?: string };
   counts: { healthy: number; degraded: number; down: number; activeJobs: number };
   nodes: NodeInfo[];
   recentJobs: { tool: string; target: string; status: string; id: string }[];
