@@ -65,6 +65,41 @@ describe("tm_install", () => {
     expect(calls.filter((c) => c.includes("base64 -d")).length).toBe(1); // .env written once, never echoed
   });
 
+  it("private repo over HTTPS: auto-switches to a deploy key and prints the key + instructions", async () => {
+    const { deps } = fakeDeps([
+      [/docker compose version/, { stdout: "ok" }],
+      [/command -v git/, { code: 0 }],
+      [/git clone -b 'main' 'https:/, { code: 128, stderr: "fatal: could not read Username for 'https://github.com': No such device or address" }],
+      [/ssh-keygen/, { code: 0 }],
+      [/cat .*\.pub/, { stdout: "ssh-ed25519 AAAAKEY adpix-deploy@host" }],
+      [/git ls-remote/, { stdout: "NO" }], // key not yet authorized
+    ]);
+    const out = await tool("tm_install").handler(deps, { dir: "/opt/adpix-tagmanager", repoUrl: "https://github.com/mehrabiyan/AdpixTagManager.git", branch: "main", s3Bucket: "adpix-tags", timeoutSeconds: 1800 });
+    expect(out).toMatch(/deploy key/i);
+    expect(out).toContain("ssh-ed25519 AAAAKEY");
+    expect(out).toMatch(/Nothing installed yet/);
+  });
+
+  it("private repo: clones over SSH once the deploy key is authorized", async () => {
+    const { deps, calls } = fakeDeps([
+      [/docker compose version/, { stdout: "ok" }],
+      [/command -v git/, { code: 0 }],
+      [/git clone -b 'main' 'https:/, { code: 128, stderr: "could not read Username for 'https://github.com'" }],
+      [/ssh-keygen/, { code: 0 }],
+      [/cat .*\.pub/, { stdout: "ssh-ed25519 KEY" }],
+      [/git ls-remote/, { stdout: "OK" }], // authorized
+      [/git clone -b 'main' 'git@github/, { code: 0 }], // SSH clone succeeds
+      [/deploy\/\.env.* && echo yes/, { stdout: "no" }],
+      [/base64 -d/, { code: 0 }],
+      [/--env-file deploy\/\.env build/, { code: 0 }],
+      [/--env-file deploy\/\.env up -d/, { code: 0 }],
+      [/8686\/healthz/, { code: 0, stdout: "healthy after ~5s (api+edge 200)" }],
+    ]);
+    const out = await tool("tm_install").handler(deps, { dir: "/opt/adpix-tagmanager", repoUrl: "https://github.com/mehrabiyan/AdpixTagManager.git", branch: "main", databaseUrl: "postgres://x", authIssuer: "https://account.adpix.io", s3AccessKey: "k", s3SecretKey: "s", purgeToken: "p", s3Bucket: "adpix-tags", timeoutSeconds: 1800 });
+    expect(out).toContain("Done");
+    expect(calls.some((c) => /git clone -b 'main' 'git@github\.com:mehrabiyan\/AdpixTagManager\.git'/.test(c))).toBe(true);
+  });
+
   it("asks for secrets when .env is missing and none provided", async () => {
     const { deps } = fakeDeps([
       [/docker compose version/, { stdout: "ok" }],
