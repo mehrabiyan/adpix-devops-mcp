@@ -99,7 +99,8 @@ describe("panel end-to-end lifecycle", () => {
     expect(Array.isArray(fleet.nodes)).toBe(true);
     const dbv = await (await fetch(`${base}/api/db?engine=ch`, { headers: { cookie } })).json();
     expect(dbv.engine).toBe("ch");
-    expect("tuneRows" in dbv).toBe(true);
+    expect(Array.isArray(dbv.stats)).toBe(true);
+    expect(Array.isArray(dbv.tune)).toBe(true);
     const ver = await (await fetch(`${base}/api/wizard/verify-server`, { method: "POST", headers: S(true), body: JSON.stringify({ host: "10.0.0.9", port: 22, username: "root" }) })).json();
     expect(ver.reachable).toBe(true); // benign deps connect succeeds
 

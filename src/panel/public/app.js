@@ -137,7 +137,7 @@ function clusterMenu(anchor) {
 const SCREENS = {};
 SCREENS.dashboard = async (c) => {
   const f = S.fleet || { cluster: { name: "", vip: "", servers: 0 }, counts: { healthy: 0, degraded: 0, down: 0, activeJobs: 0 }, nodes: [], recentJobs: [], alerts: [] };
-  const sub = `cluster ${f.cluster.name || "—"}${f.cluster.region ? " · " + f.cluster.region : ""} · ${f.cluster.servers} servers${f.cluster.version ? " · v" + f.cluster.version : f.cluster.vip ? " · vip " + f.cluster.vip : ""}`;
+  const sub = `cluster ${f.cluster.name || "—"} · ${f.cluster.servers} server${f.cluster.servers === 1 ? "" : "s"}${f.cluster.vip ? " · vip " + f.cluster.vip : ""}`;
   c.innerHTML = H(t("fleetOverview"), sub, bigBtn("backup", t("backupAll"), "backups") + bigBtn("deploy", t("deploy"), "deploys") + bigBtn("add", t("addServer"), "plus", true));
   c.querySelector('[data-act="backup"]').onclick = () => action("adpix_backup");
   c.querySelector('[data-act="deploy"]').onclick = () => action("adpix_update");
@@ -203,7 +203,7 @@ SCREENS.serverDetail = (c) => {
   // gauges
   c.appendChild(el(`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:16px">${[["CPU", n.cpu], ["MEMORY", n.mem], ["DISK", n.disk]].map(([l, v]) => `<div style="${cardOpen};padding:14px 16px"><div style="font-size:11.5px;color:var(--c-muted);text-transform:uppercase;letter-spacing:.5px">${l}</div><div style="font-size:26px;font-weight:400;margin:6px 0 8px;color:${metColor(v)}">${v}%</div><div style="height:5px;border-radius:999px;background:var(--c-sunken);overflow:hidden"><div style="height:100%;width:${v}%;background:${metColor(v)};border-radius:999px"></div></div></div>`).join("")}</div>`));
   const grid = el(`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;align-items:start"></div>`); c.appendChild(grid);
-  const known = ["ingest", "api", "web", "worker", "identity-job", "postgres", "clickhouse", "caddy", "redis"];
+  const known = SERVICES;
   const cont = el(`<div style="${cardOpen}"><div style="${cardHead}">${t("containers")}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--c-divider)" class="cc"></div></div>`);
   cont.querySelector(".cc").innerHTML = known.map((svc) => `<div style="background:var(--c-card);padding:12px 14px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="width:8px;height:8px;border-radius:50%;background:var(--c-idle)"></span><span style="font-family:var(--font-mono);font-size:13px;font-weight:500">${esc(svc)}</span></div><div style="display:flex;gap:5px"><button class="iconbtn-sm" data-svc="${svc}" data-a="restart" style="flex:1" title="Restart">${ic("restart", 13)}</button><button class="iconbtn-sm" data-svc="${svc}" data-a="stop" style="flex:1" title="Stop">${ic("stop", 12)}</button><button class="iconbtn-sm" data-svc="${svc}" data-a="status" style="flex:1" title="Status">${ic("wave", 13)}</button></div></div>`).join("");
   cont.querySelectorAll("[data-svc]").forEach((b) => (b.onclick = () => { const svc = b.dataset.svc, a = b.dataset.a; if (a === "status") action("container_control", { server: name, service: svc, action: "status" }); else verifyAction({ name: "container_control", title: `${a} ${svc} on ${name}`, destructive: true }, { server: name, service: svc, action: a }); }));
@@ -228,34 +228,19 @@ SCREENS.databases = (c) => {
     tune.querySelector("[data-apply]").onclick = () => verifyAction({ name: `${eng}_tune`, title: `Apply ${eng} tuning (restarts engine)`, destructive: true }, { apply: true });
     const ra = ret.querySelector("[data-ret]"); if (ra) ra.onclick = () => verifyAction({ name: "ch_retention", title: "Apply ClickHouse retention (drops old partitions)", destructive: true }, { mode: "apply", months: Number(ret.querySelector(".rmon").value) });
     try {
-      const d = await api(`/api/db?engine=${eng}`);
-      // stat cards from health (best-effort numeric extraction)
-      const cards = statCards(d.healthText, eng);
-      stats.innerHTML = cards.length ? cards.map((s) => `<div style="${cardOpen};padding:14px 16px"><div style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--c-muted)"><span style="width:6px;height:6px;border-radius:50%;background:var(--c-${s.dot})"></span>${esc(s.label)}</div><div style="font-size:22px;font-weight:400;margin-top:7px;font-family:var(--font-mono);color:var(--c-${s.dot})">${esc(s.value)}</div></div>`).join("") : `<div style="${cardOpen};padding:14px 16px;grid-column:1/-1"><pre class="out">${esc(d.healthText)}</pre></div>`;
+      const d = await api(`/api/db?engine=${eng}` + (S.cluster ? "&cluster=" + encodeURIComponent(S.cluster) : ""));
+      if (d.error) { stats.innerHTML = `<div style="${cardOpen};padding:14px 16px;grid-column:1/-1"><pre class="out" style="color:var(--c-neg)">${esc(d.error)}</pre></div>`; tune.querySelector(".tunebody").innerHTML = `<div class="empty">Unavailable.</div>`; return; }
+      stats.innerHTML = d.stats.length ? d.stats.map((s) => `<div style="${cardOpen};padding:14px 16px"><div style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--c-muted)"><span style="width:6px;height:6px;border-radius:50%;background:var(--c-${s.level})"></span>${esc(s.label)}</div><div style="font-size:22px;font-weight:400;margin-top:7px;font-family:var(--font-mono);color:var(--c-${s.level})">${esc(s.value)}</div></div>`).join("") : `<div class="empty" style="grid-column:1/-1">No stats — is the ${eng === "pg" ? "Postgres" : "ClickHouse"} stack up?</div>`;
       const tb = tune.querySelector(".tunebody");
-      tb.innerHTML = d.tuneRows.length ? `<div style="display:grid;grid-template-columns:1.3fr 1fr auto 1fr;gap:8px;padding:9px 16px;border-bottom:1px solid var(--c-border);font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:var(--c-hint)"><span>Setting</span><span style="text-align:end">Before</span><span></span><span>After</span></div>` + d.tuneRows.map((r) => `<div style="display:grid;grid-template-columns:1.3fr 1fr auto 1fr;gap:8px;align-items:center;padding:9px 16px;border-bottom:1px solid var(--c-divider);font-family:var(--font-mono);font-size:12px"><span>${esc(r.setting)}</span><span style="text-align:end;color:var(--c-muted);text-decoration:line-through">${esc(r.before)}</span><span style="color:var(--c-hint)">→</span><span style="color:var(--c-pos);font-weight:500">${esc(r.after)}</span></div>`).join("") : `<div class="card-pad"><pre class="out">${esc(d.tuneText)}</pre></div>`;
+      const tcols = "1.5fr 1fr auto 1fr .6fr";
+      tb.innerHTML = d.tune.length
+        ? `<div style="display:grid;grid-template-columns:${tcols};gap:8px;padding:9px 16px;border-bottom:1px solid var(--c-border);font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:var(--c-hint)"><span>Setting</span><span style="text-align:end">Current</span><span></span><span>Recommended</span><span style="text-align:end">Restart</span></div>`
+          + d.tune.map((r) => { const changed = r.current !== r.recommended; return `<div style="display:grid;grid-template-columns:${tcols};gap:8px;align-items:center;padding:9px 16px;border-bottom:1px solid var(--c-divider);font-family:var(--font-mono);font-size:12px"><span>${esc(r.setting)}</span><span style="text-align:end;color:var(--c-muted);${changed ? "text-decoration:line-through" : ""}">${esc(r.current)}</span><span style="color:var(--c-hint)">→</span><span style="color:${changed ? "var(--c-pos)" : "var(--c-muted)"};font-weight:500">${esc(r.recommended)}</span><span style="text-align:end">${r.restart ? `<span class="tag">restart</span>` : ""}</span></div>`; }).join("")
+        : `<div class="empty">No tuning recommendations.</div>`;
     } catch (e) { stats.innerHTML = `<div style="${cardOpen};padding:14px 16px;grid-column:1/-1"><pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre></div>`; }
   };
   draw();
 };
-function statCards(text, eng) {
-  const find = (re) => { const m = String(text).match(re); return m ? m[1] : null; };
-  const out = [];
-  if (eng === "ch") {
-    const parts = find(/([\d,]+)\s*(?:active\s*)?parts/i), merges = find(/([\d,]+)\s*merge/i), ins = find(/([\d,]+)\s*\/?\s*s|inserts?[^\d]*([\d,]+)/i), comp = find(/([\d.]+)\s*[x×]\s*compress|compress[^\d]*([\d.]+)/i);
-    if (parts) out.push({ label: "Active parts", value: parts, dot: "brand" });
-    if (merges) out.push({ label: "Merge backlog", value: merges, dot: "warn" });
-    if (ins) out.push({ label: "Inserts / s", value: ins, dot: "pos" });
-    if (comp) out.push({ label: "Compression", value: comp + "×", dot: "pos" });
-  } else {
-    const conn = find(/([\d,]+)\s*connection/i), cache = find(/([\d.]+)\s*%?\s*cache/i), lag = find(/lag[^\d]*([\d.]+\s*\w*)/i), size = find(/size[^\d]*([\d.]+\s*\w+)/i);
-    if (conn) out.push({ label: "Connections", value: conn, dot: "brand" });
-    if (cache) out.push({ label: "Cache hit", value: cache + "%", dot: "pos" });
-    if (lag) out.push({ label: "Replication lag", value: lag, dot: "warn" });
-    if (size) out.push({ label: "DB size", value: size, dot: "pos" });
-  }
-  return out;
-}
 
 // ============================================================ remaining screens (faithful, tool-driven)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -286,41 +271,121 @@ function toolPanel(title, tool, args = {}) {
   const load = async () => { body.innerHTML = `<div class="skel" style="width:60%"></div>`; try { renderResult(await runDisplay(tool, args), body); } catch (e) { body.innerHTML = `<pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre>`; } };
   card.querySelector(".refresh").onclick = load; load(); return card;
 }
+// structured grid table (cols = grid-template-columns; rows = arrays of pre-formatted cell HTML)
+function gridTable(cols, headers, rows, empty = "No rows.") {
+  return `<div class="gridhead" style="grid-template-columns:${cols}">${headers.map((h, i) => `<span${i === headers.length - 1 ? ' style="text-align:end"' : ""}>${esc(h)}</span>`).join("")}</div>` +
+    (rows.length ? rows.map((r) => `<div style="display:grid;grid-template-columns:${cols};gap:12px;align-items:center;padding:11px 16px;border-bottom:1px solid var(--c-divider);font-size:12.5px">${r.join("")}</div>`).join("") : `<div class="empty">${esc(empty)}</div>`);
+}
+// data panel backed by a structured /api aggregator (cluster-scoped). render(d) → innerHTML string.
+function dataPanel(title, url, render, headerExtra = "") {
+  const card = el(`<div style="${cardOpen}"><div style="${cardHead};display:flex;align-items:center;justify-content:space-between"><span>${esc(title)}</span><span style="display:flex;align-items:center;gap:8px">${headerExtra}<button class="btn btn-sm refresh">${t("refresh")}</button></span></div><div class="body"><div class="card-pad"><div class="skel" style="width:60%"></div></div></div></div>`);
+  const body = card.querySelector(".body");
+  const load = async () => {
+    body.innerHTML = `<div class="card-pad"><div class="skel" style="width:60%"></div></div>`;
+    try { const u = url + (S.cluster ? (url.includes("?") ? "&" : "?") + "cluster=" + encodeURIComponent(S.cluster) : ""); const d = await api(u); body.innerHTML = d.error ? `<div class="card-pad"><pre class="out" style="color:var(--c-neg)">${esc(d.error)}</pre></div>` : render(d); }
+    catch (e) { body.innerHTML = `<div class="card-pad"><pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre></div>`; }
+  };
+  card.querySelector(".refresh").onclick = load; load(); return card;
+}
 async function action(tool, args = {}) { try { const r = await startJob(tool, args); toast(`Started ${tool}`); openDrawer(r.job.id); } catch (e) { toast(e.message, true); } }
 
 SCREENS.deploys = (c) => {
   c.innerHTML = H(STR[S.lang].nav.deploys, "Releases, rollback, and blue-green across the cluster.");
   const g = el(`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;align-items:start"></div>`); c.appendChild(g);
   const left = el(`<div style="display:flex;flex-direction:column;gap:16px"></div>`);
-  const cur = el(`<div style="${cardOpen};padding:18px 20px"><div style="font-size:12px;color:var(--c-muted);text-transform:uppercase;letter-spacing:.5px">Current deploy</div><div style="display:flex;gap:8px;margin-top:14px">${bigBtn("u", "Update", null, true)}${bigBtn("bg", "Blue-green")}${bigBtn("rb", "Rollback")}</div></div>`);
+  const cur = el(`<div style="${cardOpen};padding:18px 20px"><div style="font-size:12px;color:var(--c-muted);text-transform:uppercase;letter-spacing:.5px">Current deploy</div><div class="verbody" style="margin:10px 0 14px"><div class="skel" style="width:50%"></div></div><div style="display:flex;gap:8px">${bigBtn("u", "Update", null, true)}${bigBtn("bg", "Blue-green")}${bigBtn("rb", "Rollback")}</div></div>`);
   cur.querySelector('[data-act="u"]').onclick = () => action("adpix_update");
   cur.querySelector('[data-act="bg"]').onclick = () => verifyAction({ name: "bluegreen_deploy", title: "Blue-green deploy across the cluster", destructive: true }, {});
-  cur.querySelector('[data-act="rb"]').onclick = () => action("adpix_update");
-  left.append(cur, toolPanel("CI/CD status", "cicd_status"));
-  g.append(left, toolPanel("Cluster status", "cluster_status"));
+  cur.querySelector('[data-act="rb"]').onclick = () => verifyAction({ name: "adpix_update", title: "Rollback (redeploy the previous build)", destructive: false }, {});
+  const cicd = el(`<div style="${cardOpen}"><div style="${cardHead};display:flex;align-items:center;justify-content:space-between">CI / CD pipeline<button class="btn btn-sm refresh">${t("refresh")}</button></div><div class="ccbody"><div class="card-pad"><div class="skel" style="width:60%"></div></div></div></div>`);
+  left.append(cur, cicd);
+  const right = el(`<div></div>`);
+  right.innerHTML = (S.fleet && (S.fleet.nodes.length || S.fleet.cluster.name)) ? `<div style="${cardOpen}">${topologyCard(S.fleet)}</div>` : `<div style="${cardOpen}"><div style="${cardHead}">Cluster topology</div><div class="empty">No cluster defined.</div></div>`;
+  g.append(left, right);
+  const load = async () => {
+    try {
+      const d = await api("/api/deploys");
+      cur.querySelector(".verbody").innerHTML = d.error ? `<span class="muted" style="font-size:13px">${esc(d.error)}</span>` : `<div style="display:flex;align-items:baseline;gap:10px"><span style="font-size:22px;font-weight:400">${esc(d.version.hash || "—")}</span><span class="mono muted" style="font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.version.subject || "")}</span></div><div style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--c-muted);margin-top:6px">${d.autoRollback ? `<span style="color:var(--c-pos)">${ic("check", 14)}</span> auto-rollback on a failed health check` : "auto-rollback off"}${d.version.behind !== "?" && d.version.behind > 0 ? ` · <span style="color:var(--c-warn);font-weight:500">${d.version.behind} behind</span>` : ""}</div>`;
+      const cc = cicd.querySelector(".ccbody");
+      if (d.error) { cc.innerHTML = `<div class="card-pad"><pre class="out" style="color:var(--c-neg)">${esc(d.error)}</pre></div>`; return; }
+      const head = `<div style="display:flex;gap:0;border-bottom:1px solid var(--c-divider)"><div style="flex:1;padding:14px 16px;border-inline-end:1px solid var(--c-divider)"><div style="font-size:11.5px;color:var(--c-muted)">Timer</div><div style="margin-top:5px;font-size:13.5px">${d.timer.enabled ? pill("enabled", "pos") : pill("disabled", "idle")}${d.timer.next ? `<span class="mono muted" style="font-size:11.5px;margin-inline-start:8px">next ${esc(d.timer.next)}</span>` : ""}</div></div><div style="flex:1;padding:14px 16px"><div style="font-size:11.5px;color:var(--c-muted)">Last run</div><div style="margin-top:5px;font-size:13.5px">${d.timer.lastRun ? pill(d.timer.lastRun.result, d.timer.lastRun.result) : `<span class="muted">none yet</span>`}</div></div></div>`;
+      const hist = d.history.length ? `<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--c-hint);padding:10px 16px 6px">Deploy history</div>` + d.history.map((h) => `<div style="display:flex;align-items:center;gap:11px;padding:9px 16px"><span style="width:9px;height:9px;border-radius:50%;border:2px solid var(--c-${sc(h.result)});flex:none"></span><span class="mono" style="font-size:13px;font-weight:500;width:70px">${esc(h.hash || "—")}</span><span style="font-size:12.5px;color:var(--c-${sc(h.result)});flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(h.subject || h.result || "")}</span><span style="font-size:11.5px;color:var(--c-hint)">${esc(h.when)}</span></div>`).join("") : `<div class="empty">No deploys recorded yet.</div>`;
+      cc.innerHTML = head + `<div style="padding:6px 0">${hist}</div>`;
+    } catch (e) { cur.querySelector(".verbody").innerHTML = `<span class="muted">${esc(e.message)}</span>`; cicd.querySelector(".ccbody").innerHTML = `<div class="card-pad"><pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre></div>`; }
+  };
+  cicd.querySelector(".refresh").onclick = load; load();
 };
 SCREENS.ha = (c) => {
   c.innerHTML = H(STR[S.lang].nav.ha, "Witness-anchored quorum: VIP, Postgres, Redis, ClickHouse.", `${bigBtn("standup", "Stand up HA")}${bigBtn("fail", "Failover")}`);
   c.querySelector('[data-act="standup"]').onclick = () => verifyAction({ name: "ha_standup", title: "Stand up the HA quorum", destructive: true }, { mode: "keepalived" });
-  c.querySelector('[data-act="fail"]').onclick = () => toast("Failover: ha_quorum status, then promote via pg_replication.");
+  c.querySelector('[data-act="fail"]').onclick = () => confirmDanger("Promote standby (failover)", `Promote the Postgres standby to PRIMARY. Use this only when the current primary is lost — a double-promote causes split-brain. Confirm by typing the cluster name.`, S.fleet?.cluster?.name || S.cluster || "", async () => { await startDestructive("pg_replication", { mode: "promote" }); toast("Failover (promote) started"); openDrawer(); }, "Promote standby");
   if (S.fleet && (S.fleet.nodes.length || S.fleet.cluster.name)) c.appendChild(el(`<div style="${cardOpen};margin-bottom:16px">${topologyCard(S.fleet)}</div>`));
-  c.appendChild(toolPanel("Quorum status", "ha_quorum", { mode: "status" }));
+  c.appendChild(dataPanel("Quorum status", "/api/ha", (d) => {
+    const head = `<div style="padding:9px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--c-divider)">${pill(cap(d.verdict), d.verdict)}${d.vip ? `<span class="mono muted" style="font-size:12px">VIP ${esc(d.vip)}</span>` : ""}</div>`;
+    const tbl = gridTable("1fr .7fr 1fr 1.1fr .7fr 1fr", ["Member", "Role", "Postgres", "Redis", "Sentinel", "ClickHouse"],
+      d.members.map((m) => [`<span class="mono" style="font-weight:500">${esc(m.name)}</span>`, `<span class="muted">${esc(m.role)}</span>`, `<span class="mono ${m.postgres === "primary" ? "" : "muted"}">${esc(m.postgres)}</span>`, `<span class="mono muted" style="font-size:11.5px">${esc(m.redis)}</span>`, m.sentinel ? `<span style="color:var(--c-pos)">yes</span>` : `<span class="muted">no</span>`, `<span class="mono muted" style="font-size:11.5px">${esc(m.ch)}</span>`]), "No members — define a cluster.");
+    const finds = d.findings.length ? `<div style="padding:12px 16px">${d.findings.map((f) => `<div style="display:flex;gap:8px;padding:4px 0;font-size:12.5px"><span style="color:var(--c-${/SPLIT|no writer|read-only|UNREACH/i.test(f) ? "neg" : "warn"});flex:none">${ic("warn", 14)}</span><span>${esc(f)}</span></div>`).join("")}</div>` : "";
+    return head + tbl + finds;
+  }));
 };
-SCREENS.dns = (c) => { c.innerHTML = H(STR[S.lang].nav.dns, "Required DNS records and client connection configs."); c.appendChild(toolPanel("Required DNS records", "dns_plan")); const x = el(`<div style="margin-top:16px"></div>`); c.appendChild(x); x.appendChild(toolPanel("Client connect configs", "connect_configs")); };
+SCREENS.dns = (c) => {
+  c.innerHTML = H(STR[S.lang].nav.dns, "Required DNS records and client connection configs.");
+  c.appendChild(dataPanel("Required DNS records", "/api/dns", (d) => gridTable("1.3fr .6fr 1.7fr .5fr .7fr .8fr", ["Name", "Type", "Value", "TTL", "Proxied", "Zone"],
+    d.records.map((r) => [
+      `<span class="mono">${esc(r.name)}</span>`,
+      `<span class="mono" style="color:var(--c-brand);font-weight:500">${esc(r.type)}</span>`,
+      `<span class="mono muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.value)}</span>`,
+      `<span class="muted">${r.ttl}</span>`,
+      r.proxied ? `<span style="color:var(--c-pos);font-weight:500">proxied</span>` : `<span class="muted">direct</span>`,
+      `<span class="muted">${esc(r.zone)}</span>`,
+    ]), "No DNS records — define a cluster with hosts.")));
+  const x = el(`<div style="margin-top:16px"></div>`); c.appendChild(x); x.appendChild(toolPanel("Client connect configs", "connect_configs"));
+};
 SCREENS.monitoring = (c) => {
-  c.innerHTML = H(STR[S.lang].nav.monitoring, "Health probes, TLS expiry, host metrics.");
+  c.innerHTML = H(STR[S.lang].nav.monitoring, "Front-door health, TLS expiry, host metrics.");
   const g = el(`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;align-items:start;margin-bottom:16px"></div>`); c.appendChild(g);
-  g.append(toolPanel("Health probes", "health_check"), toolPanel("TLS certificates", "tls_status"));
-  c.appendChild(toolPanel("Host metrics", "system_metrics"));
-  const m = el(`<div style="margin-top:16px;${cardOpen}"><div style="${cardHead};display:flex;align-items:center;justify-content:space-between">PromQL query<span style="font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;background:var(--c-warn-bg);color:var(--c-warn)">metrics_query</span></div><div class="card-pad"><label class="fld"><span class="lab">PromQL (against the witness Prometheus)</span><input class="input mono" id="pq" value="up"></label><button class="btn btn-primary btn-sm" id="pr">Run</button><div class="po" style="margin-top:10px"></div></div></div>`);
+  const probesCard = el(`<div style="${cardOpen}"><div style="${cardHead};display:flex;align-items:center;justify-content:space-between">Health probes<button class="btn btn-sm refresh">${t("refresh")}</button></div><div class="pbody"><div class="card-pad"><div class="skel" style="width:60%"></div></div></div></div>`);
+  const certsCard = el(`<div style="${cardOpen}"><div style="${cardHead}">TLS certificates</div><div class="cbody"><div class="card-pad"><div class="skel" style="width:50%"></div></div></div></div>`);
+  g.append(probesCard, certsCard);
+  const hostsCard = el(`<div style="${cardOpen};margin-bottom:16px"><div style="${cardHead}">Host metrics</div><div class="hbody"></div></div>`);
+  c.appendChild(hostsCard);
+  hostsCard.querySelector(".hbody").innerHTML = (S.fleet?.nodes || []).length ? S.fleet.nodes.map((n) => nodeHealthRow(n)).join("") : `<div class="empty">No servers — host metrics appear once a server is added.</div>`;
+  const load = async () => {
+    probesCard.querySelector(".pbody").innerHTML = `<div class="card-pad"><div class="skel" style="width:60%"></div></div>`;
+    try {
+      const d = await api("/api/monitoring" + (S.cluster ? "?cluster=" + encodeURIComponent(S.cluster) : ""));
+      if (d.error) { probesCard.querySelector(".pbody").innerHTML = `<div class="card-pad"><pre class="out" style="color:var(--c-neg)">${esc(d.error)}</pre></div>`; certsCard.querySelector(".cbody").innerHTML = `<div class="empty">Unavailable.</div>`; return; }
+      probesCard.querySelector(".pbody").innerHTML = gridTable("1.4fr 1fr .6fr .7fr .5fr", ["Route", "Service", "HTTP", "TTFB", ""],
+        d.probes.map((p) => [`<span class="mono" style="font-weight:500">${esc(p.path)}</span>`, `<span class="muted">${esc(p.service)}</span>`, `<span class="mono" style="color:var(--c-${p.ok ? "pos" : "neg"})">${esc(p.http)}</span>`, `<span class="mono muted">${p.ms}ms</span>`, `<span style="text-align:end"><span class="dot" style="display:inline-block;background:var(--c-${p.ok ? "pos" : "neg"})"></span></span>`]), "No probes.");
+      certsCard.querySelector(".cbody").innerHTML = d.certs.length ? d.certs.map((cert) => `<div style="display:flex;align-items:center;gap:11px;padding:13px 16px;border-bottom:1px solid var(--c-divider)"><span style="color:var(--c-${cert.level});flex:none">${ic("lock", 16)}</span><span style="flex:1;font-family:var(--font-mono);font-size:12.5px">${esc(cert.host)}</span><span style="font-size:11.5px;color:var(--c-${cert.level});font-weight:500">${cert.days < 0 ? "expired" : `expires in ${cert.days}d`}</span></div>`).join("") : `<div class="empty">No certificates — define cluster hosts.</div>`;
+    } catch (e) { probesCard.querySelector(".pbody").innerHTML = `<div class="card-pad"><pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre></div>`; }
+  };
+  probesCard.querySelector(".refresh").onclick = load; load();
+  const m = el(`<div style="${cardOpen}"><div style="${cardHead};display:flex;align-items:center;justify-content:space-between">PromQL query<span style="font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;background:var(--c-warn-bg);color:var(--c-warn)">metrics_query</span></div><div class="card-pad"><label class="fld"><span class="lab">PromQL (against the witness Prometheus)</span><input class="input mono" id="pq" value="up"></label><button class="btn btn-primary btn-sm" id="pr">Run</button><div class="po" style="margin-top:10px"></div></div></div>`);
   c.appendChild(m); m.querySelector("#pr").onclick = async () => { const o = m.querySelector(".po"); o.innerHTML = `<span class="spin"></span>`; try { const r = await runTool("metrics_query", { query: m.querySelector("#pq").value }); o.innerHTML = `<pre class="out">${esc(r.result)}</pre>`; } catch (e) { o.innerHTML = `<pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre>`; } };
 };
 SCREENS.security = (c) => {
   c.innerHTML = H(STR[S.lang].nav.security, "Audit findings, hardening, patching, launch gate.", `${bigBtn("h", "Harden (dry-run)")}${bigBtn("p", "Apply patches", null, true)}`);
   c.querySelector('[data-act="h"]').onclick = () => action("harden_server", { apply: false });
   c.querySelector('[data-act="p"]').onclick = () => verifyAction({ name: "patch_system", title: "Apply system patches", destructive: true }, {});
-  c.appendChild(toolPanel("Launch gate", "launch_gate", { mode: "status" }));
-  const x = el(`<div style="margin-top:16px"></div>`); c.appendChild(x); x.appendChild(toolPanel("Security audit", "security_audit"));
+  const wrap = el(`<div style="display:flex;flex-direction:column;gap:16px"></div>`); c.appendChild(wrap);
+  const gateCard = el(`<div style="${cardOpen}"><div style="${cardHead};display:flex;align-items:center;justify-content:space-between">Launch gate<button class="btn btn-sm refresh">${t("refresh")}</button></div><div class="card-pad gbody"><div class="skel" style="width:50%"></div></div></div>`);
+  const auditCard = el(`<div style="${cardOpen}"><div style="${cardHead};display:flex;align-items:center;gap:14px"><span style="flex:none;font-weight:500">Security audit</span><div class="scorewrap" style="flex:1"></div><span class="scoretext mono muted" style="flex:none;font-size:11.5px"></span></div><div class="abody"><div class="card-pad"><div class="skel" style="width:60%"></div></div></div></div>`);
+  wrap.append(gateCard, auditCard);
+  const load = async () => {
+    try {
+      const d = await api("/api/security" + (S.cluster ? "?cluster=" + encodeURIComponent(S.cluster) : ""));
+      if (d.error) { gateCard.querySelector(".gbody").innerHTML = `<pre class="out" style="color:var(--c-neg)">${esc(d.error)}</pre>`; auditCard.querySelector(".abody").innerHTML = `<div class="empty">Audit unavailable.</div>`; return; }
+      const g = d.launchGate;
+      gateCard.querySelector(".gbody").innerHTML = `<div style="display:flex;align-items:center;gap:10px${g.blockers.length ? ";margin-bottom:12px" : ""}">${g.cleared ? pill("cleared", "pos") : pill("blocked", "neg")}${g.reference ? `<span class="mono muted" style="font-size:12px">ref ${esc(g.reference)}</span>` : ""}</div>`
+        + (g.blockers.length ? `<div style="font-size:12.5px;color:var(--c-muted);margin-bottom:6px">${g.blockers.length} release-blocker(s) before go-live:</div>` + g.blockers.map((b) => `<div style="display:flex;gap:8px;padding:6px 0;font-size:12.5px"><span style="color:var(--c-neg);flex:none">${ic("warn", 14)}</span><span>${esc(b)}</span></div>`).join("") : `<div class="muted" style="font-size:12.5px">No blockers — cleared for go-live.</div>`);
+      const total = d.counts.pass + d.counts.warn + d.counts.fail || 1;
+      auditCard.querySelector(".scorewrap").innerHTML = `<div style="display:flex;height:7px;border-radius:999px;overflow:hidden;background:var(--c-sunken)"><div style="width:${d.counts.pass / total * 100}%;background:var(--c-pos)"></div><div style="width:${d.counts.warn / total * 100}%;background:var(--c-warn)"></div><div style="width:${d.counts.fail / total * 100}%;background:var(--c-neg)"></div></div>`;
+      auditCard.querySelector(".scoretext").textContent = `${d.counts.pass} pass · ${d.counts.warn} warn · ${d.counts.fail} fail`;
+      auditCard.querySelector(".abody").innerHTML = d.findings.length ? d.findings.map((f) => { const k = f.level === "PASS" ? "pos" : f.level === "WARN" ? "warn" : "neg"; return `<div style="display:flex;align-items:flex-start;gap:12px;padding:13px 16px;border-bottom:1px solid var(--c-divider)"><span style="width:22px;height:22px;border-radius:50%;background:var(--c-${k}-bg);color:var(--c-${k});display:grid;place-items:center;flex:none;font-size:11px;font-weight:700;margin-top:1px">${f.level[0]}</span><div style="flex:1;min-width:0;font-size:13px">${esc(f.what)}</div><span style="font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;background:var(--c-${k}-bg);color:var(--c-${k})">${f.level}</span></div>`; }).join("") : `<div class="empty">No findings — add a server to audit.</div>`;
+    } catch (e) { gateCard.querySelector(".gbody").innerHTML = `<pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre>`; }
+  };
+  gateCard.querySelector(".refresh").onclick = load; load();
 };
 SCREENS.jobs = async (c) => {
   c.innerHTML = H(STR[S.lang].nav.jobs, "Live jobs and the immutable audit trail.", `<button class="btn btn-sm" data-r>${t("refresh")}</button>`);
@@ -347,7 +412,6 @@ SCREENS.settings = (c) => {
   const a = el(`<div style="display:flex;flex-direction:column;gap:16px"></div>`), b = el(`<div style="display:flex;flex-direction:column;gap:16px"></div>`); grid.append(a, b);
   if (S.me.role === "owner") { a.append(adminUsers(), adminSessions()); b.append(adminAudit(), adminKill()); }
   else a.appendChild(el(`<div style="${cardOpen};padding:16px" class="muted">Signed in as <b>${esc(S.me.username)}</b> · role <b>${esc(S.me.role)}</b>. Admin controls are owner-only.</div>`));
-  b.appendChild(el(`<div style="${cardOpen}"><div style="${cardHead};display:flex;align-items:center;gap:8px">SMTP / email <span style="font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;background:var(--c-warn-bg);color:var(--c-warn)">${t("soon")}</span></div><div class="card-pad muted" style="font-size:13px">Alert digests + reports. Wire an SMTP host in a future release.</div></div>`));
 };
 
 // ============================================================ generic action card

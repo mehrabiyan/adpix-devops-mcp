@@ -15,10 +15,15 @@ import { authorize } from "./rbac.js";
 import { appendAudit, readAudit, verifyChain } from "./audit.js";
 import { argsHash } from "./hash.js";
 import { resolveAccess, parseCookies, SESSION_COOKIE, type Actor, type AccessCtx } from "./access.js";
-import { buildFleet, parseTuneRows, listClusters } from "./fleet.js";
+import { buildFleet, listClusters } from "./fleet.js";
 import { diagnoseServer } from "./diagnose.js";
+import { buildDnsView } from "./aggregate/dns.js";
+import { buildDbView } from "./aggregate/db.js";
+import { buildSecurityView } from "./aggregate/security.js";
+import { buildMonitorView } from "./aggregate/monitor.js";
+import { buildQuorumView } from "./aggregate/cluster.js";
+import { buildDeployView } from "./aggregate/deploy.js";
 import { classifyError } from "./errors.js";
-import { isDemo, DEMO_FLEET, DEMO_JOBS, demoDb, demoTool, DEMO_DIAGNOSIS } from "./demo.js";
 import { loadRegistry, saveRegistry } from "../registry.js";
 import { mcpKeyPath } from "../install/steps.js";
 import { shq } from "../util.js";
@@ -139,35 +144,62 @@ export function createPanelServer(opts: PanelOpts): Server {
 
       // ---- structured fleet model (dashboard + servers); cluster-scoped ----
       if (path === "/api/fleet" && method === "GET") {
-        if (isDemo()) { sendJson(res, 200, DEMO_FLEET); return; }
         try { sendJson(res, 200, await buildFleet(deps, engine.list(), url.searchParams.get("cluster") ?? undefined)); }
         catch (e) { sendJson(res, 200, { cluster: { name: "", vip: "", servers: 0 }, counts: { healthy: 0, degraded: 0, down: 0, activeJobs: 0 }, nodes: [], recentJobs: [], alerts: [], error: classifyError(e).message }); }
         return;
       }
       // ---- clusters (for the switcher) ----
       if (path === "/api/clusters" && method === "GET") {
-        if (isDemo()) { sendJson(res, 200, { clusters: [{ name: "prod", witness: "witness", nodes: ["node-a", "node-b"], vip: "10.0.0.10" }] }); return; }
         sendJson(res, 200, { clusters: listClusters() });
         return;
       }
-      // ---- databases view (stat cards + tune diff) ----
+      // ---- DNS records (structured) ----
+      if (path === "/api/dns" && method === "GET") {
+        const az = authorize(actor.role, actor.scopes, catByName.get("dns_plan")!, {});
+        if (!az.ok) { sendJson(res, 403, { error: az.reason }); return; }
+        sendJson(res, 200, buildDnsView(url.searchParams.get("cluster") ?? undefined));
+        return;
+      }
+      // ---- security audit + launch gate (structured) ----
+      if (path === "/api/security" && method === "GET") {
+        const az = authorize(actor.role, actor.scopes, catByName.get("security_audit")!, {});
+        if (!az.ok) { sendJson(res, 403, { error: az.reason }); return; }
+        sendJson(res, 200, await buildSecurityView(deps, url.searchParams.get("server") ?? undefined));
+        return;
+      }
+      // ---- monitoring: front-door probes + TLS expiry (structured) ----
+      if (path === "/api/monitoring" && method === "GET") {
+        const az = authorize(actor.role, actor.scopes, catByName.get("health_check")!, {});
+        if (!az.ok) { sendJson(res, 403, { error: az.reason }); return; }
+        sendJson(res, 200, await buildMonitorView(deps, url.searchParams.get("server") ?? undefined, url.searchParams.get("cluster") ?? undefined));
+        return;
+      }
+      // ---- HA quorum (structured) ----
+      if (path === "/api/ha" && method === "GET") {
+        const az = authorize(actor.role, actor.scopes, catByName.get("ha_quorum")!, {});
+        if (!az.ok) { sendJson(res, 403, { error: az.reason }); return; }
+        sendJson(res, 200, await buildQuorumView(deps, url.searchParams.get("cluster") ?? undefined));
+        return;
+      }
+      // ---- deploys: version + CI/CD + history (structured) ----
+      if (path === "/api/deploys" && method === "GET") {
+        const az = authorize(actor.role, actor.scopes, catByName.get("cicd_status")!, {});
+        if (!az.ok) { sendJson(res, 403, { error: az.reason }); return; }
+        sendJson(res, 200, await buildDeployView(deps, url.searchParams.get("server") ?? undefined));
+        return;
+      }
+      // ---- databases view (structured stat cards + tune diff) ----
       if (path === "/api/db" && method === "GET") {
         const eng = url.searchParams.get("engine") === "ch" ? "ch" : "pg";
-        if (isDemo()) { sendJson(res, 200, demoDb(eng)); return; }
-        const health = toolByName.get(`${eng}_health`); const tune = toolByName.get(`${eng}_tune`);
         const az = authorize(actor.role, actor.scopes, catByName.get(`${eng}_health`)!, {});
         if (!az.ok) { sendJson(res, 403, { error: az.reason }); return; }
-        let healthText = "", tuneText = "";
-        try { healthText = await health!.handler(deps, {}); } catch (e) { healthText = String(e); }
-        try { tuneText = await tune!.handler(deps, { apply: false }); } catch (e) { tuneText = String(e); }
-        sendJson(res, 200, { engine: eng, healthText, tuneText, tuneRows: parseTuneRows(tuneText) });
+        sendJson(res, 200, await buildDbView(deps, eng, url.searchParams.get("server") ?? undefined));
         return;
       }
       // ---- add-server wizard: full connectivity DIAGNOSIS (key or password) ----
       if ((path === "/api/wizard/diagnose" || path === "/api/wizard/verify-server") && method === "POST") {
         if (!["owner", "operator"].includes(actor.role)) { sendJson(res, 403, { error: "owner/operator only" }); return; }
         const b = await readBody(req);
-        if (isDemo()) { sendJson(res, 200, DEMO_DIAGNOSIS); return; }
         try {
           const diag = await diagnoseServer(deps, { host: String(b.host || ""), port: Number(b.port) || 22, username: String(b.username || "root"), password: b.password ? String(b.password) : undefined, privateKeyPath: b.privateKeyPath ? String(b.privateKeyPath) : undefined });
           sendJson(res, 200, diag);
@@ -181,7 +213,6 @@ export function createPanelServer(opts: PanelOpts): Server {
         const name = String(b.name || ""); const host = String(b.host || ""); const port = Number(b.port) || 22; const username = String(b.username || "root");
         const role = b.role === "witness" ? "witness" : "node"; const clusterName = b.cluster ? String(b.cluster) : "";
         if (!name || !host) { sendJson(res, 400, { error: "name + host are required" }); return; }
-        if (isDemo()) { audit(actor, "panel.add-server", name, { host }, "demo add"); sendJson(res, 200, { ok: true, result: `Demo: would add ${name} (${username}@${host}:${port}) as ${role}${clusterName ? " in cluster " + clusterName : ""}.` }); return; }
         try {
           let keyPath = b.privateKeyPath ? String(b.privateKeyPath) : "";
           if (b.password) {
@@ -219,13 +250,6 @@ export function createPanelServer(opts: PanelOpts): Server {
       if (syncM && method === "POST") {
         const tool = toolByName.get(syncM[1]); const cat = catByName.get(syncM[1]);
         if (!tool || !cat) { sendJson(res, 404, { error: `unknown tool` }); return; }
-        if (isDemo()) {
-          const d = demoTool(tool.name);
-          const b0 = await readBody(req); const p0 = z.object(tool.schema).safeParse((b0.args as Record<string, unknown>) ?? {});
-          try { sendJson(res, 200, { result: d ?? (await tool.handler(deps, p0.success ? (p0.data as Record<string, unknown>) : {})) }); }
-          catch (e) { sendJson(res, 200, { result: `ERROR (${tool.name}): ${e instanceof Error ? e.message : String(e)}`, isError: true }); }
-          return;
-        }
         if (!cat.readOnly) { sendJson(res, 409, { error: `${tool.name} is not read-only — POST it to /api/jobs` }); return; }
         const b = await readBody(req); const args = (b.args as Record<string, unknown>) ?? {};
         const az = authorize(actor.role, actor.scopes, cat, args);
@@ -258,7 +282,6 @@ export function createPanelServer(opts: PanelOpts): Server {
         const b = await readBody(req); const tool = b.tool ? toolByName.get(String(b.tool)) : undefined; const cat = b.tool ? catByName.get(String(b.tool)) : undefined;
         const args = (b.args as Record<string, unknown>) ?? {};
         if (!tool || !cat) { sendJson(res, 404, { error: `unknown tool "${b.tool}"` }); return; }
-        if (isDemo()) { sendJson(res, 202, { job: { id: "demo" + ([...DEMO_JOBS].length) + "-" + tool.name, tool: tool.name, args: {}, status: "succeeded", key: "demo", createdAt: new Date(0).toISOString(), logTail: ["demo mode — action not executed against a real fleet"] } }); return; }
         const az = authorize(actor.role, actor.scopes, cat, args);
         if (!az.ok) { audit(actor, tool.name, targetOf(args), args, `denied: ${az.reason}`); sendJson(res, 403, { error: az.reason }); return; }
         if (killed && cat.destructive) { sendJson(res, 423, { error: "kill-switch engaged — destructive ops are disabled" }); return; }
@@ -272,7 +295,7 @@ export function createPanelServer(opts: PanelOpts): Server {
         sendJson(res, 202, { job: r });
         return;
       }
-      if (path === "/api/jobs" && method === "GET") { sendJson(res, 200, { jobs: isDemo() ? DEMO_JOBS : engine.list() }); return; }
+      if (path === "/api/jobs" && method === "GET") { sendJson(res, 200, { jobs: engine.list() }); return; }
 
       const idM = path.match(/^\/api\/jobs\/([a-f0-9-]+)(\/cancel|\/stream)?$/);
       if (idM) {

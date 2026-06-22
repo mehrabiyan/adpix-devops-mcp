@@ -23,12 +23,12 @@ const SSH_HARDENING_CONTENT = [
   "ClientAliveCountMax 4",
 ].join("\\n");
 
-interface AuditFinding {
+export interface AuditFinding {
   level: "PASS" | "WARN" | "FAIL";
   what: string;
 }
 
-async function runAudit(s: Session, srv: ServerConfig): Promise<AuditFinding[]> {
+export async function runAudit(s: Session, srv: ServerConfig): Promise<AuditFinding[]> {
   const r = await s.exec(
     [
       `echo ===SSHD; sshd -T 2>/dev/null | grep -E '^(permitrootlogin|passwordauthentication) ' || grep -rhiE '^\\s*(PermitRootLogin|PasswordAuthentication)\\b' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/ 2>/dev/null || echo unknown`,
