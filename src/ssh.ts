@@ -42,10 +42,17 @@ interface Auth {
   config: Partial<ConnectConfig>;
 }
 
-function buildAuth(server: ServerConfig): Auth {
+function buildAuth(server: ServerConfig, opts: ConnectOpts = {}): Auth {
   const passphrase = process.env.ADPIX_SSH_PASSPHRASE;
-  if (server.privateKeyPath) {
-    const p = expandHome(server.privateKeyPath);
+  // explicit overrides (ad-hoc connect for diagnosis / bootstrap) take precedence over the
+  // persisted config + agent/default keys, so a password connect is never silently replaced
+  // by the operator's own SSH key.
+  if (opts.password) {
+    return { method: "password", config: { password: opts.password } };
+  }
+  const keyPath = opts.privateKeyPathOverride ?? server.privateKeyPath;
+  if (keyPath) {
+    const p = expandHome(keyPath);
     if (!fs.existsSync(p)) {
       throw new Error(`Private key not found at ${p} (server "${server.name}").`);
     }
@@ -68,13 +75,17 @@ function buildAuth(server: ServerConfig): Auth {
   );
 }
 
-/** Per-connection host-key strictness. Strict refuses an unpinned host (used by the installer's verify-reconnect). */
+/** Per-connection host-key strictness + ad-hoc auth overrides (diagnosis / password bootstrap). */
 export interface ConnectOpts {
   strictHostKey?: boolean;
+  /** Ad-hoc password auth (never persisted) — forces password method, bypassing keys/agent. */
+  password?: string;
+  /** Ad-hoc private-key path (e.g. the MCP key) — overrides the server's stored path. */
+  privateKeyPathOverride?: string;
 }
 
 export async function connect(server: ServerConfig, opts: ConnectOpts = {}): Promise<Session> {
-  const auth = buildAuth(server);
+  const auth = buildAuth(server, opts);
   const conn = new Client();
   // Host-key verification: TOFU-pin by default, strict on demand. Before this the MCP
   // verified NOTHING and accepted any host key — MITM-able.

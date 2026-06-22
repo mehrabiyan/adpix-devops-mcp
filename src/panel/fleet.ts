@@ -50,16 +50,32 @@ function statusOf(p: { reachable: boolean; cpu: number; mem: number; disk: numbe
   return "healthy";
 }
 
-export async function buildFleet(deps: Deps, jobs: JobRecord[]): Promise<Fleet> {
+/** Run an async fn over items with a bounded worker pool (so 50 servers don't open 50 SSH at once). */
+async function mapLimit<T, R>(items: T[], limit: number, fn: (x: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let i = 0;
+  const worker = async () => { while (i < items.length) { const idx = i++; out[idx] = await fn(items[idx]); } };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
+
+/** List every defined cluster (name + members) — drives the cluster switcher. */
+export function listClusters(): { name: string; witness?: string; nodes: string[]; vip?: string }[] {
+  const reg = loadRegistry();
+  return Object.entries(reg.clusters ?? {}).map(([name, c]) => ({ name, witness: c.witness, nodes: c.nodes ?? [], vip: c.vip }));
+}
+
+export async function buildFleet(deps: Deps, jobs: JobRecord[], clusterName?: string): Promise<Fleet> {
   const reg = loadRegistry();
   const names = Object.keys(reg.servers);
-  const clEntry = reg.clusters ? Object.entries(reg.clusters)[0] : undefined;
-  const clusterName = clEntry?.[0] ?? "";
+  const entries = Object.entries(reg.clusters ?? {});
+  const clEntry = (clusterName ? entries.find(([n]) => n === clusterName) : undefined) ?? entries[0];
+  const selectedName = clEntry?.[0] ?? "";
   const cluster = clEntry?.[1] as Omit<ClusterConfig, "name"> | undefined;
   const witness = cluster?.witness;
   const clusterNodes = cluster?.nodes ?? [];
 
-  const probes = await Promise.all(names.map((n) => probeNode(deps, n)));
+  const probes = await mapLimit(names, 8, (n) => probeNode(deps, n));
   const nodes: NodeInfo[] = names.map((name, i) => {
     const p = probes[i]; const srv = reg.servers[name];
     const role: NodeInfo["role"] = name === witness ? "witness" : clusterNodes.includes(name) ? "node" : "—";
@@ -84,7 +100,7 @@ export async function buildFleet(deps: Deps, jobs: JobRecord[]): Promise<Fleet> 
     else if (n.status === "degraded") alerts.push({ title: `${n.name} under pressure`, why: `cpu ${n.cpu}% · mem ${n.mem}% · disk ${n.disk}%`, level: "warn", action: { tool: "system_metrics", label: "Inspect" } });
   }
 
-  return { cluster: { name: clusterName, vip: cluster?.vip ?? "", servers: names.length }, counts, nodes, recentJobs, alerts };
+  return { cluster: { name: selectedName, vip: cluster?.vip ?? "", servers: names.length }, counts, nodes, recentJobs, alerts };
 }
 
 /** Verify reachability of an (often not-yet-registered) host + return its SSH host-key

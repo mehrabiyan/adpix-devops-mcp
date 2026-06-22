@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { buildFleet, verifyServer, parseTuneRows } from "../src/panel/fleet.js";
+import { buildFleet, verifyServer, parseTuneRows, listClusters } from "../src/panel/fleet.js";
 import { saveRegistry, loadRegistry, resolveServer } from "../src/registry.js";
 import type { Deps } from "../src/deps.js";
 import type { ExecResult, Session } from "../src/ssh.js";
@@ -91,6 +91,41 @@ describe("fleet — registry shapes", () => {
     ];
     const f = await buildFleet(deps({ x: "Linux|1|0.1|10|10" }), jobs);
     expect(f.counts.activeJobs).toBe(2);
+  });
+});
+
+describe("fleet — multiple clusters", () => {
+  function twoClusters() {
+    const s: Record<string, { host: string; port: number; username: string; adpixDir: string }> = {};
+    ["w1", "a", "w2", "b"].forEach((n, i) => (s[n] = { host: `10.0.0.${i + 1}`, port: 22, username: "root", adpixDir: "/opt/adpix" }));
+    saveRegistry({ version: 1, servers: s });
+    const r = loadRegistry();
+    r.clusters = { east: { witness: "w1", nodes: ["a"], hosts: [], idpIssuer: "x", vip: "10.0.0.100" }, west: { witness: "w2", nodes: ["b"], hosts: [], idpIssuer: "x", vip: "10.0.0.200" } };
+    saveRegistry(r);
+  }
+  const allUp = deps({ w1: "L|1|0.1|10|10", a: "L|1|0.1|10|10", w2: "L|1|0.1|10|10", b: "L|1|0.1|10|10" });
+  it("listClusters returns every defined cluster", () => {
+    twoClusters();
+    const cs = listClusters();
+    expect(cs.map((c) => c.name).sort()).toEqual(["east", "west"]);
+    expect(cs.find((c) => c.name === "west")!.vip).toBe("10.0.0.200");
+  });
+  it("buildFleet scopes roles to the SELECTED cluster", async () => {
+    twoClusters();
+    const f = await buildFleet(allUp, [], "west");
+    expect(f.cluster.name).toBe("west");
+    const by = Object.fromEntries(f.nodes.map((n) => [n.name, n.role]));
+    expect(by.w2).toBe("witness"); expect(by.b).toBe("node");
+    expect(by.w1).toBe("—"); expect(by.a).toBe("—"); // not in 'west'
+  });
+  it("defaults to the first cluster when none is named", async () => {
+    twoClusters();
+    expect((await buildFleet(allUp, [])).cluster.name).toBe("east");
+  });
+  it("probes ALL servers regardless of cluster selection", async () => {
+    twoClusters();
+    const f = await buildFleet(allUp, [], "west");
+    expect(f.nodes.length).toBe(4);
   });
 });
 

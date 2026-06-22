@@ -1,15 +1,16 @@
 import { execFile } from "node:child_process";
 import { resolveServer, type ServerConfig } from "./registry.js";
-import { connect, type ExecResult, type Session } from "./ssh.js";
+import { connect, type ConnectOpts, type ExecResult, type Session } from "./ssh.js";
 
 /**
  * Dependency seam: tools talk to servers only through `Deps`, so tests swap in
  * a fake session and never touch the network. `local` runs on the machine
- * hosting THIS MCP process (used by mcp_self_update).
+ * hosting THIS MCP process (used by mcp_self_update). connect() accepts optional
+ * ConnectOpts for ad-hoc auth (password/key overrides during diagnosis/bootstrap).
  */
 export interface Deps {
   resolve(name?: string): ServerConfig;
-  connect(server: ServerConfig): Promise<Session>;
+  connect(server: ServerConfig, opts?: ConnectOpts): Promise<Session>;
   local(cmd: string, opts?: { timeoutMs?: number }): Promise<ExecResult>;
 }
 

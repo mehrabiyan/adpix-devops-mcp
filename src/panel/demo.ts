@@ -70,3 +70,19 @@ const DEMO_TOOL: Record<string, string> = {
 export function demoTool(name: string): string | null {
   return DEMO_TOOL[name] ?? null;
 }
+
+/** A passing connectivity diagnosis for the add-server wizard in demo mode. */
+export const DEMO_DIAGNOSIS = {
+  reachable: true,
+  fingerprint: "SHA256:DEMOd3m0F1nG3rPr1ntAbC123dEm0XyZ",
+  canAdd: true,
+  summary: "Reachable and ready to add.",
+  checks: [
+    { name: "SSH connection", ok: true, detail: "connected as root@10.0.0.13:22", soft: false },
+    { name: "Host key", ok: true, detail: "SHA256:DEMOd3m0F1nG3rPr1ntAbC123dEm0XyZ", soft: false },
+    { name: "Privilege", ok: true, detail: "root access", soft: false },
+    { name: "Operating system", ok: true, detail: "Ubuntu 24.04 LTS", soft: true },
+    { name: "Docker", ok: true, detail: "Docker version 27.1.1", soft: true },
+    { name: "Disk space", ok: true, detail: "182G free, 18% used", soft: true },
+  ],
+};

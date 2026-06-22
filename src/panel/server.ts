@@ -15,8 +15,13 @@ import { authorize } from "./rbac.js";
 import { appendAudit, readAudit, verifyChain } from "./audit.js";
 import { argsHash } from "./hash.js";
 import { resolveAccess, parseCookies, SESSION_COOKIE, type Actor, type AccessCtx } from "./access.js";
-import { buildFleet, verifyServer, parseTuneRows } from "./fleet.js";
-import { isDemo, DEMO_FLEET, DEMO_JOBS, demoDb, demoTool } from "./demo.js";
+import { buildFleet, parseTuneRows, listClusters } from "./fleet.js";
+import { diagnoseServer } from "./diagnose.js";
+import { classifyError } from "./errors.js";
+import { isDemo, DEMO_FLEET, DEMO_JOBS, demoDb, demoTool, DEMO_DIAGNOSIS } from "./demo.js";
+import { loadRegistry, saveRegistry } from "../registry.js";
+import { mcpKeyPath } from "../install/steps.js";
+import { shq } from "../util.js";
 
 /**
  * The control-panel HTTP server. Phase 1 (loopback job engine + SPA) + Phase 2 hardening:
@@ -132,11 +137,17 @@ export function createPanelServer(opts: PanelOpts): Server {
       }
       if (path === "/api/catalog" && method === "GET") { sendJson(res, 200, { tools: buildCatalog() }); return; }
 
-      // ---- structured fleet model (dashboard + servers) ----
+      // ---- structured fleet model (dashboard + servers); cluster-scoped ----
       if (path === "/api/fleet" && method === "GET") {
         if (isDemo()) { sendJson(res, 200, DEMO_FLEET); return; }
-        try { sendJson(res, 200, await buildFleet(deps, engine.list())); }
-        catch (e) { sendJson(res, 200, { cluster: { name: "", vip: "", servers: 0 }, counts: { healthy: 0, degraded: 0, down: 0, activeJobs: 0 }, nodes: [], recentJobs: [], alerts: [], error: (e as Error).message }); }
+        try { sendJson(res, 200, await buildFleet(deps, engine.list(), url.searchParams.get("cluster") ?? undefined)); }
+        catch (e) { sendJson(res, 200, { cluster: { name: "", vip: "", servers: 0 }, counts: { healthy: 0, degraded: 0, down: 0, activeJobs: 0 }, nodes: [], recentJobs: [], alerts: [], error: classifyError(e).message }); }
+        return;
+      }
+      // ---- clusters (for the switcher) ----
+      if (path === "/api/clusters" && method === "GET") {
+        if (isDemo()) { sendJson(res, 200, { clusters: [{ name: "prod", witness: "witness", nodes: ["node-a", "node-b"], vip: "10.0.0.10" }] }); return; }
+        sendJson(res, 200, { clusters: listClusters() });
         return;
       }
       // ---- databases view (stat cards + tune diff) ----
@@ -152,12 +163,48 @@ export function createPanelServer(opts: PanelOpts): Server {
         sendJson(res, 200, { engine: eng, healthText, tuneText, tuneRows: parseTuneRows(tuneText) });
         return;
       }
-      // ---- add-server wizard: verify SSH (ad-hoc connect + fingerprint) ----
-      if (path === "/api/wizard/verify-server" && method === "POST") {
+      // ---- add-server wizard: full connectivity DIAGNOSIS (key or password) ----
+      if ((path === "/api/wizard/diagnose" || path === "/api/wizard/verify-server") && method === "POST") {
         if (!["owner", "operator"].includes(actor.role)) { sendJson(res, 403, { error: "owner/operator only" }); return; }
         const b = await readBody(req);
-        if (isDemo()) { sendJson(res, 200, { reachable: true, fingerprint: "SHA256:DEMOd3m0F1nG3rPr1ntAbC123dEm0XyZ", detail: `ok\nroot\nLinux 6.8.0 (demo)` }); return; }
-        sendJson(res, 200, await verifyServer(deps, { host: String(b.host || ""), port: Number(b.port) || 22, username: String(b.username || "root") }));
+        if (isDemo()) { sendJson(res, 200, DEMO_DIAGNOSIS); return; }
+        try {
+          const diag = await diagnoseServer(deps, { host: String(b.host || ""), port: Number(b.port) || 22, username: String(b.username || "root"), password: b.password ? String(b.password) : undefined, privateKeyPath: b.privateKeyPath ? String(b.privateKeyPath) : undefined });
+          sendJson(res, 200, diag);
+        } catch (e) { sendJson(res, 200, { reachable: false, fingerprint: "", checks: [{ name: "Diagnose", ok: false, detail: classifyError(e).message, soft: false }], summary: classifyError(e).message, canAdd: false }); }
+        return;
+      }
+      // ---- add a server (diagnosed first); if password-auth, authorize the MCP key then store the KEY PATH ----
+      if (path === "/api/wizard/add-server" && method === "POST") {
+        if (!["owner"].includes(actor.role)) { sendJson(res, 403, { error: "owner only" }); return; }
+        const b = await readBody(req);
+        const name = String(b.name || ""); const host = String(b.host || ""); const port = Number(b.port) || 22; const username = String(b.username || "root");
+        const role = b.role === "witness" ? "witness" : "node"; const clusterName = b.cluster ? String(b.cluster) : "";
+        if (!name || !host) { sendJson(res, 400, { error: "name + host are required" }); return; }
+        if (isDemo()) { audit(actor, "panel.add-server", name, { host }, "demo add"); sendJson(res, 200, { ok: true, result: `Demo: would add ${name} (${username}@${host}:${port}) as ${role}${clusterName ? " in cluster " + clusterName : ""}.` }); return; }
+        try {
+          let keyPath = b.privateKeyPath ? String(b.privateKeyPath) : "";
+          if (b.password) {
+            // password bootstrap: append the MCP public key to the target's authorized_keys, then forget the password
+            const pub = (await deps.local(`cat ${shq(mcpKeyPath() + ".pub")} 2>/dev/null || true`)).stdout.trim();
+            if (!pub.startsWith("ssh-")) { sendJson(res, 400, { error: `MCP public key not found at ${mcpKeyPath()}.pub — run the host installer first, or add with a key path.` }); return; }
+            const s = await deps.connect({ name, host, port, username, adpixDir: "/opt/adpix" }, { password: String(b.password) });
+            try { await s.exec(`umask 077; mkdir -p ~/.ssh; touch ~/.ssh/authorized_keys; grep -qxF ${shq(pub)} ~/.ssh/authorized_keys || echo ${shq(pub)} >> ~/.ssh/authorized_keys; echo OK`, { timeoutMs: 15000 }); } finally { s.close(); }
+            keyPath = mcpKeyPath();
+          }
+          const addTool = toolByName.get("server_add")!;
+          const result = await addTool.handler(deps, { name, host, port, username, privateKeyPath: keyPath || undefined, verify: !b.password && !keyPath ? false : true });
+          // assign to a cluster (create if new)
+          if (clusterName) {
+            const reg = loadRegistry();
+            reg.clusters = reg.clusters ?? {};
+            const c = reg.clusters[clusterName] ?? { nodes: [], hosts: [], idpIssuer: "https://account.adpix.io" };
+            if (role === "witness") c.witness = name; else if (!c.nodes.includes(name)) c.nodes.push(name);
+            reg.clusters[clusterName] = c; saveRegistry(reg);
+          }
+          audit(actor, "panel.add-server", name, { host, role, cluster: clusterName }, "added");
+          sendJson(res, 200, { ok: true, result });
+        } catch (e) { sendJson(res, 400, { error: classifyError(e).message }); }
         return;
       }
 

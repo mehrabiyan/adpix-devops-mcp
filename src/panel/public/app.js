@@ -55,7 +55,7 @@ const LOGO = `<svg viewBox="0 0 150 130" width="26" height="22"><rect x="6" y="4
 
 // ============================================================ nav + state + utils
 const NAV = [{ grp: "overview", items: ["dashboard"] }, { grp: "fleet", items: ["servers", "ha"] }, { grp: "data", items: ["databases", "backups"] }, { grp: "delivery", items: ["deploys", "dns"] }, { grp: "observe", items: ["monitoring", "jobs"] }, { grp: "govern", items: ["security", "settings"] }];
-const S = { lang: localStorage.getItem("adpix_lang") || "en", theme: localStorage.getItem("adpix_theme") || "light", screen: "dashboard", collapsed: false, catalog: [], mode: "token", csrf: "", me: { username: "local", role: "owner" }, sd: null, fleet: null };
+const S = { lang: localStorage.getItem("adpix_lang") || "en", theme: localStorage.getItem("adpix_theme") || "light", screen: "dashboard", collapsed: false, catalog: [], mode: "token", csrf: "", me: { username: "local", role: "owner" }, sd: null, fleet: null, cluster: "", clusters: [] };
 const el = (h) => { const d = document.createElement("div"); d.innerHTML = h.trim(); return d.firstElementChild; };
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 function toast(m, err = false) { let w = document.querySelector(".toasts"); if (!w) { w = el(`<div class="toasts"></div>`); document.body.appendChild(w); } const tt = el(`<div class="toast ${err ? "err" : ""}">${esc(m)}</div>`); w.appendChild(tt); setTimeout(() => tt.remove(), 4200); }
@@ -98,7 +98,7 @@ function render() {
   app.querySelector("#lang").onclick = () => { S.lang = S.lang === "en" ? "fa" : "en"; localStorage.setItem("adpix_lang", S.lang); render(); };
   app.querySelector("#activity").onclick = () => openDrawer();
   app.querySelector("#palette").onclick = openPalette;
-  app.querySelector(".cluster-pill").onclick = () => { S.screen = "ha"; render(); };
+  app.querySelector(".cluster-pill").onclick = (e) => clusterMenu(e.currentTarget);
   app.querySelector("#account").onclick = async () => { if (S.mode !== "session") return toast(`${S.me.username} · ${S.me.role} (token mode)`); if (confirm(`Log out ${S.me.username}?`)) { try { await api("/api/logout", { method: "POST", body: "{}" }); } catch {} location.reload(); } };
   (SCREENS[S.screen] || SCREENS.dashboard)(document.getElementById("content"));
 }
@@ -114,7 +114,24 @@ const cardHead = `padding:13px 16px;border-bottom:1px solid var(--c-divider);fon
 function bigBtn(id, label, icon, primary) { return `<button data-act="${id}" style="display:inline-flex;align-items:center;gap:7px;height:38px;padding-inline:15px;border:${primary ? "0" : "1px solid var(--c-border)"};background:${primary ? "var(--c-brand)" : "var(--c-card)"};color:${primary ? "#fff" : "var(--c-text)"};border-radius:8px;cursor:pointer;font:inherit;font-size:13px;font-weight:${primary ? 600 : 500};box-shadow:var(--c-shadow-card);white-space:nowrap">${icon ? ic(icon, 15) : ""}${esc(label)}</button>`; }
 
 // ============================================================ data fetch
-async function loadFleet() { try { S.fleet = await api("/api/fleet"); } catch { S.fleet = null; } }
+async function loadFleet() { try { S.fleet = await api("/api/fleet" + (S.cluster ? "?cluster=" + encodeURIComponent(S.cluster) : "")); } catch { S.fleet = null; } }
+async function loadClusters() { try { S.clusters = (await api("/api/clusters")).clusters || []; } catch { S.clusters = []; } }
+
+// cluster switcher popover
+function clusterMenu(anchor) {
+  document.querySelector(".popmenu")?.remove();
+  const r = anchor.getBoundingClientRect();
+  const items = [{ name: "", label: "All / default" }, ...S.clusters.map((c) => ({ name: c.name, label: c.name, sub: `${c.nodes.length} nodes${c.vip ? " · " + c.vip : ""}` }))];
+  const m = el(`<div class="popmenu" style="position:fixed;top:${r.bottom + 6}px;inset-inline-start:${r.left}px;min-width:220px;background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-menu);z-index:80;padding:6px">
+    ${items.map((it) => `<div class="ci" data-c="${esc(it.name)}" style="display:flex;align-items:center;gap:9px;padding:9px 11px;border-radius:8px;cursor:pointer;${it.name === S.cluster ? "background:var(--c-brand-tint)" : ""}"><span style="width:7px;height:7px;border-radius:50%;background:${it.name === S.cluster ? "var(--c-brand)" : "var(--c-idle)"}"></span><div style="flex:1"><div style="font-size:13px;font-weight:500">${esc(it.label)}</div>${it.sub ? `<div class="muted" style="font-size:11px">${esc(it.sub)}</div>` : ""}</div></div>`).join("")}
+    ${S.me.role === "owner" ? `<div style="border-top:1px solid var(--c-divider);margin-top:6px;padding-top:6px"><div class="addsrv" style="display:flex;align-items:center;gap:9px;padding:9px 11px;border-radius:8px;cursor:pointer;color:var(--c-brand)">${ic("plus", 15)}<span style="font-size:13px;font-weight:500">Add server</span></div></div>` : ""}</div>`);
+  document.body.appendChild(m);
+  const close = () => { m.remove(); document.removeEventListener("click", onDoc, true); };
+  const onDoc = (ev) => { if (!m.contains(ev.target) && !anchor.contains(ev.target)) close(); };
+  setTimeout(() => document.addEventListener("click", onDoc, true), 0);
+  m.querySelectorAll("[data-c]").forEach((x) => (x.onclick = async () => { S.cluster = x.dataset.c; close(); await loadFleet(); render(); }));
+  m.querySelector(".addsrv")?.addEventListener("click", () => { close(); addServerWizard(); });
+}
 
 // ============================================================ DASHBOARD
 const SCREENS = {};
@@ -178,10 +195,11 @@ SCREENS.servers = (c) => {
 SCREENS.serverDetail = (c) => {
   const name = S.sd; const n = (S.fleet?.nodes || []).find((x) => x.name === name) || { name, host: "", os: "", status: "idle", cpu: 0, mem: 0, disk: 0 };
   c.innerHTML = `<button data-back style="display:inline-flex;align-items:center;gap:6px;border:0;background:transparent;color:var(--c-muted);font:inherit;font-size:12.5px;cursor:pointer;margin-bottom:12px;padding:0">${ic("chevL", 15)} ${STR[S.lang].nav.servers}</button>`
-    + `<div style="display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:18px"><div style="flex:1;min-width:220px"><div style="display:flex;align-items:center;gap:10px"><h1 style="margin:0;font-size:22px;font-weight:500;font-family:var(--font-mono)">${esc(name)}</h1>${pill(cap(n.status), n.status)}</div><div style="color:var(--c-muted);font-size:13px;margin-top:5px;font-family:var(--font-mono)">${esc(n.host)} · ${esc(n.os)}</div></div><div style="display:flex;gap:8px">${bigBtn("backup", "Backup now")}${bigBtn("restart", "Restart all")}</div></div>`;
+    + `<div style="display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:18px"><div style="flex:1;min-width:220px"><div style="display:flex;align-items:center;gap:10px"><h1 style="margin:0;font-size:22px;font-weight:500;font-family:var(--font-mono)">${esc(name)}</h1>${pill(cap(n.status), n.status)}</div><div style="color:var(--c-muted);font-size:13px;margin-top:5px;font-family:var(--font-mono)">${esc(n.host)} · ${esc(n.os)}</div></div><div style="display:flex;gap:8px">${bigBtn("backup", "Backup now")}${bigBtn("restart", "Restart all")}<button data-act="remove" style="display:inline-flex;align-items:center;gap:7px;height:38px;padding-inline:15px;border:1px solid var(--c-neg);background:transparent;color:var(--c-neg);border-radius:8px;cursor:pointer;font:inherit;font-size:13px;font-weight:500">${ic("stop", 14)} Remove</button></div></div>`;
   c.querySelector("[data-back]").onclick = () => { S.screen = "servers"; S.sd = null; render(); };
   c.querySelector('[data-act="backup"]').onclick = () => action("adpix_backup", { server: name });
   c.querySelector('[data-act="restart"]').onclick = () => verifyAction({ name: "adpix_restart", title: `Restart all services on ${name}`, destructive: true }, { server: name });
+  c.querySelector('[data-act="remove"]').onclick = () => confirmDanger("Remove server", `Remove <b class="mono">${esc(name)}</b> from the registry. This does <b>not</b> touch the machine or its data — it only stops AdPix from managing it. The MCP key stays authorized on the host until you revoke it.`, name, async () => { await startJob("server_remove", { name }); toast(`Removed ${name}`); await loadClusters(); await loadFleet(); S.screen = "servers"; S.sd = null; render(); }, "Remove server");
   // gauges
   c.appendChild(el(`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:16px">${[["CPU", n.cpu], ["MEMORY", n.mem], ["DISK", n.disk]].map(([l, v]) => `<div style="${cardOpen};padding:14px 16px"><div style="font-size:11.5px;color:var(--c-muted);text-transform:uppercase;letter-spacing:.5px">${l}</div><div style="font-size:26px;font-weight:400;margin:6px 0 8px;color:${metColor(v)}">${v}%</div><div style="height:5px;border-radius:999px;background:var(--c-sunken);overflow:hidden"><div style="height:100%;width:${v}%;background:${metColor(v)};border-radius:999px"></div></div></div>`).join("")}</div>`));
   const grid = el(`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;align-items:start"></div>`); c.appendChild(grid);
@@ -399,12 +417,67 @@ function wizard(title, steps, onFinish) {
 function field(label, input) { return `<label style="display:block;margin-bottom:14px"><span style="display:block;font-size:12px;font-weight:600;color:var(--c-muted);margin-bottom:6px">${esc(label)}</span>${input}</label>`; }
 function addServerWizard() {
   wizard("Add a server", [
-    { label: "Connect", body: (ctx, b) => { b.innerHTML = `<div style="font-weight:600;font-size:15px;margin-bottom:6px">Connect to the server</div><div class="muted" style="font-size:13px;margin-bottom:16px">Enter the host and SSH credentials. AdPix connects over SSH only — there is no agent.</div>${field("Host / IP address", `<input class="input mono" id="w_host" value="${esc(ctx.host || "")}" placeholder="10.0.0.13">`)}${field("SSH port & user", `<div style="display:flex;gap:10px"><input class="input mono" id="w_port" value="${esc(ctx.port || "22")}" style="width:90px"><input class="input mono" id="w_user" value="${esc(ctx.user || "root")}" style="flex:1"></div>`)}`; }, onNext: (ctx) => { ctx.host = document.getElementById("w_host").value.trim(); ctx.port = document.getElementById("w_port").value.trim() || "22"; ctx.user = document.getElementById("w_user").value.trim() || "root"; return ctx.host ? true : "host required"; } },
-    { label: "Verify SSH", body: async (ctx, b) => { b.innerHTML = `<div style="font-weight:600;font-size:15px;margin-bottom:14px">Verifying SSH…</div><div class="vres"><span class="spin"></span> connecting to ${esc(ctx.host)}…</div>`; try { const r = await api("/api/wizard/verify-server", { method: "POST", body: JSON.stringify({ host: ctx.host, port: Number(ctx.port), username: ctx.user }) }); ctx.verified = r.reachable; b.querySelector(".vres").innerHTML = r.reachable ? `<div class="badge b-pos" style="margin-bottom:12px"><span class="dot"></span>SSH reachable</div><div style="font-size:12px;color:var(--c-muted);margin-bottom:6px">Host key fingerprint</div><pre class="out" style="font-size:11px">${esc(r.fingerprint)}</pre><div class="mono muted" style="font-size:11.5px;margin-top:8px">${esc(r.detail)}</div>` : `<div class="badge b-neg"><span class="dot"></span>Cannot reach ${esc(ctx.host)}</div><div class="mono muted" style="font-size:11.5px;margin-top:8px">${esc(r.detail)}</div>`; } catch (e) { ctx.verified = false; b.querySelector(".vres").innerHTML = `<div class="badge b-neg"><span class="dot"></span>${esc(e.message)}</div>`; } }, onNext: (ctx) => ctx.verified ? true : "SSH not verified — fix credentials/host" },
-    { label: "Role", body: (ctx, b) => { b.innerHTML = `<div style="font-weight:600;font-size:15px;margin-bottom:14px">Name & role</div>${field("Server name", `<input class="input mono" id="w_name" value="${esc(ctx.name || ctx.host || "")}">`)}${field("Role", `<select class="input" id="w_role"><option value="node">node (HA serving)</option><option value="witness">witness (quorum)</option></select>`)}`; if (ctx.role) b.querySelector("#w_role").value = ctx.role; }, onNext: (ctx) => { ctx.name = document.getElementById("w_name").value.trim(); ctx.role = document.getElementById("w_role").value; return ctx.name ? true : "name required"; } },
-    { label: "Authorize", body: (ctx, b) => { b.innerHTML = `<div style="font-weight:600;font-size:15px;margin-bottom:8px">Authorize & add</div><div class="muted" style="font-size:13px;margin-bottom:14px">Adds <b class="mono">${esc(ctx.name)}</b> (${esc(ctx.user)}@${esc(ctx.host)}:${esc(ctx.port)}) as a <b>${esc(ctx.role)}</b>. The MCP key is authorized on the target.</div><pre class="out">server_add name=${esc(ctx.name)} host=${esc(ctx.host)} role=${esc(ctx.role)}</pre>`; } },
-  ], async (ctx) => { const r = await startJob("server_add", { name: ctx.name, host: ctx.host, port: Number(ctx.port), username: ctx.user, role: ctx.role, verify: false }); toast(`Adding ${ctx.name}…`); openDrawer(r.job.id); setTimeout(async () => { await loadFleet(); render(); }, 1500); });
+    { label: "Connect", body: (ctx, b) => {
+      b.innerHTML = `<div style="font-weight:600;font-size:15px;margin-bottom:6px">Connect to the server</div><div class="muted" style="font-size:13px;margin-bottom:16px">AdPix connects over SSH only. Use an SSH key, or the root password (used once to authorize the MCP key — the password is never stored).</div>
+      ${field("Host / IP address", `<input class="input mono" id="w_host" value="${esc(ctx.host || "")}" placeholder="10.0.0.13">`)}
+      ${field("SSH port & user", `<div style="display:flex;gap:10px"><input class="input mono" id="w_port" value="${esc(ctx.port || "22")}" style="width:90px"><input class="input mono" id="w_user" value="${esc(ctx.user || "root")}" style="flex:1"></div>`)}
+      ${field("Authentication", `<select class="input" id="w_auth"><option value="key">SSH private key (path)</option><option value="password">Root password</option></select>`)}
+      <div id="w_authfield"></div>`;
+      b.querySelector("#w_auth").value = ctx.authMethod || "key";
+      const drawAuth = () => { const m = b.querySelector("#w_auth").value; b.querySelector("#w_authfield").innerHTML = m === "password" ? field("Root password", `<input class="input" type="password" id="w_pw" value="${esc(ctx.password || "")}">`) : field("Private key path", `<input class="input mono" id="w_key" value="${esc(ctx.privateKeyPath || "")}" placeholder="~/.ssh/id_ed25519 (blank = MCP key / agent)">`); };
+      drawAuth(); b.querySelector("#w_auth").onchange = drawAuth;
+    }, onNext: (ctx) => {
+      ctx.host = document.getElementById("w_host").value.trim(); ctx.port = document.getElementById("w_port").value.trim() || "22"; ctx.user = document.getElementById("w_user").value.trim() || "root";
+      ctx.authMethod = document.getElementById("w_auth").value;
+      ctx.password = ctx.authMethod === "password" ? (document.getElementById("w_pw")?.value || "") : "";
+      ctx.privateKeyPath = ctx.authMethod === "key" ? (document.getElementById("w_key")?.value.trim() || "") : "";
+      if (!ctx.host) return "Host / IP is required.";
+      if (ctx.authMethod === "password" && !ctx.password) return "Enter the root password.";
+      return true;
+    } },
+    { label: "Diagnose", body: async (ctx, b) => {
+      b.innerHTML = `<div style="font-weight:600;font-size:15px;margin-bottom:14px">Diagnosing ${esc(ctx.host)}…</div><div class="dres"><span class="spin"></span> running connectivity checks…</div>`;
+      try {
+        const d = await api("/api/wizard/diagnose", { method: "POST", body: JSON.stringify({ host: ctx.host, port: Number(ctx.port), username: ctx.user, password: ctx.password || undefined, privateKeyPath: ctx.privateKeyPath || undefined }) });
+        ctx.canAdd = d.canAdd;
+        b.querySelector(".dres").innerHTML = `<div class="badge ${d.reachable ? (d.canAdd ? "b-pos" : "b-warn") : "b-neg"}" style="margin-bottom:12px"><span class="dot"></span>${esc(d.summary)}</div>`
+          + d.checks.map((c) => `<div style="display:flex;align-items:flex-start;gap:10px;padding:9px 0;border-bottom:1px solid var(--c-divider)"><span style="color:${c.ok ? "var(--c-pos)" : c.soft ? "var(--c-warn)" : "var(--c-neg)"};flex:none;margin-top:1px">${c.ok ? ic("check", 15) : ic("warn", 15)}</span><div style="flex:1"><div style="font-size:13px;font-weight:500">${esc(c.name)}${c.soft && !c.ok ? ` <span class="hint" style="font-weight:400">(optional)</span>` : ""}</div><div class="mono muted" style="font-size:11.5px;word-break:break-word">${esc(c.detail)}</div></div></div>`).join("");
+      } catch (e) { ctx.canAdd = false; b.querySelector(".dres").innerHTML = `<div class="badge b-neg"><span class="dot"></span>${esc(e.message)}</div>`; }
+    }, onNext: (ctx) => ctx.canAdd ? true : "Connectivity check failed — fix the host/credentials/privilege before adding." },
+    { label: "Role", body: (ctx, b) => {
+      const opts = ["", ...S.clusters.map((c) => c.name)];
+      b.innerHTML = `<div style="font-weight:600;font-size:15px;margin-bottom:14px">Name, role & cluster</div>
+      ${field("Server name", `<input class="input mono" id="w_name" value="${esc(ctx.name || ctx.host || "")}">`)}
+      ${field("Role", `<select class="input" id="w_role"><option value="node">node (HA serving)</option><option value="witness">witness (quorum arbiter)</option></select>`)}
+      ${field("Cluster", `<select class="input" id="w_cluster">${opts.map((o) => `<option value="${esc(o)}">${o ? esc(o) : "— none —"}</option>`).join("")}<option value="__new">+ new cluster…</option></select>`)}
+      <div id="w_newcluster"></div>`;
+      if (ctx.role) b.querySelector("#w_role").value = ctx.role; if (ctx.cluster) b.querySelector("#w_cluster").value = ctx.cluster;
+      const drawNew = () => { b.querySelector("#w_newcluster").innerHTML = b.querySelector("#w_cluster").value === "__new" ? field("New cluster name", `<input class="input mono" id="w_clnew" placeholder="prod">`) : ""; };
+      drawNew(); b.querySelector("#w_cluster").onchange = drawNew;
+    }, onNext: (ctx) => {
+      ctx.name = document.getElementById("w_name").value.trim(); ctx.role = document.getElementById("w_role").value;
+      const cl = document.getElementById("w_cluster").value; ctx.cluster = cl === "__new" ? (document.getElementById("w_clnew")?.value.trim() || "") : cl;
+      if (!ctx.name) return "Server name is required.";
+      if (cl === "__new" && !ctx.cluster) return "Enter the new cluster name.";
+      return true;
+    } },
+    { label: "Authorize", body: (ctx, b) => { b.innerHTML = `<div style="font-weight:600;font-size:15px;margin-bottom:8px">Authorize & add</div><div class="muted" style="font-size:13px;margin-bottom:14px">Add <b class="mono">${esc(ctx.name)}</b> (${esc(ctx.user)}@${esc(ctx.host)}:${esc(ctx.port)}) as a <b>${esc(ctx.role)}</b>${ctx.cluster ? ` in cluster <b>${esc(ctx.cluster)}</b>` : ""}.${ctx.authMethod === "password" ? " The MCP key will be authorized on the target, then the password is discarded." : ""}</div><pre class="out">server_add name=${esc(ctx.name)} host=${esc(ctx.host)} auth=${esc(ctx.authMethod)} role=${esc(ctx.role)}</pre>`; } },
+  ], async (ctx) => {
+    const r = await api("/api/wizard/add-server", { method: "POST", body: JSON.stringify({ name: ctx.name, host: ctx.host, port: Number(ctx.port), username: ctx.user, role: ctx.role, cluster: ctx.cluster || "", authMethod: ctx.authMethod, password: ctx.password || undefined, privateKeyPath: ctx.privateKeyPath || undefined }) });
+    toast(`Added ${ctx.name}`); await loadClusters(); await loadFleet(); render();
+  });
 }
+// generic typed-confirm danger slide-in (prevents sudden deletes / sensitive ops)
+function confirmDanger(title, message, target, onConfirm, okLabel = "Confirm") {
+  const { panel, close } = slideIn(480);
+  panel.innerHTML = `<div class="drawer-head"><strong style="color:var(--c-neg)">${ic("warn", 17)} ${esc(title)}</strong><button class="icon-btn dc">${ic("x", 16)}</button></div>
+    <div class="drawer-body" style="padding:18px"><div style="font-size:13.5px;line-height:1.55;margin-bottom:14px">${message}</div>
+    ${target ? `<div style="display:flex;gap:10px;background:var(--c-neg-bg);border:1px solid var(--c-neg);border-radius:10px;padding:13px 14px;margin-bottom:16px"><span style="color:var(--c-neg);flex:none">${ic("warn", 18)}</span><div style="font-size:12.5px;line-height:1.5">Type <b class="mono">${esc(target)}</b> to confirm.</div></div><input class="input ci" placeholder="${esc(target)}">` : ""}</div>
+    <div style="display:flex;justify-content:flex-end;gap:10px;padding:14px 18px;border-top:1px solid var(--c-divider);background:var(--c-sunken)"><button class="btn dc2">Cancel</button><button class="btn btn-danger run">${esc(okLabel)}</button></div>`;
+  panel.querySelector(".dc").onclick = close; panel.querySelector(".dc2").onclick = close;
+  panel.querySelector(".run").onclick = async () => { if (target && panel.querySelector(".ci").value.trim() !== target) return toast(`Type "${target}" to confirm`, true); const btn = panel.querySelector(".run"); btn.disabled = true; btn.innerHTML = `<span class="spin"></span>`; try { await onConfirm(); close(); } catch (e) { toast(e.message, true); btn.disabled = false; btn.textContent = okLabel; } };
+}
+
 // destructive action → slide-in verify (impact → type-to-confirm → run)
 function verifyAction(tool, args) {
   if (!tool.destructive) return action(tool.name, args);
@@ -472,7 +545,7 @@ function liveStream(id, it) {
 
 // ============================================================ admin (settings)
 function panelCard(title) { return el(`<div style="${cardOpen}"><div style="${cardHead};display:flex;align-items:center;justify-content:space-between">${esc(title)}<button class="btn btn-sm refresh">${t("refresh")}</button></div><div class="card-pad"><div class="body"><div class="skel" style="width:60%"></div></div></div></div>`); }
-function adminUsers() { const c = panelCard("Users & roles"); const body = c.querySelector(".body"); const load = async () => { try { const { users } = await api("/api/admin/users"); body.innerHTML = `<table class="t"><thead><tr><th>User</th><th>Role</th><th>Scopes</th><th></th></tr></thead><tbody>${users.map((u) => `<tr><td class="mono">${esc(u.username)}</td><td><span class="tag">${esc(u.role)}</span></td><td class="muted">${esc((u.scopes || []).join(", "))}</td><td>${u.username === S.me.username ? "" : `<button class="btn btn-sm rm" data-u="${esc(u.username)}">Remove</button>`}</td></tr>`).join("")}</tbody></table><div style="margin-top:12px"><button class="btn btn-primary btn-sm add">+ Add user</button></div>`; body.querySelector(".add").onclick = () => addUserModal(load); body.querySelectorAll(".rm").forEach((x) => (x.onclick = async () => { if (confirm(`Remove ${x.dataset.u}?`)) { await api("/api/admin/users/remove", { method: "POST", body: JSON.stringify({ username: x.dataset.u }) }); load(); } })); } catch (e) { body.innerHTML = `<pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre>`; } }; c.querySelector(".refresh").onclick = load; load(); return c; }
+function adminUsers() { const c = panelCard("Users & roles"); const body = c.querySelector(".body"); const load = async () => { try { const { users } = await api("/api/admin/users"); body.innerHTML = `<table class="t"><thead><tr><th>User</th><th>Role</th><th>Scopes</th><th></th></tr></thead><tbody>${users.map((u) => `<tr><td class="mono">${esc(u.username)}</td><td><span class="tag">${esc(u.role)}</span></td><td class="muted">${esc((u.scopes || []).join(", "))}</td><td>${u.username === S.me.username ? "" : `<button class="btn btn-sm rm" data-u="${esc(u.username)}">Remove</button>`}</td></tr>`).join("")}</tbody></table><div style="margin-top:12px"><button class="btn btn-primary btn-sm add">+ Add user</button></div>`; body.querySelector(".add").onclick = () => addUserModal(load); body.querySelectorAll(".rm").forEach((x) => (x.onclick = () => confirmDanger("Remove user", `Remove admin <b class="mono">${esc(x.dataset.u)}</b>? Their sessions are not auto-revoked — engage the kill-switch if needed.`, x.dataset.u, async () => { await api("/api/admin/users/remove", { method: "POST", body: JSON.stringify({ username: x.dataset.u }) }); toast(`Removed ${x.dataset.u}`); load(); }, "Remove user"))); } catch (e) { body.innerHTML = `<pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre>`; } }; c.querySelector(".refresh").onclick = load; load(); return c; }
 function addUserModal(after) { const { panel, close } = slideIn(440); panel.innerHTML = `<div class="drawer-head"><strong>Add user</strong><button class="icon-btn dc">${ic("x", 16)}</button></div><div class="drawer-body" style="padding:18px">${field("Username", `<input class="input" id="au_u">`)}${field("Password", `<input class="input" type="password" id="au_p">`)}${field("Role", `<select class="input" id="au_r"><option>viewer</option><option>operator</option><option>owner</option></select>`)}${field("Scopes (comma; blank=all)", `<input class="input" id="au_s" placeholder="*">`)}</div><div style="display:flex;justify-content:flex-end;gap:10px;padding:14px 18px;border-top:1px solid var(--c-divider);background:var(--c-sunken)"><button class="btn dc2">Cancel</button><button class="btn btn-primary ok">Create</button></div>`; panel.querySelector(".dc").onclick = close; panel.querySelector(".dc2").onclick = close; panel.querySelector(".ok").onclick = async () => { const g = (id) => panel.querySelector(id).value.trim(); if (!g("#au_u") || !g("#au_p")) return toast("username + password required", true); try { const r = await api("/api/admin/users", { method: "POST", body: JSON.stringify({ username: g("#au_u"), password: g("#au_p"), role: g("#au_r"), scopes: g("#au_s") ? g("#au_s").split(",").map((s) => s.trim()) : ["*"] }) }); close(); showTotp(r); after && after(); } catch (e) { toast(e.message, true); } }; }
 function showTotp(r) { const { panel, close } = slideIn(440); panel.innerHTML = `<div class="drawer-head"><strong>TOTP secret (shown once)</strong><button class="icon-btn dc">${ic("x", 16)}</button></div><div class="drawer-body" style="padding:18px"><p>User <b>${esc(r.username)}</b> created. Add to an authenticator:</p><pre class="out">${esc(r.totpSecret)}</pre><p class="muted" style="word-break:break-all;font-size:12px">${esc(r.totpUri)}</p></div>`; panel.querySelector(".dc").onclick = close; }
 function adminSessions() { const c = panelCard("Active sessions"); const body = c.querySelector(".body"); const load = async () => { try { const { sessions } = await api("/api/admin/sessions"); body.innerHTML = sessions.length ? `<table class="t"><thead><tr><th>User</th><th>IP</th><th>Last seen</th></tr></thead><tbody>${sessions.map((s) => `<tr><td class="mono">${esc(s.username)}</td><td class="muted">${esc(s.ip)}</td><td class="muted">${new Date(s.lastSeen).toLocaleTimeString()}</td></tr>`).join("")}</tbody></table>` : `<div class="empty">No active sessions.</div>`; } catch (e) { body.innerHTML = `<pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre>`; } }; c.querySelector(".refresh").onclick = load; load(); return c; }
@@ -487,7 +560,7 @@ function renderSetup(msg = "") { authShell(`<p class="muted" style="margin-top:0
 // ============================================================ boot
 async function boot() {
   let me = null; try { me = await api("/api/me"); } catch {}
-  if (me) { S.me = me.actor; S.mode = me.mode; if (me.csrf) S.csrf = me.csrf; if (me.killed) { authShell(`<div class="badge b-neg"><span class="dot"></span>Kill-switch engaged</div><p class="muted">Destructive ops disabled, sessions revoked. An owner must release it.</p><button class="btn" id="r" style="width:100%;justify-content:center;margin-top:8px">Reload</button>`); document.getElementById("r").onclick = () => location.reload(); return; } try { const { tools } = await api("/api/catalog"); S.catalog = tools; } catch (e) { authShell(`<div class="empty">Failed to load: ${esc(e.message)}</div>`); return; } await loadFleet(); render(); return; }
+  if (me) { S.me = me.actor; S.mode = me.mode; if (me.csrf) S.csrf = me.csrf; if (me.killed) { authShell(`<div class="badge b-neg"><span class="dot"></span>Kill-switch engaged</div><p class="muted">Destructive ops disabled, sessions revoked. An owner must release it.</p><button class="btn" id="r" style="width:100%;justify-content:center;margin-top:8px">Reload</button>`); document.getElementById("r").onclick = () => location.reload(); return; } try { const { tools } = await api("/api/catalog"); S.catalog = tools; } catch (e) { authShell(`<div class="empty">Failed to load: ${esc(e.message)}</div>`); return; } await loadClusters(); await loadFleet(); render(); return; }
   let status = {}; try { status = await fetch("/api/status").then((r) => r.json()); } catch {}
   if (status.adminsExist) return renderLogin();
   if (TOKEN) return renderSetup();

@@ -274,3 +274,36 @@ describe("panel auth + RBAC (live)", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------- fleet / diagnose / add-server
+describe("panel fleet + add-server endpoints (live)", () => {
+  it("lists clusters (empty registry → none)", async () => {
+    await withServer(async (base, token) => {
+      const r = await fetch(`${base}/api/clusters`, { headers: H(token) });
+      expect(r.status).toBe(200);
+      expect((await r.json()).clusters).toEqual([]);
+    });
+  });
+  it("diagnose reports reachable when SSH connects (benign deps)", async () => {
+    await withServer(async (base, token) => {
+      const d = await (await fetch(`${base}/api/wizard/diagnose`, { method: "POST", headers: { ...H(token), "content-type": "application/json" }, body: JSON.stringify({ host: "10.0.0.1", username: "root" }) })).json();
+      expect(d.reachable).toBe(true);
+      expect(Array.isArray(d.checks)).toBe(true);
+    });
+  });
+  it("add-server (key path) persists + assigns to a cluster", async () => {
+    await withServer(async (base, token) => {
+      const r = await fetch(`${base}/api/wizard/add-server`, { method: "POST", headers: { ...H(token), "content-type": "application/json" }, body: JSON.stringify({ name: "node-a", host: "10.0.0.11", username: "root", role: "node", cluster: "prod", privateKeyPath: "/dev/null" }) });
+      expect(r.status).toBe(200);
+      expect((await r.json()).ok).toBe(true);
+      const cs = (await (await fetch(`${base}/api/clusters`, { headers: H(token) })).json()).clusters;
+      expect(cs.find((c: { name: string; nodes: string[] }) => c.name === "prod")?.nodes).toContain("node-a");
+    });
+  });
+  it("add-server requires name + host (400)", async () => {
+    await withServer(async (base, token) => {
+      const r = await fetch(`${base}/api/wizard/add-server`, { method: "POST", headers: { ...H(token), "content-type": "application/json" }, body: JSON.stringify({ name: "", host: "" }) });
+      expect(r.status).toBe(400);
+    });
+  });
+});
