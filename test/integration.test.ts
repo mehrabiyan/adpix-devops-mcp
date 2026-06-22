@@ -200,6 +200,7 @@ const FIXTURES: Record<string, Record<string, unknown>> = {
   obs_deploy: {},
   obs_status: {},
   dns_plan: {},
+  ha_standup: {},
   connect_configs: {},
 };
 

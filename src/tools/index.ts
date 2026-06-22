@@ -15,6 +15,7 @@ import { launchTools } from "./launch.js";
 import { tagmanagerTools } from "./tagmanager.js";
 import { observabilityTools } from "./observability.js";
 import { installTools } from "./install.js";
+import { haTools } from "./ha.js";
 
 export const allTools: ToolDef[] = [
   ...serverTools,
@@ -33,4 +34,5 @@ export const allTools: ToolDef[] = [
   ...tagmanagerTools,
   ...observabilityTools,
   ...installTools,
+  ...haTools,
 ];
