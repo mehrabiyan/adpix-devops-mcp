@@ -1,437 +1,435 @@
-// AdPix Cloud — control panel SPA. Faithful implementation of the AdPix Cloud design over the
-// panel API: topbar (logo, cluster switcher, ⌘K palette), pill sidebar, 11 bespoke screens,
-// dark/light, EN/FA + RTL, live jobs drawer (SSE), destructive preview→nonce, login + TOTP.
+// AdPix Cloud — control panel SPA. Pixel-faithful to the AdPix Cloud design, driven by the
+// panel API (/api/fleet, /api/db, tools, jobs). Slide-in panels + a stepper wizard for actions,
+// SSE job drawer, login + TOTP. Inline styles mirror the design tokens exactly.
 
-// ============================================================ token + api
+// ============================================================ api
 const TOKEN = (location.hash.match(/token=([a-f0-9]+)/) || [])[1] || sessionStorage.getItem("adpix_token") || "";
 if (TOKEN) sessionStorage.setItem("adpix_token", TOKEN);
 history.replaceState(null, "", location.pathname);
-
-function authHeaders(mut) {
-  if (S.mode === "session") return mut ? { "x-adpix-csrf": S.csrf } : {};
-  return TOKEN ? { "x-adpix-token": TOKEN } : {};
-}
+function authHeaders(mut) { if (S.mode === "session") return mut ? { "x-adpix-csrf": S.csrf } : {}; return TOKEN ? { "x-adpix-token": TOKEN } : {}; }
 async function api(path, opts = {}) {
   const res = await fetch(path, { ...opts, credentials: "same-origin", headers: { ...(opts.body ? { "content-type": "application/json" } : {}), ...authHeaders(!!opts.body), ...(opts.headers || {}) } });
   if (!res.ok && res.status !== 202) { let m = res.statusText; try { m = (await res.json()).error || m; } catch {} const e = new Error(m); e.status = res.status; throw e; }
   return res.status === 204 ? null : res.json();
 }
-const runTool = (name, args = {}) => api(`/api/tools/${name}`, { method: "POST", body: JSON.stringify({ args }) });
-const startJob = (tool, args = {}) => api("/api/jobs", { method: "POST", body: JSON.stringify({ tool, args, idempotencyKey: `${tool}:${Date.now()}` }) });
-async function startDestructive(tool, args = {}) {
-  const pv = await api("/api/preview", { method: "POST", body: JSON.stringify({ tool, args }) });
-  return api("/api/jobs", { method: "POST", body: JSON.stringify({ tool, args, nonce: pv.nonce, idempotencyKey: `${tool}:${Date.now()}` }) });
-}
+const runTool = (n, a = {}) => api(`/api/tools/${n}`, { method: "POST", body: JSON.stringify({ args: a }) });
+const startJob = (tool, a = {}) => api("/api/jobs", { method: "POST", body: JSON.stringify({ tool, args: a, idempotencyKey: `${tool}:${Date.now()}` }) });
+async function startDestructive(tool, a = {}) { const pv = await api("/api/preview", { method: "POST", body: JSON.stringify({ tool, args: a }) }); return api("/api/jobs", { method: "POST", body: JSON.stringify({ tool, args: a, nonce: pv.nonce, idempotencyKey: `${tool}:${Date.now()}` }) }); }
 const listJobs = () => api("/api/jobs");
 const cancelJob = (id) => api(`/api/jobs/${id}/cancel`, { method: "POST", body: "{}" });
-async function streamJob(id, onEvent, signal) {
-  const res = await fetch(`/api/jobs/${id}/stream`, { headers: { "x-adpix-token": TOKEN }, credentials: "same-origin", signal });
-  const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = "";
-  while (true) { const { value, done } = await reader.read(); if (done) break; buf += dec.decode(value, { stream: true });
-    let i; while ((i = buf.indexOf("\n\n")) !== -1) { const chunk = buf.slice(0, i); buf = buf.slice(i + 2); const line = chunk.split("\n").find((l) => l.startsWith("data: ")); if (line) { try { onEvent(JSON.parse(line.slice(6))); } catch {} } } }
-}
+async function streamJob(id, onEvent, signal) { const res = await fetch(`/api/jobs/${id}/stream`, { headers: { "x-adpix-token": TOKEN }, credentials: "same-origin", signal }); const rd = res.body.getReader(); const dec = new TextDecoder(); let buf = ""; while (true) { const { value, done } = await rd.read(); if (done) break; buf += dec.decode(value, { stream: true }); let i; while ((i = buf.indexOf("\n\n")) !== -1) { const ch = buf.slice(0, i); buf = buf.slice(i + 2); const ln = ch.split("\n").find((l) => l.startsWith("data: ")); if (ln) { try { onEvent(JSON.parse(ln.slice(6))); } catch {} } } } }
 
 // ============================================================ i18n
 const STR = {
   en: { nav: { dashboard: "Dashboard", servers: "Servers", ha: "High availability", databases: "Databases", backups: "Backups", deploys: "Deploys", dns: "DNS & connect", monitoring: "Monitoring", jobs: "Jobs & audit", security: "Security", settings: "Settings" },
     grp: { overview: "Overview", fleet: "Fleet", data: "Data", delivery: "Delivery", observe: "Observe", govern: "Govern" },
-    run: "Run", refresh: "Refresh", cancel: "Cancel", confirm: "Confirm", close: "Close", activity: "Activity", collapse: "Collapse",
-    fleetOverview: "Fleet overview", backupAll: "Backup all", deploy: "Deploy", addServer: "Add server", search: "Search servers, screens, actions…",
-    recentJobs: "Recent jobs", activeAlerts: "Active alerts", viewAll: "View all", nodeHealth: "Node health", clusterTopology: "Cluster topology",
-    quorumHealthy: "Quorum healthy", noJobs: "No active jobs. Everything is idle.", containers: "Containers", logs: "Logs", follow: "Follow",
-    typeToConfirm: "This is irreversible. Type the target name to confirm:", destructive: "Destructive action", soon: "Soon" },
+    fleetOverview: "Fleet overview", backupAll: "Backup all", deploy: "Deploy", addServer: "Add server", search: "Search servers, screens, actions…", collapse: "Collapse",
+    quorumHealthy: "Quorum healthy", clusterTopology: "Cluster topology", nodeHealth: "Node health", recentJobs: "Recent jobs", activeAlerts: "Active alerts", viewAll: "View all",
+    activity: "Activity", noJobs: "No active jobs. Everything is idle.", containers: "Containers", logs: "Logs", refresh: "Refresh", cancel: "Cancel", back: "Back", next: "Next",
+    typeToConfirm: "This is irreversible. Type the target name to confirm:", soon: "Soon" },
   fa: { nav: { dashboard: "داشبورد", servers: "سرورها", ha: "دسترس‌پذیری بالا", databases: "پایگاه‌داده", backups: "پشتیبان‌گیری", deploys: "استقرار", dns: "DNS و اتصال", monitoring: "پایش", jobs: "کارها و ممیزی", security: "امنیت", settings: "تنظیمات" },
     grp: { overview: "نمای کلی", fleet: "فلیت", data: "داده", delivery: "تحویل", observe: "مشاهده", govern: "حاکمیت" },
-    run: "اجرا", refresh: "تازه‌سازی", cancel: "لغو", confirm: "تأیید", close: "بستن", activity: "فعالیت", collapse: "جمع کردن",
-    fleetOverview: "نمای کلی فلیت", backupAll: "پشتیبان‌گیری همه", deploy: "استقرار", addServer: "افزودن سرور", search: "جستجوی سرور، صفحه، عملیات…",
-    recentJobs: "کارهای اخیر", activeAlerts: "هشدارهای فعال", viewAll: "مشاهده همه", nodeHealth: "سلامت گره‌ها", clusterTopology: "توپولوژی خوشه",
-    quorumHealthy: "حد نصاب سالم", noJobs: "کار فعالی نیست.", containers: "کانتینرها", logs: "لاگ‌ها", follow: "دنبال‌کردن",
-    typeToConfirm: "این عمل بازگشت‌ناپذیر است. نام هدف را بنویسید:", destructive: "عملیات مخرب", soon: "به‌زودی" },
+    fleetOverview: "نمای کلی فلیت", backupAll: "پشتیبان‌گیری همه", deploy: "استقرار", addServer: "افزودن سرور", search: "جستجوی سرور، صفحه، عملیات…", collapse: "جمع کردن",
+    quorumHealthy: "حد نصاب سالم", clusterTopology: "توپولوژی خوشه", nodeHealth: "سلامت گره‌ها", recentJobs: "کارهای اخیر", activeAlerts: "هشدارهای فعال", viewAll: "مشاهده همه",
+    activity: "فعالیت", noJobs: "کار فعالی نیست.", containers: "کانتینرها", logs: "لاگ‌ها", refresh: "تازه‌سازی", cancel: "لغو", back: "قبلی", next: "بعدی",
+    typeToConfirm: "این عمل بازگشت‌ناپذیر است. نام هدف را بنویسید:", soon: "به‌زودی" },
 };
 const t = (k) => STR[S.lang][k] ?? k;
 
 // ============================================================ icons
 const IP = {
-  dashboard: "M12 13a2 2 0 100-4 2 2 0 000 4zM12 4a8 8 0 108 8M12 11l4-3",
-  servers: "M4 5h16v6H4zM4 13h16v6H4zM8 8h.01M8 16h.01", ha: "M6 9a3 3 0 100-6 3 3 0 000 6zm12 0a3 3 0 100-6 3 3 0 000 6zM12 21a3 3 0 100-6 3 3 0 000 6zM7.5 7.5l3 6m6-6l-3 6",
+  dashboard: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z", servers: "M4 5h16v6H4zM4 13h16v6H4zM8 8h.01M8 16h.01",
+  ha: "M6 9a3 3 0 100-6 3 3 0 000 6zm12 0a3 3 0 100-6 3 3 0 000 6zM12 21a3 3 0 100-6 3 3 0 000 6zM7.5 7.5l3 6m6-6l-3 6",
   databases: "M12 3c4.4 0 8 1.3 8 3s-3.6 3-8 3-8-1.3-8-3 3.6-3 8-3zM4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3",
   backups: "M3 5h18v4H3zM5 9v10h14V9M9 13h6", deploys: "M12 19V8M9 11l3-3 3 3M7 19a4 4 0 010-8 5 5 0 019.6-1.5A4 4 0 0117 19",
   dns: "M12 3a9 9 0 100 18 9 9 0 000-18zM3 12h18M12 3c2.5 2.5 2.5 15.5 0 18M12 3c-2.5 2.5-2.5 15.5 0 18", monitoring: "M3 12h4l2 6 4-12 2 6h6",
   jobs: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01", security: "M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z",
   settings: "M12 9a3 3 0 100 6 3 3 0 000-6zM19.4 13a7.5 7.5 0 000-2l2-1.5-2-3.5-2.3 1a7.5 7.5 0 00-1.7-1L15 3h-4l-.4 2.5a7.5 7.5 0 00-1.7 1l-2.3-1-2 3.5L6.6 11a7.5 7.5 0 000 2l-2 1.5 2 3.5 2.3-1a7.5 7.5 0 001.7 1L11 21h4l.4-2.5a7.5 7.5 0 001.7-1l2.3 1 2-3.5z",
   search: "M11 4a7 7 0 100 14 7 7 0 000-14zm9 16l-3.5-3.5", sun: "M12 8a4 4 0 100 8 4 4 0 000-8zM12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19",
-  moon: "M21 12.8A8 8 0 1111.2 3a6.3 6.3 0 009.8 9.8z", bell: "M6 9a6 6 0 1112 0c0 5 2 6 2 6H4s2-1 2-6M10 20a2 2 0 004 0",
-  wave: "M3 12h4l2 6 4-12 2 6h6", copy: "M9 9h11v11H9zM5 15V5a2 2 0 012-2h10", play: "M6 4l14 8-14 8z", x: "M18 6L6 18M6 6l12 12",
-  menu: "M4 6h16M4 12h16M4 18h16", chevron: "M6 9l6 6 6-6", check: "M20 6L9 17l-5-5", plus: "M12 5v14M5 12h14",
-  restart: "M3 12a9 9 0 103-6.7M3 4v4h4", stop: "M6 6h12v12H6z", bolt: "M13 2L4 14h7l-1 8 9-12h-7z", lock: "M4 10h16v11H4zM8 10V7a4 4 0 018 0v3",
+  moon: "M21 12.8A8 8 0 1111.2 3a6.3 6.3 0 009.8 9.8z", bell: "M6 9a6 6 0 1112 0c0 5 2 6 2 6H4s2-1 2-6M10 20a2 2 0 004 0", wave: "M3 12h4l2 6 4-12 2 6h6",
+  copy: "M9 9h11v11H9zM5 15V5a2 2 0 012-2h10", play: "M6 4l14 8-14 8z", x: "M18 6L6 18M6 6l12 12", chevron: "M6 9l6 6 6-6", chevL: "M15 6l-6 6 6 6",
+  plus: "M12 5v14M5 12h14", restart: "M3 12a9 9 0 103-6.7M3 4v4h4", stop: "M6 6h12v12H6z", bolt: "M13 2L4 14h7l-1 8 9-12h-7z", check: "M20 6L9 17l-5-5", warn: "M12 9v4M12 17h.01M10.3 3.9 2.4 18a2 2 0 001.7 3h15.8a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z",
 };
-const ic = (n, sz = 18, sw = 1.9) => `<svg width="${sz}" height="${sz}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round">${(IP[n] || "").split(/(?=M)/).map((d) => `<path d="${d}"/>`).join("")}</svg>`;
+const ic = (n, sz = 18, sw = 1.85) => `<svg width="${sz}" height="${sz}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round">${(IP[n] || "").split(/(?=M)/).filter(Boolean).map((d) => `<path d="${d}"/>`).join("")}</svg>`;
 const LOGO = `<svg viewBox="0 0 150 130" width="26" height="22"><rect x="6" y="44" width="22" height="48" rx="11" fill="var(--c-brand)"/><rect x="36" y="10" width="22" height="116" rx="11" fill="var(--c-text)"/><rect x="66" y="30" width="22" height="76" rx="11" fill="var(--c-brand)"/><rect x="96" y="10" width="22" height="116" rx="11" fill="var(--amber-300)"/><rect x="126" y="48" width="22" height="40" rx="11" fill="var(--c-text)"/></svg>`;
 
-// ============================================================ nav
-const NAV = [
-  { grp: "overview", items: ["dashboard"] }, { grp: "fleet", items: ["servers", "ha"] },
-  { grp: "data", items: ["databases", "backups"] }, { grp: "delivery", items: ["deploys", "dns"] },
-  { grp: "observe", items: ["monitoring", "jobs"] }, { grp: "govern", items: ["security", "settings"] },
-];
-const SCREEN_GROUPS = { security: ["security"] };
-
-// ============================================================ state + utils
-const S = { lang: localStorage.getItem("adpix_lang") || "en", theme: localStorage.getItem("adpix_theme") || "light", screen: "dashboard", collapsed: false, catalog: [], drawer: false, mode: "token", csrf: "", me: { username: "local", role: "owner" }, sd: null, runningJobs: 0 };
+// ============================================================ nav + state + utils
+const NAV = [{ grp: "overview", items: ["dashboard"] }, { grp: "fleet", items: ["servers", "ha"] }, { grp: "data", items: ["databases", "backups"] }, { grp: "delivery", items: ["deploys", "dns"] }, { grp: "observe", items: ["monitoring", "jobs"] }, { grp: "govern", items: ["security", "settings"] }];
+const S = { lang: localStorage.getItem("adpix_lang") || "en", theme: localStorage.getItem("adpix_theme") || "light", screen: "dashboard", collapsed: false, catalog: [], mode: "token", csrf: "", me: { username: "local", role: "owner" }, sd: null, fleet: null };
 const el = (h) => { const d = document.createElement("div"); d.innerHTML = h.trim(); return d.firstElementChild; };
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-function toast(msg, err = false) { let w = document.querySelector(".toasts"); if (!w) { w = el(`<div class="toasts"></div>`); document.body.appendChild(w); } const tt = el(`<div class="toast ${err ? "err" : ""}">${esc(msg)}</div>`); w.appendChild(tt); setTimeout(() => tt.remove(), 4200); }
-// status → {color var, bg var, label}
-function stat(s) { const k = /healthy|up|ok|running|pass|success|active/i.test(s) ? "pos" : /degraded|warn|lag|behind/i.test(s) ? "warn" : /down|fail|error|unreach|crit/i.test(s) ? "neg" : "idle"; return { color: `var(--c-${k})`, bg: `var(--c-${k}-bg)`, k }; }
-function badge(label, s) { const c = stat(s || label); return `<span class="badge b-${c.k}"><span class="dot"></span>${esc(label)}</span>`; }
-function parseServers(text) { const out = []; for (const line of String(text).split("\n")) { const m = line.match(/^-\s+([\w.-]+):\s+([^@]+)@([\d.]+):(\d+)/); if (m) out.push({ name: m[1], user: m[2], host: m[3], port: m[4], def: /\[default\]/.test(line) }); } return out; }
-function parseCluster(text) { const c = { name: "", witness: "", nodes: [], vip: "" }; const nm = text.match(/cluster[^\n]*?"?([\w.-]+)"?/i); const w = text.match(/witness[:\s=]+"?([\w.-]+)/i); const v = text.match(/vip[:\s=]+"?([\d.]+)/i); const n = text.match(/nodes[:\s=]+\[?([^\]\n]+)/i); if (nm) c.name = nm[1]; if (w) c.witness = w[1]; if (v) c.vip = v[1]; if (n) c.nodes = n[1].split(/[,\s]+/).map((x) => x.replace(/["']/g, "")).filter(Boolean); return c; }
+function toast(m, err = false) { let w = document.querySelector(".toasts"); if (!w) { w = el(`<div class="toasts"></div>`); document.body.appendChild(w); } const tt = el(`<div class="toast ${err ? "err" : ""}">${esc(m)}</div>`); w.appendChild(tt); setTimeout(() => tt.remove(), 4200); }
+const SK = { healthy: "pos", up: "pos", ok: "pos", running: "warn", queued: "idle", degraded: "warn", down: "neg", failed: "neg", canceled: "idle", interrupted: "warn", succeeded: "pos" };
+const sc = (s) => SK[s] || (/heal|up|ok|pass|succ|done/i.test(s) ? "pos" : /degrad|warn|run/i.test(s) ? "warn" : /down|fail|err|crit|unreach/i.test(s) ? "neg" : "idle");
+const cvar = (k) => `var(--c-${k})`;
+function pill(label, s) { const k = sc(s || label); return `<span style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:500;padding:2px 9px;border-radius:999px;background:var(--c-${k}-bg);color:var(--c-${k})"><span style="width:6px;height:6px;border-radius:50%;background:var(--c-${k})"></span>${esc(label)}</span>`; }
+const metColor = (v) => v >= 80 ? cvar("neg") : v >= 65 ? cvar("warn") : cvar("brand");
 
 // ============================================================ shell
 function render() {
   document.documentElement.dataset.theme = S.theme; document.body.dir = S.lang === "fa" ? "rtl" : "ltr"; document.body.lang = S.lang;
+  const aj = S.fleet ? S.fleet.counts.activeJobs : 0;
+  const cl = S.fleet ? S.fleet.cluster : { name: "—" };
   const app = document.getElementById("app");
-  app.innerHTML = `<div style="height:100vh;display:flex;flex-direction:column;overflow:hidden">
-    <header class="topbar" style="gap:14px">
+  app.innerHTML = `<div style="height:100vh;display:flex;flex-direction:column;overflow:hidden;background:var(--c-bg);color:var(--c-text)">
+    <header style="height:56px;flex:none;display:flex;align-items:center;gap:14px;padding-inline:16px;background:var(--c-topbar);border-bottom:1px solid var(--c-border);z-index:20">
       <div style="display:flex;align-items:center;gap:10px;min-width:180px">${LOGO}<span style="font-family:var(--font-display);font-weight:600;font-size:17px;letter-spacing:-.2px">AdPix <span style="color:var(--c-muted);font-weight:500">Cloud</span></span></div>
-      <button class="search-pill" id="palette">${ic("search", 16)}<span style="flex:1;text-align:start">${esc(t("search"))}</span><kbd>⌘K</kbd></button>
+      <button class="cluster-pill"><span style="width:7px;height:7px;border-radius:50%;background:var(--c-pos)"></span><span style="font-weight:500">${esc(cl.name || "no cluster")}</span>${cl.vip ? `<span style="color:var(--c-hint);font-size:11px">${esc(cl.vip)}</span>` : ""}${ic("chevron", 14)}</button>
+      <button class="search-pill" id="palette">${ic("search", 16)}<span style="flex:1;text-align:start;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t("search"))}</span><kbd>⌘K</kbd></button>
       <div style="flex:1"></div>
-      <button class="icon-btn" id="lang" title="Language">${S.lang === "en" ? "EN" : "فا"}</button>
-      <button class="icon-btn" id="theme">${ic(S.theme === "dark" ? "sun" : "moon", 16)}</button>
-      <button class="icon-btn" id="activity" title="${t("activity")}" style="position:relative">${ic("wave", 16)}${S.runningJobs ? `<span class="pulse" style="position:absolute;top:5px;inset-inline-end:5px;width:8px;height:8px;border-radius:50%;background:var(--c-brand);border:2px solid var(--c-card)"></span>` : ""}</button>
-      <button class="icon-btn" id="account" title="${esc(S.me.username)} · ${esc(S.me.role)}" style="background:var(--c-brand-tint);color:var(--c-brand);border-color:transparent;font-weight:700">${esc((S.me.username[0] || "?").toUpperCase())}</button>
+      <button class="icon-btn" id="lang" style="border-radius:999px">${S.lang === "en" ? "EN" : "فا"}</button>
+      <button class="icon-btn" id="theme" style="border-radius:999px">${ic(S.theme === "dark" ? "sun" : "moon", 17)}</button>
+      <button class="icon-btn" id="activity" title="${t("activity")}" style="position:relative;border-radius:999px">${ic("wave", 17)}${aj ? `<span class="pulse" style="position:absolute;top:5px;inset-inline-end:5px;width:8px;height:8px;border-radius:50%;background:var(--c-brand);border:2px solid var(--c-topbar)"></span>` : ""}</button>
+      <button class="icon-btn" style="border-radius:999px">${ic("bell", 17)}</button>
+      <button class="icon-btn" id="account" title="${esc(S.me.username)} · ${esc(S.me.role)}" style="background:var(--c-brand);color:#fff;border-color:transparent;font-weight:600;border-radius:999px;font-size:13px">${esc((S.me.username.slice(0, 2)).toUpperCase())}</button>
     </header>
     <div style="flex:1;display:flex;min-height:0">
       <aside class="sidebar ${S.collapsed ? "collapsed" : ""}">
-        <nav class="nav">${NAV.map((g) => `<div class="nav-group"><div class="nav-group-label">${esc(STR[S.lang].grp[g.grp])}</div>${g.items.map((id) => `<div class="nav-item ${S.screen === id ? "active" : ""}" data-nav="${id}"><span class="ic">${ic(id)}</span><span class="label">${esc(STR[S.lang].nav[id])}</span>${id === "jobs" && S.runningJobs ? `<span class="badge b-warn" style="padding:1px 7px;font-size:11px">${S.runningJobs}</span>` : ""}</div>`).join("")}</div>`).join("")}</nav>
-        <div style="border-top:1px solid var(--c-border);padding:10px"><button class="nav-item" id="collapse" style="width:100%"><span class="ic">${ic("chevron", 16)}</span><span class="label">${t("collapse")}</span></button></div>
+        <nav class="nav" style="padding:12px 10px">${NAV.map((g) => `<div class="nav-group"><div class="nav-group-label">${esc(STR[S.lang].grp[g.grp])}</div>${g.items.map((id) => navItem(id, aj)).join("")}</div>`).join("")}</nav>
+        <div style="border-top:1px solid var(--c-border);padding:10px"><button class="nav-item" id="collapse" style="width:100%;color:var(--c-muted)"><span class="ic">${ic("chevL", 16)}</span><span class="label">${t("collapse")}</span></button></div>
       </aside>
-      <main class="main"><div class="content" id="content"></div></main>
-    </div>
-  </div>`;
+      <main class="main"><div class="content" id="content" style="padding:22px 26px 60px"></div></main>
+    </div></div>`;
   app.querySelectorAll("[data-nav]").forEach((n) => (n.onclick = () => { S.screen = n.dataset.nav; S.sd = null; render(); }));
   app.querySelector("#collapse").onclick = () => { S.collapsed = !S.collapsed; render(); };
   app.querySelector("#theme").onclick = () => { S.theme = S.theme === "dark" ? "light" : "dark"; localStorage.setItem("adpix_theme", S.theme); render(); };
   app.querySelector("#lang").onclick = () => { S.lang = S.lang === "en" ? "fa" : "en"; localStorage.setItem("adpix_lang", S.lang); render(); };
   app.querySelector("#activity").onclick = () => openDrawer();
   app.querySelector("#palette").onclick = openPalette;
+  app.querySelector(".cluster-pill").onclick = () => { S.screen = "ha"; render(); };
   app.querySelector("#account").onclick = async () => { if (S.mode !== "session") return toast(`${S.me.username} · ${S.me.role} (token mode)`); if (confirm(`Log out ${S.me.username}?`)) { try { await api("/api/logout", { method: "POST", body: "{}" }); } catch {} location.reload(); } };
-  renderScreen(document.getElementById("content"));
-  refreshJobBadge();
+  (SCREENS[S.screen] || SCREENS.dashboard)(document.getElementById("content"));
 }
-function head(title, sub, actions = "") { return `<div class="h1row"><div class="grow"><h1>${esc(title)}</h1>${sub ? `<div class="sub">${esc(sub)}</div>` : ""}</div><div style="display:flex;gap:8px;flex-wrap:wrap">${actions}</div></div>`; }
-function btn(id, label, icon, kind = "") { return `<button class="btn ${kind} btn-sm" data-act="${id}">${icon ? ic(icon, 14) : ""}${esc(label)}</button>`; }
-async function refreshJobBadge() { try { const { jobs } = await listJobs(); const n = jobs.filter((j) => j.status === "running" || j.status === "queued").length; if (n !== S.runningJobs) { S.runningJobs = n; } } catch {} }
+function navItem(id, aj) {
+  const count = id === "servers" && S.fleet ? S.fleet.nodes.length : id === "jobs" && aj ? aj : id === "deploys" && S.fleet ? 0 : "";
+  const badge = count ? `<span style="display:flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;border-radius:999px;font-size:11px;font-weight:600;background:${id === "jobs" ? "var(--c-warn-bg)" : "var(--c-sunken)"};color:${id === "jobs" ? "var(--c-warn)" : "var(--c-muted)"}">${count}</span>` : "";
+  return `<div class="nav-item ${S.screen === id ? "active" : ""}" data-nav="${id}"><span class="ic">${ic(id)}</span><span class="label" style="flex:1">${esc(STR[S.lang].nav[id])}</span>${badge}</div>`;
+}
+// header block
+function H(title, sub, actions = "") { return `<div style="display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:20px"><div style="flex:1;min-width:220px"><h1 style="margin:0;font-size:22px;font-weight:500;letter-spacing:-.3px">${esc(title)}</h1>${sub ? `<div style="color:var(--c-muted);font-size:13px;margin-top:4px">${esc(sub)}</div>` : ""}</div><div style="display:flex;gap:8px;flex-wrap:wrap">${actions}</div></div>`; }
+const cardOpen = `background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);overflow:hidden`;
+const cardHead = `padding:13px 16px;border-bottom:1px solid var(--c-divider);font-weight:500;font-size:14px`;
+function bigBtn(id, label, icon, primary) { return `<button data-act="${id}" style="display:inline-flex;align-items:center;gap:7px;height:38px;padding-inline:15px;border:${primary ? "0" : "1px solid var(--c-border)"};background:${primary ? "var(--c-brand)" : "var(--c-card)"};color:${primary ? "#fff" : "var(--c-text)"};border-radius:8px;cursor:pointer;font:inherit;font-size:13px;font-weight:${primary ? 600 : 500};box-shadow:var(--c-shadow-card)">${icon ? ic(icon, 15) : ""}${esc(label)}</button>`; }
 
-// ============================================================ screen router
-const SCREENS = {};
-function renderScreen(c) { (SCREENS[S.screen] || (() => { c.innerHTML = head(STR[S.lang].nav[S.screen] || S.screen); }))(c); }
-
-// helper: a card that loads a read tool's text
-function toolPanel(title, tool, args = {}, actions = "") {
-  const card = el(`<div class="panel"><div class="head">${esc(title)}<button class="btn btn-sm refresh">${t("refresh")}</button></div><div class="card-pad"><div class="body"><div class="skel" style="width:70%"></div><div class="skel" style="width:50%;margin-top:8px"></div></div></div></div>`);
-  const body = card.querySelector(".body");
-  const load = async () => { body.innerHTML = `<div class="skel" style="width:60%"></div>`; try { const r = await runTool(tool, args); body.innerHTML = `<pre class="out">${esc(r.result)}</pre>`; } catch (e) { body.innerHTML = `<pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre>`; } };
-  card.querySelector(".refresh").onclick = load; load();
-  return card;
-}
-// run an action tool (job); destructive→preview modal
-async function action(tool, args = {}, destructive = false) {
-  try { if (destructive) return destructiveModal({ name: tool, title: tool, destructive: true }, args); const r = await startJob(tool, args); toast(`Started ${tool}`); openDrawer(r.job.id); refreshJobBadge(); }
-  catch (e) { toast(e.message, true); }
-}
+// ============================================================ data fetch
+async function loadFleet() { try { S.fleet = await api("/api/fleet"); } catch { S.fleet = null; } }
 
 // ============================================================ DASHBOARD
+const SCREENS = {};
 SCREENS.dashboard = async (c) => {
-  c.innerHTML = head(t("fleetOverview"), "Live fleet health, cluster quorum, and recent activity.",
-    btn("backup", t("backupAll"), "backups") + btn("deploy", t("deploy"), "deploys") + `<button class="btn btn-primary btn-sm" data-act="add">${ic("plus", 14)}${t("addServer")}</button>`);
+  const f = S.fleet || { cluster: { name: "", vip: "", servers: 0 }, counts: { healthy: 0, degraded: 0, down: 0, activeJobs: 0 }, nodes: [], recentJobs: [], alerts: [] };
+  c.innerHTML = H(t("fleetOverview"), `cluster ${f.cluster.name || "—"} · ${f.cluster.servers} servers${f.cluster.vip ? " · vip " + f.cluster.vip : ""}`, bigBtn("backup", t("backupAll"), "backups") + bigBtn("deploy", t("deploy"), "deploys") + bigBtn("add", t("addServer"), "plus", true));
   c.querySelector('[data-act="backup"]').onclick = () => action("adpix_backup");
-  c.querySelector('[data-act="deploy"]').onclick = () => action("adpix_update", {}, false);
-  c.querySelector('[data-act="add"]').onclick = () => { S.screen = "servers"; render(); };
-  const kpis = el(`<div class="gridcards autofit" style="margin-bottom:16px"></div>`); c.appendChild(kpis);
+  c.querySelector('[data-act="deploy"]').onclick = () => action("adpix_update");
+  c.querySelector('[data-act="add"]').onclick = addServerWizard;
+  // KPI cards
+  const kpi = [["HEALTHY", f.counts.healthy, "servers", "pos"], ["DEGRADED", f.counts.degraded, "need attention", "warn"], ["DOWN", f.counts.down, "critical", "neg"], ["ACTIVE JOBS", f.counts.activeJobs, "running", "brand"]];
+  c.appendChild(el(`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:16px">${kpi.map(([l, v, s, k]) => `<div style="${cardOpen};padding:18px 18px 18px 20px;position:relative"><div style="position:absolute;inset-block:0;inset-inline-start:0;width:4px;background:var(--c-${k})"></div><div style="color:var(--c-muted);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.6px">${l}</div><div style="display:flex;align-items:baseline;gap:8px;margin-top:10px"><span style="font-size:32px;font-weight:400;letter-spacing:-.5px">${v}</span><span style="font-size:13px;color:var(--c-muted)">${s}</span></div></div>`).join("")}</div>`));
+  // topology + node health
   const row2 = el(`<div style="display:grid;grid-template-columns:1.35fr 1fr;gap:16px;margin-bottom:16px"></div>`); c.appendChild(row2);
-  const topo = el(`<div class="panel"></div>`); const nodeH = el(`<div class="panel"><div class="head">${t("nodeHealth")}</div><div class="body card-pad"><div class="skel" style="width:60%"></div></div></div>`); row2.append(topo, nodeH);
-  const row3 = el(`<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px"></div>`); c.appendChild(row3);
-  const jobsC = el(`<div class="panel"><div class="head">${t("recentJobs")}<button class="btn btn-sm" data-go="jobs">${t("viewAll")} →</button></div><div class="rj"></div></div>`);
-  const alertsC = el(`<div class="panel"><div class="head">${t("activeAlerts")}<span class="al-count"></span></div><div class="al"></div></div>`);
-  row3.append(jobsC, alertsC); jobsC.querySelector("[data-go]").onclick = () => { S.screen = "jobs"; render(); };
-
-  const [srvText, cluText] = await Promise.all([runTool("server_list").then((r) => r.result).catch(() => ""), runTool("cluster_list").then((r) => r.result).catch(() => "")]);
-  const servers = parseServers(srvText); const clu = parseCluster(cluText);
-  const kpiData = [["Servers", servers.length, "registered", "var(--c-brand)"], ["Cluster", clu.name || "—", clu.nodes.length ? `${clu.nodes.length} nodes` : "none", "var(--c-pos)"], ["Witness", clu.witness || "—", "quorum", "var(--c-pos)"], ["VIP", clu.vip || "—", "front door", "var(--c-brand)"]];
-  kpis.innerHTML = kpiData.map(([l, v, s, col]) => `<div class="accent-card"><div class="bar" style="background:${col}"></div><div class="kpi-label">${esc(l)}</div><div style="display:flex;align-items:baseline;gap:8px;margin-top:8px"><span class="kpi mono">${esc(v)}</span><span style="font-size:12px;color:var(--c-muted)">${esc(s)}</span></div></div>`).join("");
-
-  // topology
-  if (clu.nodes.length || clu.witness) topo.innerHTML = topologySvg(clu, t("clusterTopology"), t("quorumHealthy"));
-  else topo.innerHTML = `<div class="head">${t("clusterTopology")}</div><div class="empty">No cluster defined. Define one on the High availability screen.</div>`;
-  // node health = host metrics per server (live, one probe)
-  nodeH.querySelector(".body").innerHTML = servers.length ? servers.map((s) => `<div class="mono" style="padding:10px 0;border-bottom:1px solid var(--c-divider)"><b>${esc(s.name)}</b> <span class="muted">${esc(s.host)}</span></div>`).join("") + `<div class="hint" style="margin-top:8px">Open a server for live CPU/RAM/disk.</div>` : `<div class="empty">No servers yet.</div>`;
+  row2.appendChild(el(`<div style="${cardOpen}">${topologyCard(f)}</div>`));
+  const nh = el(`<div style="${cardOpen}"><div style="${cardHead}">${t("nodeHealth")}</div><div></div></div>`);
+  nh.lastElementChild.innerHTML = f.nodes.length ? f.nodes.map((n) => nodeHealthRow(n)).join("") : `<div class="empty">No servers. Add one to see live health.</div>`;
+  row2.appendChild(nh);
   // recent jobs + alerts
-  try { const { jobs } = await listJobs(); jobsC.querySelector(".rj").innerHTML = jobs.length ? jobs.slice(0, 5).map((j) => `<div style="display:flex;align-items:center;gap:11px;padding:11px 16px;border-bottom:1px solid var(--c-divider)"><span class="dot ${j.status === "running" ? "pulse" : ""}" style="background:${stat(j.status).color}"></span><div style="flex:1;min-width:0"><div class="mono" style="font-size:13px;font-weight:500">${esc(j.tool)}</div><div class="mono muted" style="font-size:11.5px">${esc(j.key || "")}</div></div>${badge(j.status, j.status)}</div>`).join("") : `<div class="empty">${t("noJobs")}</div>`; } catch { jobsC.querySelector(".rj").innerHTML = `<div class="empty">${t("noJobs")}</div>`; }
-  alertsC.querySelector(".al").innerHTML = `<div class="empty">Run a health check from Monitoring to surface alerts.</div>`;
+  const row3 = el(`<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px"></div>`); c.appendChild(row3);
+  const rj = el(`<div style="${cardOpen}"><div style="${cardHead};display:flex;align-items:center;justify-content:space-between">${t("recentJobs")}<button data-go style="border:0;background:transparent;color:var(--c-brand);font:inherit;font-size:12.5px;font-weight:500;cursor:pointer">${t("viewAll")} →</button></div><div></div></div>`);
+  rj.querySelector("[data-go]").onclick = () => { S.screen = "jobs"; render(); };
+  rj.lastElementChild.innerHTML = f.recentJobs.length ? f.recentJobs.map((j) => `<div style="display:flex;align-items:center;gap:11px;padding:11px 16px;border-bottom:1px solid var(--c-divider)"><span style="width:8px;height:8px;border-radius:50%;background:var(--c-${sc(j.status)});flex:none;${j.status === "running" ? "animation:pulse-dot 1.4s infinite" : ""}"></span><div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:500">${esc(j.tool)}</div><div style="font-size:11.5px;color:var(--c-muted);font-family:var(--font-mono)">${esc(j.target)}</div></div><span style="font-size:11.5px;color:var(--c-hint)">${esc(j.status)}</span></div>`).join("") : `<div class="empty">${t("noJobs")}</div>`;
+  const al = el(`<div style="${cardOpen}"><div style="${cardHead};display:flex;align-items:center;justify-content:space-between">${t("activeAlerts")}<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--c-warn-bg);color:var(--c-warn)">${f.alerts.length}</span></div><div></div></div>`);
+  al.lastElementChild.innerHTML = f.alerts.length ? f.alerts.map((a) => `<div style="display:flex;gap:11px;padding:12px 16px;border-bottom:1px solid var(--c-divider)"><span style="width:3px;border-radius:999px;background:var(--c-${a.level});flex:none;align-self:stretch"></span><div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:500">${esc(a.title)}</div><div style="font-size:12px;color:var(--c-muted);margin-top:2px">${esc(a.why)}</div>${a.action ? `<button data-fix="${esc(a.action.tool)}" style="margin-top:7px;border:1px solid var(--c-border);background:var(--c-card);color:var(--c-text);border-radius:7px;padding:4px 10px;font:inherit;font-size:12px;font-weight:500;cursor:pointer">${esc(a.action.label)}</button>` : ""}</div></div>`).join("") : `<div class="empty">No active alerts.</div>`;
+  al.querySelectorAll("[data-fix]").forEach((b) => (b.onclick = () => action(b.dataset.fix)));
+  row3.append(rj, al);
 };
-function topologySvg(clu, title, healthy) {
-  const A = clu.nodes[0] || "node-a", B = clu.nodes[1] || "node-b", W = clu.witness || "witness";
-  return `<div class="head">${esc(title)}<span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--c-pos);font-weight:500"><span class="dot" style="background:var(--c-pos)"></span>${esc(healthy)}</span></div>
+function nodeHealthRow(n) {
+  const mets = [["CPU", n.cpu], ["MEM", n.mem], ["DISK", n.disk]];
+  return `<div style="padding:12px 16px;border-bottom:1px solid var(--c-divider)"><div style="display:flex;align-items:center;gap:8px;margin-bottom:9px"><span style="font-family:var(--font-mono);font-size:13px;font-weight:500">${esc(n.name)}</span><span style="font-size:11px;color:var(--c-hint);text-transform:uppercase;letter-spacing:.4px">${esc(n.role)}</span><span style="flex:1"></span>${pill(n.status, n.status)}</div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">${mets.map(([l, v]) => `<div><div style="display:flex;justify-content:space-between;font-size:11px;color:var(--c-muted);margin-bottom:4px"><span>${l}</span><span style="font-family:var(--font-mono);color:${metColor(v)}">${v}%</span></div><div style="height:5px;border-radius:999px;background:var(--c-sunken);overflow:hidden"><div style="height:100%;width:${v}%;background:${metColor(v)};border-radius:999px"></div></div></div>`).join("")}</div></div>`;
+}
+function topologyCard(f) {
+  const W = f.nodes.find((n) => n.role === "witness"), nodes = f.nodes.filter((n) => n.role === "node");
+  const A = nodes[0], B = nodes[1];
+  const stk = (n) => n ? cvar(sc(n.status)) : "var(--c-border)";
+  return `<div style="${cardHead};display:flex;align-items:center;justify-content:space-between">${t("clusterTopology")}<span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--c-pos);font-weight:500"><span style="width:7px;height:7px;border-radius:50%;background:var(--c-pos)"></span>${t("quorumHealthy")}</span></div>
   <div style="padding:8px 12px 14px"><svg viewBox="0 0 560 230" width="100%" style="display:block">
-    <line x1="280" y1="60" x2="150" y2="165" stroke="var(--c-border)" stroke-width="2"/><line x1="280" y1="60" x2="410" y2="165" stroke="var(--c-border)" stroke-width="2"/><line x1="150" y1="165" x2="410" y2="165" stroke="var(--c-brand)" stroke-width="2" stroke-dasharray="5 5"/>
-    <rect x="232" y="18" width="96" height="44" rx="9" fill="var(--c-card)" stroke="var(--c-pos)" stroke-width="2"/><circle cx="248" cy="40" r="5" fill="var(--c-pos)"/><text x="262" y="37" font-size="12" font-weight="600" fill="var(--c-text)" font-family="var(--font-mono)">${esc(W)}</text><text x="262" y="50" font-size="9.5" fill="var(--c-muted)">3rd vote</text>
-    <rect x="78" y="163" width="148" height="50" rx="9" fill="var(--c-card)" stroke="var(--c-pos)" stroke-width="2"/><circle cx="96" cy="183" r="5" fill="var(--c-pos)"/><text x="110" y="181" font-size="12" font-weight="600" fill="var(--c-text)" font-family="var(--font-mono)">${esc(A)}</text><text x="110" y="194" font-size="9.5" fill="var(--c-muted)">pg primary · ch r1</text>
-    <rect x="334" y="163" width="148" height="50" rx="9" fill="var(--c-card)" stroke="var(--c-pos)" stroke-width="2"/><circle cx="352" cy="183" r="5" fill="var(--c-pos)"/><text x="366" y="181" font-size="12" font-weight="600" fill="var(--c-text)" font-family="var(--font-mono)">${esc(B)}</text><text x="366" y="194" font-size="9.5" fill="var(--c-muted)">pg standby · ch r2</text>
-    ${clu.vip ? `<rect x="244" y="147" width="72" height="34" rx="8" fill="var(--c-brand-tint)" stroke="var(--c-brand)" stroke-width="1.5"/><text x="280" y="168" text-anchor="middle" font-size="10" font-weight="700" fill="var(--c-brand)" font-family="var(--font-mono)">VIP</text>` : ""}
+    <line x1="280" y1="62" x2="150" y2="168" stroke="var(--c-border)" stroke-width="2"/><line x1="280" y1="62" x2="410" y2="168" stroke="var(--c-border)" stroke-width="2"/>${A && B ? `<line x1="150" y1="168" x2="280" y2="170" stroke="var(--c-brand)" stroke-width="2" stroke-dasharray="5 5"/><line x1="410" y1="168" x2="280" y2="170" stroke="var(--c-brand)" stroke-width="2" stroke-dasharray="5 5"/>` : ""}
+    ${f.cluster.vip ? `<rect x="244" y="153" width="72" height="34" rx="8" fill="var(--c-brand-tint)" stroke="var(--c-brand)" stroke-width="1.5"/><text x="280" y="170" text-anchor="middle" font-size="10" font-weight="700" fill="var(--c-brand)" font-family="var(--font-mono)">VIP</text><text x="280" y="182" text-anchor="middle" font-size="9" fill="var(--c-brand)" font-family="var(--font-mono)">${esc(f.cluster.vip.split(".").pop())}</text>` : ""}
+    <rect x="232" y="18" width="96" height="46" rx="9" fill="var(--c-card)" stroke="${stk(W)}" stroke-width="2"/><circle cx="248" cy="41" r="5" fill="${stk(W)}"/><text x="262" y="38" font-size="12" font-weight="600" fill="var(--c-text)" font-family="var(--font-mono)">${esc(W ? W.name : "witness")}</text><text x="262" y="51" font-size="9.5" fill="var(--c-muted)">3rd vote</text>
+    <rect x="78" y="168" width="148" height="52" rx="9" fill="var(--c-card)" stroke="${stk(A)}" stroke-width="2"/><circle cx="96" cy="188" r="5" fill="${stk(A)}"/><text x="110" y="186" font-size="12" font-weight="600" fill="var(--c-text)" font-family="var(--font-mono)">${esc(A ? A.name : "node-a")}</text><text x="110" y="199" font-size="9.5" fill="var(--c-muted)">${esc(A ? A.dbRole : "—")}</text><text x="110" y="212" font-size="9.5" fill="${A && A.status !== "healthy" ? "var(--c-warn)" : "var(--c-muted)"}">${A ? `cpu ${A.cpu}% · mem ${A.mem}%` : ""}</text>
+    <rect x="334" y="168" width="148" height="52" rx="9" fill="var(--c-card)" stroke="${stk(B)}" stroke-width="2"/><circle cx="352" cy="188" r="5" fill="${stk(B)}"/><text x="366" y="186" font-size="12" font-weight="600" fill="var(--c-text)" font-family="var(--font-mono)">${esc(B ? B.name : "node-b")}</text><text x="366" y="199" font-size="9.5" fill="var(--c-muted)">${esc(B ? B.dbRole : "—")}</text><text x="366" y="212" font-size="9.5" fill="${B && B.status !== "healthy" ? "var(--c-warn)" : "var(--c-muted)"}">${B ? `cpu ${B.cpu}% · mem ${B.mem}%` : ""}</text>
   </svg></div>`;
 }
 
 // ============================================================ SERVERS
-SCREENS.servers = async (c) => {
-  c.innerHTML = head(STR[S.lang].nav.servers, "Every registered server in the fleet.", `<button class="btn btn-primary btn-sm" data-act="add">${ic("plus", 14)}${t("addServer")}</button>`);
-  c.querySelector('[data-act="add"]').onclick = () => addServerModal();
-  const panel = el(`<div class="panel"><div class="gridhead" style="grid-template-columns:1.4fr .9fr 1.1fr 1fr .8fr"><span>Name</span><span>Role</span><span>Host</span><span>adpixDir</span><span style="text-align:end">Status</span></div><div class="rows"><div class="card-pad"><div class="skel" style="width:60%"></div></div></div></div>`);
-  c.appendChild(panel);
-  const [srvText, cluText] = await Promise.all([runTool("server_list").then((r) => r.result).catch((e) => e.message), runTool("cluster_list").then((r) => r.result).catch(() => "")]);
-  const servers = parseServers(srvText); const clu = parseCluster(cluText);
-  const roleOf = (n) => n === clu.witness ? "witness" : clu.nodes.includes(n) ? "node" : "—";
-  const rows = panel.querySelector(".rows");
-  rows.innerHTML = servers.length ? "" : `<div class="empty">${esc(srvText)}</div>`;
-  servers.forEach((s) => { const r = el(`<button class="gridrow" style="grid-template-columns:1.4fr .9fr 1.1fr 1fr .8fr"><span style="display:flex;align-items:center;gap:9px"><span class="dot" style="background:var(--c-idle)"></span><span class="mono" style="font-weight:500">${esc(s.name)}</span></span><span class="muted">${esc(roleOf(s.name))}</span><span class="mono muted">${esc(s.host)}</span><span class="muted">${esc("/opt/adpix")}</span><span style="text-align:end">${badge("open →", "idle")}</span></button>`); r.onclick = () => { S.sd = s.name; S.screen = "serverDetail"; render(); }; rows.appendChild(r); });
+SCREENS.servers = (c) => {
+  const f = S.fleet || { cluster: { name: "" }, nodes: [] };
+  c.innerHTML = H(STR[S.lang].nav.servers, `${f.nodes.length} servers${f.cluster.name ? " in cluster " + f.cluster.name : ""}`, bigBtn("add", t("addServer"), "plus", true));
+  c.querySelector('[data-act="add"]').onclick = addServerWizard;
+  const cols = "1.4fr .8fr 1.1fr 1.1fr 1fr .8fr";
+  const tbl = el(`<div style="${cardOpen}"><div style="display:grid;grid-template-columns:${cols};gap:12px;padding:11px 18px;border-bottom:1px solid var(--c-border);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--c-hint)"><span>Name</span><span>Role</span><span>Host</span><span>OS</span><span>Status</span><span style="text-align:end">Last seen</span></div><div class="rows"></div></div>`);
+  c.appendChild(tbl);
+  tbl.querySelector(".rows").innerHTML = f.nodes.length ? f.nodes.map((n) => `<button class="srvrow" data-n="${esc(n.name)}" style="width:100%;display:grid;grid-template-columns:${cols};gap:12px;align-items:center;padding:13px 18px;border:0;border-bottom:1px solid var(--c-divider);background:transparent;cursor:pointer;color:inherit;font:inherit;text-align:start"><span style="display:flex;align-items:center;gap:9px"><span style="width:8px;height:8px;border-radius:50%;background:var(--c-${sc(n.status)})"></span><span style="font-family:var(--font-mono);font-size:13px;font-weight:500">${esc(n.name)}</span></span><span style="font-size:12.5px;color:var(--c-muted)">${esc(n.role)}</span><span style="font-family:var(--font-mono);font-size:12.5px;color:var(--c-muted)">${esc(n.host)}</span><span style="font-size:12.5px;color:var(--c-muted)">${esc(n.os)}</span><span>${pill(n.status, n.status)}</span><span style="text-align:end;font-size:12px;color:var(--c-hint);font-family:var(--font-mono)">${esc(n.lastSeen)}</span></button>`).join("") : `<div class="empty">No servers registered. Click “Add server”.</div>`;
+  tbl.querySelectorAll(".srvrow").forEach((r) => (r.onclick = () => { S.sd = r.dataset.n; S.screen = "serverDetail"; render(); }));
 };
 
-// ============================================================ SERVER DETAIL / CONTAINERS
-SCREENS.serverDetail = async (c) => {
-  const name = S.sd;
-  c.innerHTML = `<button class="btn btn-sm" data-back style="margin-bottom:12px;background:transparent;border:0;color:var(--c-muted)">${ic("chevron", 15)} ${STR[S.lang].nav.servers}</button>`
-    + head(name, "Containers, resources, and live logs.", `<button class="btn btn-sm" data-act="backup">Backup now</button><button class="btn btn-sm" data-act="restart">Restart all</button>`);
+// ============================================================ SERVER DETAIL
+SCREENS.serverDetail = (c) => {
+  const name = S.sd; const n = (S.fleet?.nodes || []).find((x) => x.name === name) || { name, host: "", os: "", status: "idle", cpu: 0, mem: 0, disk: 0 };
+  c.innerHTML = `<button data-back style="display:inline-flex;align-items:center;gap:6px;border:0;background:transparent;color:var(--c-muted);font:inherit;font-size:12.5px;cursor:pointer;margin-bottom:12px;padding:0">${ic("chevL", 15)} ${STR[S.lang].nav.servers}</button>`
+    + `<div style="display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:18px"><div style="flex:1;min-width:220px"><div style="display:flex;align-items:center;gap:10px"><h1 style="margin:0;font-size:22px;font-weight:500;font-family:var(--font-mono)">${esc(name)}</h1>${pill(n.status, n.status)}</div><div style="color:var(--c-muted);font-size:13px;margin-top:5px;font-family:var(--font-mono)">${esc(n.host)} · ${esc(n.os)}</div></div><div style="display:flex;gap:8px">${bigBtn("backup", "Backup now")}${bigBtn("restart", "Restart all")}</div></div>`;
   c.querySelector("[data-back]").onclick = () => { S.screen = "servers"; S.sd = null; render(); };
   c.querySelector('[data-act="backup"]').onclick = () => action("adpix_backup", { server: name });
-  c.querySelector('[data-act="restart"]').onclick = () => destructiveModal({ name: "adpix_restart", title: `Restart all services on ${name}`, destructive: true }, { server: name });
+  c.querySelector('[data-act="restart"]').onclick = () => verifyAction({ name: "adpix_restart", title: `Restart all services on ${name}`, destructive: true }, { server: name });
+  // gauges
+  c.appendChild(el(`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:16px">${[["CPU", n.cpu], ["MEMORY", n.mem], ["DISK", n.disk]].map(([l, v]) => `<div style="${cardOpen};padding:14px 16px"><div style="font-size:11.5px;color:var(--c-muted);text-transform:uppercase;letter-spacing:.5px">${l}</div><div style="font-size:26px;font-weight:400;margin:6px 0 8px;color:${metColor(v)}">${v}%</div><div style="height:5px;border-radius:999px;background:var(--c-sunken);overflow:hidden"><div style="height:100%;width:${v}%;background:${metColor(v)};border-radius:999px"></div></div></div>`).join("")}</div>`));
   const grid = el(`<div style="display:grid;grid-template-columns:1.05fr 1fr;gap:16px;align-items:start"></div>`); c.appendChild(grid);
-  // containers (live status text) + per-service controls for known services
   const known = ["ingest", "api", "web", "worker", "identity-job", "postgres", "clickhouse", "caddy", "redis"];
-  const contCard = el(`<div class="panel"><div class="head">${t("containers")}</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--c-divider)" class="cc"></div></div>`);
-  contCard.querySelector(".cc").innerHTML = known.map((svc) => `<div class="cont-card"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span class="dot" style="background:var(--c-idle)"></span><span class="mono" style="font-size:13px;font-weight:500">${esc(svc)}</span></div><div class="muted" style="font-size:11px;margin-bottom:9px">tap a control</div><div style="display:flex;gap:5px"><button class="iconbtn-sm" data-svc="${svc}" data-a="restart" style="flex:1" title="Restart">${ic("restart", 13)}</button><button class="iconbtn-sm" data-svc="${svc}" data-a="stop" style="flex:1" title="Stop">${ic("stop", 12)}</button><button class="iconbtn-sm" data-svc="${svc}" data-a="status" style="flex:1" title="Status">${ic("wave", 13)}</button></div></div>`).join("");
-  contCard.querySelectorAll("[data-svc]").forEach((b) => (b.onclick = () => { const svc = b.dataset.svc, a = b.dataset.a; if (a === "status") action("container_control", { server: name, service: svc, action: "status" }); else destructiveModal({ name: "container_control", title: `${a} ${svc} on ${name}`, destructive: true }, { server: name, service: svc, action: a }); }));
-  // log viewer (live)
-  const logCard = el(`<div class="panel" style="display:flex;flex-direction:column"><div class="head">${t("logs")}<button class="btn btn-sm" data-load>${t("refresh")}</button></div><div class="log-view" style="height:420px">click refresh to tail logs…</div></div>`);
-  logCard.querySelector("[data-load]").onclick = async () => { const lv = logCard.querySelector(".log-view"); lv.textContent = "loading…"; try { const r = await runTool("adpix_logs", { server: name, lines: 120 }); lv.innerHTML = String(r.result).split("\n").map((l) => `<div class="row"><span style="color:var(--c-text)">${esc(l)}</span></div>`).join(""); lv.scrollTop = lv.scrollHeight; } catch (e) { lv.textContent = e.message; } };
-  grid.append(contCard, logCard);
-};
-
-// ============================================================ JOBS & AUDIT
-SCREENS.jobs = async (c) => {
-  c.innerHTML = head(STR[S.lang].nav.jobs, "Live jobs and the immutable audit trail.", `<button class="btn btn-sm" data-r>${t("refresh")}</button>`);
-  const live = el(`<div class="panel" style="margin-bottom:16px"><div class="head">Live jobs</div><div class="lj"><div class="card-pad"><div class="skel" style="width:50%"></div></div></div></div>`); c.appendChild(live);
-  const audit = el(`<div class="panel"><div class="head">${ic("security", 15)} Audit log<span class="hint" style="margin-inline-start:auto">Immutable · hash-chained</span></div><div class="au"></div></div>`); c.appendChild(audit);
-  const loadJobs2 = async () => { try { const { jobs } = await listJobs(); live.querySelector(".lj").innerHTML = jobs.length ? jobs.slice(0, 30).map((j) => `<div style="padding:13px 16px;border-bottom:1px solid var(--c-divider)"><div style="display:flex;align-items:center;gap:11px"><span class="dot ${j.status === "running" ? "pulse" : ""}" style="background:${stat(j.status).color}"></span><span class="mono" style="font-size:13px;font-weight:500;flex:1">${esc(j.tool)}</span><span class="mono muted" style="font-size:11.5px">${esc(j.key || "")} · ${esc(j.id.slice(0, 8))}</span>${badge(j.status, j.status)}<button class="btn btn-sm" data-v="${j.id}">View</button></div></div>`).join("") : `<div class="empty">${t("noJobs")}</div>`; live.querySelectorAll("[data-v]").forEach((b) => (b.onclick = () => openDrawer(b.dataset.v))); } catch (e) { live.querySelector(".lj").innerHTML = `<pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre>`; } };
-  c.querySelector("[data-r]").onclick = loadJobs2; loadJobs2();
-  if (S.me.role === "owner") { try { const { entries, chain } = await api("/api/admin/audit"); audit.querySelector(".au").innerHTML = `<div style="padding:8px 16px">${chain.ok ? badge("chain intact", "pos") : badge("TAMPERED @ " + chain.brokenAtSeq, "neg")}</div><div class="gridhead" style="grid-template-columns:.5fr 1fr 1.4fr 1fr .8fr"><span>#</span><span>Who</span><span>Action</span><span>Target</span><span style="text-align:end">Outcome</span></div>` + entries.slice(0, 40).map((e) => `<div class="gridrow" style="grid-template-columns:.5fr 1fr 1.4fr 1fr .8fr;cursor:default"><span class="muted">${e.seq}</span><span class="mono">${esc(e.actor)}</span><span class="mono" style="font-size:11.5px">${esc(e.tool)}</span><span>${esc(e.target)}</span><span style="text-align:end" class="muted">${esc(e.outcome)}</span></div>`).join(""); } catch (e) { audit.querySelector(".au").innerHTML = `<div class="empty">${esc(e.message)}</div>`; } }
-  else audit.querySelector(".au").innerHTML = `<div class="empty">Audit log is owner-only.</div>`;
-};
-
-// ============================================================ BACKUPS
-SCREENS.backups = (c) => {
-  let tab = "list";
-  const draw = () => {
-    c.innerHTML = head(STR[S.lang].nav.backups, "On-demand + scheduled snapshots.", `<button class="btn btn-primary btn-sm" data-act="create">${ic("plus", 14)}Create backup</button>`);
-    c.appendChild(el(`<div class="seg"><button class="${tab === "list" ? "on" : ""}" data-tab="list">Run / restore</button><button class="${tab === "sched" ? "on" : ""}" data-tab="sched">Schedule</button></div>`));
-    c.querySelector('[data-act="create"]').onclick = () => action("adpix_backup");
-    c.querySelectorAll("[data-tab]").forEach((b) => (b.onclick = () => { tab = b.dataset.tab; draw(); }));
-    if (tab === "list") {
-      const g = el(`<div class="gridcards cols-2" style="grid-template-columns:1fr 1fr"></div>`); c.appendChild(g);
-      g.append(actionCardEl("adpix_backup", "Create a verified app backup", false), actionCardEl("pg_backup", "Postgres dump", false), actionCardEl("ch_backup", "ClickHouse backup", false),
-        actionCardEl("adpix_restore", "Restore the app from a backup dir", true), actionCardEl("pg_restore_db", "Restore Postgres from a dump", true), actionCardEl("ch_restore_db", "Restore ClickHouse", true));
-    } else {
-      const card = el(`<div class="panel" style="max-width:560px"><div class="head" style="display:block">Backup schedule<div class="sub">Verified snapshots on a systemd timer.</div></div><div class="card-pad">
-        <label class="fld"><span class="lab">Name</span><input class="input mono" id="sname" value="nightly-backup"></label>
-        <label class="fld"><span class="lab">OnCalendar</span><input class="input mono" id="ssched" value="daily"></label>
-        <div style="display:flex;justify-content:flex-end"><button class="btn btn-primary" id="ssave">Save schedule</button></div></div></div>`);
-      c.appendChild(card);
-      card.querySelector("#ssave").onclick = () => destructiveModal({ name: "schedule_job", title: "Create a scheduled backup timer", destructive: true }, { action: "add", task: "backup", name: card.querySelector("#sname").value.trim(), schedule: card.querySelector("#ssched").value.trim() });
-    }
-  };
-  draw();
+  const cont = el(`<div style="${cardOpen}"><div style="${cardHead}">${t("containers")}</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--c-divider)" class="cc"></div></div>`);
+  cont.querySelector(".cc").innerHTML = known.map((svc) => `<div style="background:var(--c-card);padding:12px 14px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="width:8px;height:8px;border-radius:50%;background:var(--c-idle)"></span><span style="font-family:var(--font-mono);font-size:13px;font-weight:500">${esc(svc)}</span></div><div style="display:flex;gap:5px"><button class="iconbtn-sm" data-svc="${svc}" data-a="restart" style="flex:1" title="Restart">${ic("restart", 13)}</button><button class="iconbtn-sm" data-svc="${svc}" data-a="stop" style="flex:1" title="Stop">${ic("stop", 12)}</button><button class="iconbtn-sm" data-svc="${svc}" data-a="status" style="flex:1" title="Status">${ic("wave", 13)}</button></div></div>`).join("");
+  cont.querySelectorAll("[data-svc]").forEach((b) => (b.onclick = () => { const svc = b.dataset.svc, a = b.dataset.a; if (a === "status") action("container_control", { server: name, service: svc, action: "status" }); else verifyAction({ name: "container_control", title: `${a} ${svc} on ${name}`, destructive: true }, { server: name, service: svc, action: a }); }));
+  const logc = el(`<div style="${cardOpen};display:flex;flex-direction:column"><div style="${cardHead};display:flex;align-items:center;justify-content:space-between">${t("logs")}<button class="btn btn-sm" data-load>${t("refresh")}</button></div><div class="log-view" style="height:420px">click refresh to tail logs…</div></div>`);
+  logc.querySelector("[data-load]").onclick = async () => { const lv = logc.querySelector(".log-view"); lv.textContent = "loading…"; try { const r = await runTool("adpix_logs", { server: name, lines: 120 }); lv.innerHTML = String(r.result).split("\n").map((l) => `<div class="row"><span style="color:var(--c-text)">${esc(l)}</span></div>`).join(""); lv.scrollTop = lv.scrollHeight; } catch (e) { lv.textContent = e.message; } };
+  grid.append(cont, logc);
 };
 
 // ============================================================ DATABASES
 SCREENS.databases = (c) => {
-  let db = "pg";
-  const draw = () => {
-    const pfx = db === "pg" ? "pg" : "ch";
-    c.innerHTML = head(STR[S.lang].nav.databases, "Health, tuning, and retention for Postgres + ClickHouse.", btn("opt", "Optimize", "bolt"));
-    c.appendChild(el(`<div class="seg"><button class="${db === "pg" ? "on" : ""}" data-db="pg" style="font-family:var(--font-mono)">Postgres</button><button class="${db === "ch" ? "on" : ""}" data-db="ch" style="font-family:var(--font-mono)">ClickHouse</button></div>`));
-    c.querySelectorAll("[data-db]").forEach((b) => (b.onclick = () => { db = b.dataset.db; draw(); }));
-    c.querySelector('[data-act="opt"]').onclick = () => action(`${pfx}_optimize`, { apply: false });
-    c.appendChild(toolPanel(`${db === "pg" ? "Postgres" : "ClickHouse"} health`, `${pfx}_health`, {}));
-    const g = el(`<div style="display:grid;grid-template-columns:1.1fr 1fr;gap:16px;align-items:start;margin-top:16px"></div>`); c.appendChild(g);
-    g.appendChild(toolPanel("Tune (dry-run diff)", `${pfx}_tune`, { apply: false }, ""));
-    const ret = el(`<div class="panel"><div class="head" style="display:block">Retention<div class="sub">Drops partitions older than the window. Permanent.</div></div><div class="card-pad">${db === "ch" ? `<label class="fld"><span class="lab">Keep months</span><input class="input mono" id="rmon" value="12"></label><div class="badge b-neg" style="margin-bottom:12px"><span class="dot"></span>This permanently deletes older partitions</div><button class="btn btn-danger" id="rapply" style="width:100%;justify-content:center">Apply retention</button>` : `<div class="muted">Retention applies to ClickHouse (raw events). Switch to the ClickHouse tab.</div>`}</div></div>`);
-    g.appendChild(ret);
-    const ra = ret.querySelector("#rapply"); if (ra) ra.onclick = () => destructiveModal({ name: "ch_retention", title: "Apply ClickHouse retention (drops old partitions)", destructive: true }, { mode: "apply", months: Number(ret.querySelector("#rmon").value) });
-    // tune apply button
-    const tuneApply = el(`<div style="margin-top:10px"><button class="btn btn-primary btn-sm" id="tapply">Apply tuning (restarts engine)</button></div>`); g.children[0].querySelector(".card-pad").appendChild(tuneApply);
-    tuneApply.querySelector("#tapply").onclick = () => destructiveModal({ name: `${pfx}_tune`, title: `Apply ${pfx} tuning (restarts engine)`, destructive: true }, { apply: true });
+  let eng = "ch";
+  const draw = async () => {
+    c.innerHTML = H(STR[S.lang].nav.databases, "Health, tuning, and retention for Postgres + ClickHouse.", bigBtn("opt", "Optimize", "bolt"));
+    c.appendChild(el(`<div class="seg"><button class="${eng === "pg" ? "on" : ""}" data-e="pg" style="font-family:var(--font-mono)">Postgres</button><button class="${eng === "ch" ? "on" : ""}" data-e="ch" style="font-family:var(--font-mono)">ClickHouse</button></div>`));
+    c.querySelectorAll("[data-e]").forEach((b) => (b.onclick = () => { eng = b.dataset.e; draw(); }));
+    c.querySelector('[data-act="opt"]').onclick = () => action(`${eng}_optimize`, { apply: false });
+    const stats = el(`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:14px;margin-bottom:16px"><div class="skel" style="height:80px"></div></div>`); c.appendChild(stats);
+    const grid = el(`<div style="display:grid;grid-template-columns:1.1fr 1fr;gap:16px;align-items:start"></div>`); c.appendChild(grid);
+    const tune = el(`<div style="${cardOpen}"><div style="padding:14px 16px;border-bottom:1px solid var(--c-divider)"><div style="font-weight:500;font-size:14px">Tune settings</div><div style="font-size:12.5px;color:var(--c-muted);margin-top:3px">Review the before → after diff, then apply. Applying restarts the engine.</div></div><div class="tunebody"><div class="card-pad"><div class="skel" style="width:60%"></div></div></div><div style="display:flex;justify-content:flex-end;padding:13px 16px;background:var(--c-sunken)"><button class="btn btn-primary btn-sm" data-apply>Apply tuning</button></div></div>`);
+    const ret = el(`<div style="${cardOpen}"><div style="padding:14px 16px;border-bottom:1px solid var(--c-divider)"><div style="font-weight:500;font-size:14px">Retention policy</div><div style="font-size:12.5px;color:var(--c-muted);margin-top:3px">Drops partitions older than the window. This is permanent.</div></div><div style="padding:18px 16px">${eng === "ch" ? `<label style="display:block;font-size:12px;font-weight:500;color:var(--c-muted);margin-bottom:6px">Keep data for</label><div style="display:flex;gap:8px;margin-bottom:18px"><input value="12" class="rmon" style="width:80px;height:40px;padding-inline:12px;border:1.5px solid var(--c-border);border-radius:8px;background:var(--c-card);color:var(--c-text);font:inherit;font-family:var(--font-mono);font-size:13px;outline:none"/><div style="flex:1;height:40px;display:flex;align-items:center;padding-inline:12px;border:1.5px solid var(--c-border);border-radius:8px;color:var(--c-muted);font-size:13px">months</div></div><div style="display:flex;gap:10px;background:var(--c-neg-bg);border:1px solid var(--c-neg);border-radius:10px;padding:13px 14px;margin-bottom:16px"><span style="color:var(--c-neg);flex:none">${ic("warn", 18)}</span><div style="font-size:12.5px;line-height:1.5">This TTL permanently deletes partitions older than the window.</div></div><button class="btn btn-danger" data-ret style="width:100%;justify-content:center">Apply retention</button>` : `<div class="muted">Retention applies to ClickHouse (raw events). Switch to the ClickHouse tab.</div>`}</div></div>`);
+    grid.append(tune, ret);
+    tune.querySelector("[data-apply]").onclick = () => verifyAction({ name: `${eng}_tune`, title: `Apply ${eng} tuning (restarts engine)`, destructive: true }, { apply: true });
+    const ra = ret.querySelector("[data-ret]"); if (ra) ra.onclick = () => verifyAction({ name: "ch_retention", title: "Apply ClickHouse retention (drops old partitions)", destructive: true }, { mode: "apply", months: Number(ret.querySelector(".rmon").value) });
+    try {
+      const d = await api(`/api/db?engine=${eng}`);
+      // stat cards from health (best-effort numeric extraction)
+      const cards = statCards(d.healthText, eng);
+      stats.innerHTML = cards.length ? cards.map((s) => `<div style="${cardOpen};padding:14px 16px"><div style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--c-muted)"><span style="width:6px;height:6px;border-radius:50%;background:var(--c-${s.dot})"></span>${esc(s.label)}</div><div style="font-size:22px;font-weight:400;margin-top:7px;font-family:var(--font-mono);color:var(--c-${s.dot})">${esc(s.value)}</div></div>`).join("") : `<div style="${cardOpen};padding:14px 16px;grid-column:1/-1"><pre class="out">${esc(d.healthText)}</pre></div>`;
+      const tb = tune.querySelector(".tunebody");
+      tb.innerHTML = d.tuneRows.length ? `<div style="display:grid;grid-template-columns:1.3fr 1fr auto 1fr;gap:8px;padding:9px 16px;border-bottom:1px solid var(--c-border);font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:var(--c-hint)"><span>Setting</span><span style="text-align:end">Before</span><span></span><span>After</span></div>` + d.tuneRows.map((r) => `<div style="display:grid;grid-template-columns:1.3fr 1fr auto 1fr;gap:8px;align-items:center;padding:9px 16px;border-bottom:1px solid var(--c-divider);font-family:var(--font-mono);font-size:12px"><span>${esc(r.setting)}</span><span style="text-align:end;color:var(--c-muted);text-decoration:line-through">${esc(r.before)}</span><span style="color:var(--c-hint)">→</span><span style="color:var(--c-pos);font-weight:500">${esc(r.after)}</span></div>`).join("") : `<div class="card-pad"><pre class="out">${esc(d.tuneText)}</pre></div>`;
+    } catch (e) { stats.innerHTML = `<div style="${cardOpen};padding:14px 16px;grid-column:1/-1"><pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre></div>`; }
   };
   draw();
 };
+function statCards(text, eng) {
+  const find = (re) => { const m = String(text).match(re); return m ? m[1] : null; };
+  const out = [];
+  if (eng === "ch") {
+    const parts = find(/([\d,]+)\s*(?:active\s*)?parts/i), merges = find(/([\d,]+)\s*merge/i), ins = find(/([\d,]+)\s*\/?\s*s|inserts?[^\d]*([\d,]+)/i), comp = find(/([\d.]+)\s*[x×]\s*compress|compress[^\d]*([\d.]+)/i);
+    if (parts) out.push({ label: "Active parts", value: parts, dot: "brand" });
+    if (merges) out.push({ label: "Merge backlog", value: merges, dot: "warn" });
+    if (ins) out.push({ label: "Inserts / s", value: ins, dot: "pos" });
+    if (comp) out.push({ label: "Compression", value: comp + "×", dot: "pos" });
+  } else {
+    const conn = find(/([\d,]+)\s*connection/i), cache = find(/([\d.]+)\s*%?\s*cache/i), lag = find(/lag[^\d]*([\d.]+\s*\w*)/i), size = find(/size[^\d]*([\d.]+\s*\w+)/i);
+    if (conn) out.push({ label: "Connections", value: conn, dot: "brand" });
+    if (cache) out.push({ label: "Cache hit", value: cache + "%", dot: "pos" });
+    if (lag) out.push({ label: "Replication lag", value: lag, dot: "warn" });
+    if (size) out.push({ label: "DB size", value: size, dot: "pos" });
+  }
+  return out;
+}
 
-// ============================================================ DEPLOYS
+// ============================================================ remaining screens (faithful, tool-driven)
+function toolPanel(title, tool, args = {}) {
+  const card = el(`<div style="${cardOpen}"><div style="${cardHead};display:flex;align-items:center;justify-content:space-between">${esc(title)}<button class="btn btn-sm refresh">${t("refresh")}</button></div><div class="card-pad"><div class="body"><div class="skel" style="width:70%"></div><div class="skel" style="width:50%;margin-top:8px"></div></div></div></div>`);
+  const body = card.querySelector(".body");
+  const load = async () => { body.innerHTML = `<div class="skel" style="width:60%"></div>`; try { const r = await runTool(tool, args); body.innerHTML = `<pre class="out">${esc(r.result)}</pre>`; } catch (e) { body.innerHTML = `<pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre>`; } };
+  card.querySelector(".refresh").onclick = load; load(); return card;
+}
+async function action(tool, args = {}) { try { const r = await startJob(tool, args); toast(`Started ${tool}`); openDrawer(r.job.id); } catch (e) { toast(e.message, true); } }
+
 SCREENS.deploys = (c) => {
-  c.innerHTML = head(STR[S.lang].nav.deploys, "Releases, rollback, and blue-green across the cluster.");
+  c.innerHTML = H(STR[S.lang].nav.deploys, "Releases, rollback, and blue-green across the cluster.");
   const g = el(`<div style="display:grid;grid-template-columns:1.1fr 1fr;gap:16px;align-items:start"></div>`); c.appendChild(g);
   const left = el(`<div style="display:flex;flex-direction:column;gap:16px"></div>`);
-  const cur = el(`<div class="panel card-pad"><div class="kpi-label">Current deploy</div><div style="display:flex;gap:8px;margin-top:14px"><button class="btn btn-primary" data-a="update">Update</button><button class="btn" data-a="bg">Blue-green</button><button class="btn" data-a="rb">Rollback</button></div></div>`);
-  cur.querySelector('[data-a="update"]').onclick = () => action("adpix_update");
-  cur.querySelector('[data-a="bg"]').onclick = () => destructiveModal({ name: "bluegreen_deploy", title: "Blue-green deploy across the cluster", destructive: true }, {});
-  cur.querySelector('[data-a="rb"]').onclick = () => destructiveModal({ name: "adpix_update", title: "Rollback (redeploy previous)", destructive: false }, {});
-  left.append(cur, toolPanel("CI/CD status", "cicd_status", {}));
-  g.append(left, toolPanel("Cluster status", "cluster_status", {}));
+  const cur = el(`<div style="${cardOpen};padding:18px 20px"><div style="font-size:12px;color:var(--c-muted);text-transform:uppercase;letter-spacing:.5px">Current deploy</div><div style="display:flex;gap:8px;margin-top:14px">${bigBtn("u", "Update", null, true)}${bigBtn("bg", "Blue-green")}${bigBtn("rb", "Rollback")}</div></div>`);
+  cur.querySelector('[data-act="u"]').onclick = () => action("adpix_update");
+  cur.querySelector('[data-act="bg"]').onclick = () => verifyAction({ name: "bluegreen_deploy", title: "Blue-green deploy across the cluster", destructive: true }, {});
+  cur.querySelector('[data-act="rb"]').onclick = () => action("adpix_update");
+  left.append(cur, toolPanel("CI/CD status", "cicd_status"));
+  g.append(left, toolPanel("Cluster status", "cluster_status"));
 };
-
-// ============================================================ HIGH AVAILABILITY
-SCREENS.ha = async (c) => {
-  c.innerHTML = head(STR[S.lang].nav.ha, "Witness-anchored quorum: VIP, Postgres, Redis, ClickHouse.", `<button class="btn btn-sm" data-a="standup">Stand up HA</button><button class="btn btn-danger btn-sm" data-a="fail">Failover</button>`);
-  c.querySelector('[data-a="standup"]').onclick = () => destructiveModal({ name: "ha_standup", title: "Stand up the HA quorum (keepalived + sentinel)", destructive: true }, { mode: "keepalived" });
-  c.querySelector('[data-a="fail"]').onclick = () => toast("Failover: use ha_quorum status, then promote via pg_replication.", false);
-  const topo = el(`<div class="panel" style="margin-bottom:16px"></div>`); c.appendChild(topo);
-  const cluText = await runTool("cluster_list").then((r) => r.result).catch(() => ""); const clu = parseCluster(cluText);
-  topo.innerHTML = clu.nodes.length || clu.witness ? topologySvg(clu, "Topology", "Quorum 3/3") : `<div class="head">Topology</div><div class="empty">No cluster defined. cluster_define first.</div>`;
+SCREENS.ha = (c) => {
+  c.innerHTML = H(STR[S.lang].nav.ha, "Witness-anchored quorum: VIP, Postgres, Redis, ClickHouse.", `${bigBtn("standup", "Stand up HA")}${bigBtn("fail", "Failover")}`);
+  c.querySelector('[data-act="standup"]').onclick = () => verifyAction({ name: "ha_standup", title: "Stand up the HA quorum", destructive: true }, { mode: "keepalived" });
+  c.querySelector('[data-act="fail"]').onclick = () => toast("Failover: ha_quorum status, then promote via pg_replication.");
+  if (S.fleet && (S.fleet.nodes.length || S.fleet.cluster.name)) c.appendChild(el(`<div style="${cardOpen};margin-bottom:16px">${topologyCard(S.fleet)}</div>`));
   c.appendChild(toolPanel("Quorum status", "ha_quorum", { mode: "status" }));
 };
-
-// ============================================================ DNS & CONNECT
-SCREENS.dns = (c) => {
-  c.innerHTML = head(STR[S.lang].nav.dns, "Required DNS records and client connection configs.");
-  c.appendChild(toolPanel("Required DNS records", "dns_plan", {}));
-  const cc = el(`<div style="margin-top:16px"></div>`); c.appendChild(cc); cc.appendChild(toolPanel("Client connect configs", "connect_configs", {}));
-};
-
-// ============================================================ MONITORING
+SCREENS.dns = (c) => { c.innerHTML = H(STR[S.lang].nav.dns, "Required DNS records and client connection configs."); c.appendChild(toolPanel("Required DNS records", "dns_plan")); const x = el(`<div style="margin-top:16px"></div>`); c.appendChild(x); x.appendChild(toolPanel("Client connect configs", "connect_configs")); };
 SCREENS.monitoring = (c) => {
-  c.innerHTML = head(STR[S.lang].nav.monitoring, "Health probes, TLS expiry, host metrics.");
+  c.innerHTML = H(STR[S.lang].nav.monitoring, "Health probes, TLS expiry, host metrics.");
   const g = el(`<div style="display:grid;grid-template-columns:1.2fr 1fr;gap:16px;align-items:start;margin-bottom:16px"></div>`); c.appendChild(g);
-  g.append(toolPanel("Health probes", "health_check", {}), toolPanel("TLS certificates", "tls_status", {}));
-  c.appendChild(toolPanel("Host metrics", "system_metrics", {}));
-  const m = el(`<div style="margin-top:16px"></div>`); c.appendChild(m);
-  const mq = el(`<div class="panel"><div class="head">PromQL query<span class="badge b-warn" style="padding:1px 8px">metrics_query</span></div><div class="card-pad"><label class="fld"><span class="lab">PromQL (against the witness Prometheus)</span><input class="input mono" id="pq" value="up"></label><button class="btn btn-primary btn-sm" id="pqrun">Run</button><div class="pqout" style="margin-top:10px"></div></div></div>`);
-  m.appendChild(mq);
-  mq.querySelector("#pqrun").onclick = async () => { const o = mq.querySelector(".pqout"); o.innerHTML = `<span class="spin"></span>`; try { const r = await runTool("metrics_query", { query: mq.querySelector("#pq").value }); o.innerHTML = `<pre class="out">${esc(r.result)}</pre>`; } catch (e) { o.innerHTML = `<pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre>`; } };
+  g.append(toolPanel("Health probes", "health_check"), toolPanel("TLS certificates", "tls_status"));
+  c.appendChild(toolPanel("Host metrics", "system_metrics"));
+  const m = el(`<div style="margin-top:16px;${cardOpen}"><div style="${cardHead};display:flex;align-items:center;justify-content:space-between">PromQL query<span style="font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;background:var(--c-warn-bg);color:var(--c-warn)">metrics_query</span></div><div class="card-pad"><label class="fld"><span class="lab">PromQL (against the witness Prometheus)</span><input class="input mono" id="pq" value="up"></label><button class="btn btn-primary btn-sm" id="pr">Run</button><div class="po" style="margin-top:10px"></div></div></div>`);
+  c.appendChild(m); m.querySelector("#pr").onclick = async () => { const o = m.querySelector(".po"); o.innerHTML = `<span class="spin"></span>`; try { const r = await runTool("metrics_query", { query: m.querySelector("#pq").value }); o.innerHTML = `<pre class="out">${esc(r.result)}</pre>`; } catch (e) { o.innerHTML = `<pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre>`; } };
 };
-
-// ============================================================ SECURITY
 SCREENS.security = (c) => {
-  c.innerHTML = head(STR[S.lang].nav.security, "Audit findings, hardening, patching, launch gate.", `<button class="btn btn-sm" data-a="harden">Harden (dry-run)</button><button class="btn btn-primary btn-sm" data-a="patch">Apply patches</button>`);
-  c.querySelector('[data-a="harden"]').onclick = () => action("harden_server", { apply: false });
-  c.querySelector('[data-a="patch"]').onclick = () => destructiveModal({ name: "patch_system", title: "Apply system patches", destructive: true }, {});
+  c.innerHTML = H(STR[S.lang].nav.security, "Audit findings, hardening, patching, launch gate.", `${bigBtn("h", "Harden (dry-run)")}${bigBtn("p", "Apply patches", null, true)}`);
+  c.querySelector('[data-act="h"]').onclick = () => action("harden_server", { apply: false });
+  c.querySelector('[data-act="p"]').onclick = () => verifyAction({ name: "patch_system", title: "Apply system patches", destructive: true }, {});
   c.appendChild(toolPanel("Launch gate", "launch_gate", { mode: "status" }));
-  const g = el(`<div style="margin-top:16px"></div>`); c.appendChild(g); g.appendChild(toolPanel("Security audit", "security_audit", {}));
+  const x = el(`<div style="margin-top:16px"></div>`); c.appendChild(x); x.appendChild(toolPanel("Security audit", "security_audit"));
 };
-
-// ============================================================ SETTINGS
+SCREENS.jobs = async (c) => {
+  c.innerHTML = H(STR[S.lang].nav.jobs, "Live jobs and the immutable audit trail.", `<button class="btn btn-sm" data-r>${t("refresh")}</button>`);
+  const live = el(`<div style="${cardOpen};margin-bottom:16px"><div style="${cardHead}">Live jobs</div><div class="lj"><div class="card-pad"><div class="skel" style="width:50%"></div></div></div></div>`); c.appendChild(live);
+  const audit = el(`<div style="${cardOpen}"><div style="${cardHead};display:flex;align-items:center;gap:8px">${ic("security", 15)} Audit log<span class="hint" style="margin-inline-start:auto">Immutable · hash-chained</span></div><div class="au"></div></div>`); c.appendChild(audit);
+  const lj = async () => { try { const { jobs } = await listJobs(); live.querySelector(".lj").innerHTML = jobs.length ? jobs.slice(0, 30).map((j) => `<div style="padding:13px 16px;border-bottom:1px solid var(--c-divider)"><div style="display:flex;align-items:center;gap:11px"><span style="width:9px;height:9px;border-radius:50%;background:var(--c-${sc(j.status)});${j.status === "running" ? "animation:pulse-dot 1.4s infinite" : ""}"></span><span style="font-family:var(--font-mono);font-size:13px;font-weight:500;flex:1">${esc(j.tool)}</span><span style="font-family:var(--font-mono);font-size:11.5px;color:var(--c-muted)">${esc(j.key === "_global" ? "" : j.key)} · ${esc(j.id.slice(0, 8))}</span>${pill(j.status, j.status)}<button class="btn btn-sm" data-v="${j.id}">View</button></div></div>`).join("") : `<div class="empty">${t("noJobs")}</div>`; live.querySelectorAll("[data-v]").forEach((b) => (b.onclick = () => openDrawer(b.dataset.v))); } catch (e) { live.querySelector(".lj").innerHTML = `<pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre>`; } };
+  c.querySelector("[data-r]").onclick = lj; lj();
+  if (S.me.role === "owner") { try { const { entries, chain } = await api("/api/admin/audit"); audit.querySelector(".au").innerHTML = `<div style="padding:8px 16px">${chain.ok ? pill("chain intact", "pos") : pill("TAMPERED @ " + chain.brokenAtSeq, "neg")}</div>` + entries.slice(0, 40).map((e) => `<div style="display:grid;grid-template-columns:.5fr 1fr 1.4fr 1fr .8fr;gap:12px;align-items:center;padding:11px 16px;border-bottom:1px solid var(--c-divider);font-size:12.5px"><span class="muted">${e.seq}</span><span class="mono">${esc(e.actor)}</span><span class="mono" style="font-size:11.5px">${esc(e.tool)}</span><span>${esc(e.target)}</span><span style="text-align:end" class="muted">${esc(e.outcome)}</span></div>`).join(""); } catch (e) { audit.querySelector(".au").innerHTML = `<div class="empty">${esc(e.message)}</div>`; } } else audit.querySelector(".au").innerHTML = `<div class="empty">Audit is owner-only.</div>`;
+};
+SCREENS.backups = (c) => {
+  let tab = "list"; const draw = () => {
+    c.innerHTML = H(STR[S.lang].nav.backups, "On-demand + scheduled snapshots.", bigBtn("create", "Create backup", "plus", true));
+    c.appendChild(el(`<div class="seg"><button class="${tab === "list" ? "on" : ""}" data-t="list">Run / restore</button><button class="${tab === "sched" ? "on" : ""}" data-t="sched">Schedule</button></div>`));
+    c.querySelector('[data-act="create"]').onclick = () => action("adpix_backup");
+    c.querySelectorAll("[data-t]").forEach((b) => (b.onclick = () => { tab = b.dataset.t; draw(); }));
+    if (tab === "list") { const g = el(`<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px"></div>`); c.appendChild(g); [["adpix_backup", "App backup", 0], ["pg_backup", "Postgres dump", 0], ["ch_backup", "ClickHouse backup", 0], ["adpix_restore", "Restore app", 1], ["pg_restore_db", "Restore Postgres", 1], ["ch_restore_db", "Restore ClickHouse", 1]].forEach(([n, l, d]) => g.appendChild(actionCardEl(n, l, !!d))); }
+    else { const card = el(`<div style="${cardOpen};max-width:560px"><div style="padding:16px 20px;border-bottom:1px solid var(--c-divider)"><div style="font-weight:500;font-size:14px">Backup schedule</div><div style="font-size:12.5px;color:var(--c-muted);margin-top:3px">Verified snapshots on a systemd timer.</div></div><div style="padding:20px"><label class="fld"><span class="lab">Name</span><input class="input mono" id="sn" value="nightly-backup"></label><label class="fld"><span class="lab">OnCalendar</span><input class="input mono" id="ss" value="daily"></label></div><div style="display:flex;justify-content:flex-end;padding:14px 20px;background:var(--c-sunken)"><button class="btn btn-primary" id="sv">Save schedule</button></div></div>`); c.appendChild(card); card.querySelector("#sv").onclick = () => verifyAction({ name: "schedule_job", title: "Create a scheduled backup timer", destructive: true }, { action: "add", task: "backup", name: card.querySelector("#sn").value.trim(), schedule: card.querySelector("#ss").value.trim() }); }
+  };
+  draw();
+};
 SCREENS.settings = (c) => {
-  c.innerHTML = head(STR[S.lang].nav.settings, "Admins, sessions, audit, secrets, integrations.");
+  c.innerHTML = H(STR[S.lang].nav.settings, "Admins, sessions, audit, secrets, integrations.");
   const grid = el(`<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start"></div>`); c.appendChild(grid);
-  const colA = el(`<div style="display:flex;flex-direction:column;gap:16px"></div>`); const colB = el(`<div style="display:flex;flex-direction:column;gap:16px"></div>`); grid.append(colA, colB);
-  if (S.me.role === "owner") { colA.append(adminUsers(), adminSessions()); colB.append(adminAudit(), adminKill()); }
-  else { colA.appendChild(el(`<div class="panel card-pad muted">Signed in as <b>${esc(S.me.username)}</b> · role <b>${esc(S.me.role)}</b>. Admin controls are owner-only.</div>`)); }
-  // integrations (visual, like the design's "Soon")
-  colB.appendChild(el(`<div class="panel"><div class="head">SMTP / email <span class="badge b-warn" style="padding:1px 8px">${t("soon")}</span></div><div class="card-pad muted" style="font-size:13px">Alert digests + reports. Wire an SMTP host in a future release.</div></div>`));
+  const a = el(`<div style="display:flex;flex-direction:column;gap:16px"></div>`), b = el(`<div style="display:flex;flex-direction:column;gap:16px"></div>`); grid.append(a, b);
+  if (S.me.role === "owner") { a.append(adminUsers(), adminSessions()); b.append(adminAudit(), adminKill()); }
+  else a.appendChild(el(`<div style="${cardOpen};padding:16px" class="muted">Signed in as <b>${esc(S.me.username)}</b> · role <b>${esc(S.me.role)}</b>. Admin controls are owner-only.</div>`));
+  b.appendChild(el(`<div style="${cardOpen}"><div style="${cardHead};display:flex;align-items:center;gap:8px">SMTP / email <span style="font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;background:var(--c-warn-bg);color:var(--c-warn)">${t("soon")}</span></div><div class="card-pad muted" style="font-size:13px">Alert digests + reports. Wire an SMTP host in a future release.</div></div>`));
 };
 
-// ============================================================ generic action card (used by backups)
+// ============================================================ generic action card
 function actionCardEl(name, label, destructive) {
-  const card = el(`<div class="panel card-pad" style="display:flex;flex-direction:column;gap:10px"><div style="display:flex;align-items:center;gap:8px"><strong class="mono" style="font-size:13px">${esc(name)}</strong>${destructive ? badge("destructive", "neg") : `<span class="tag">job</span>`}</div><div class="muted" style="font-size:13px;flex:1">${esc(label)}</div><div class="argform"></div><button class="btn ${destructive ? "btn-danger" : "btn-primary"} btn-sm run">${ic("play", 14)} ${t("run")}</button><div class="result"></div></div>`);
-  const cat = S.catalog.find((x) => x.name === name); const props = (cat && cat.params && cat.params.properties) || {};
-  const af = card.querySelector(".argform"); af.appendChild(argForm(props));
-  card.querySelector(".run").onclick = async () => { const args = readArgs(af); if (destructive) return destructiveModal({ name, title: label, destructive: true }, args); try { const r = await startJob(name, args); toast(`Started ${name}`); openDrawer(r.job.id); } catch (e) { card.querySelector(".result").innerHTML = `<pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre>`; } };
+  const card = el(`<div style="${cardOpen};padding:16px;display:flex;flex-direction:column;gap:10px"><div style="display:flex;align-items:center;gap:8px"><strong class="mono" style="font-size:13px">${esc(name)}</strong>${destructive ? pill("destructive", "neg") : `<span class="tag">job</span>`}</div><div class="muted" style="font-size:13px;flex:1">${esc(label)}</div><div class="af"></div><button class="btn ${destructive ? "btn-danger" : "btn-primary"} btn-sm run">${ic("play", 14)} Run</button></div>`);
+  const props = (S.catalog.find((x) => x.name === name)?.params?.properties) || {}; const af = card.querySelector(".af"); af.appendChild(argForm(props));
+  card.querySelector(".run").onclick = () => { const args = readArgs(af); if (destructive) return verifyAction({ name, title: label, destructive: true }, args); action(name, args); };
   return card;
 }
 function argForm(props) { const w = el(`<div></div>`); Object.entries(props).forEach(([k, sc]) => { if (k === "confirm") return; let f; if (sc.enum) f = `<select class="input" data-k="${k}"><option value="">—</option>${sc.enum.map((o) => `<option>${esc(o)}</option>`).join("")}</select>`; else if (sc.type === "boolean") f = `<select class="input" data-k="${k}" data-bool="1"><option value="">—</option><option>true</option><option>false</option></select>`; else f = `<input class="input" data-k="${k}" data-num="${sc.type === "number" || sc.type === "integer" ? 1 : ""}" placeholder="${esc(sc.type || "")}">`; w.appendChild(el(`<label class="fld"><span class="lab">${esc(k)}</span>${f}</label>`)); }); return w; }
 function readArgs(af) { const a = {}; af.querySelectorAll("[data-k]").forEach((i) => { const v = i.value.trim(); if (!v) return; a[i.dataset.k] = i.dataset.bool ? v === "true" : i.dataset.num ? Number(v) : v; }); return a; }
 
+// ============================================================ slide-in panels + wizard
+function slideIn(width = 440) {
+  let scrim = document.querySelector(".scrim"); if (!scrim) { scrim = el(`<div class="scrim"></div>`); document.body.appendChild(scrim); }
+  const panel = el(`<aside class="drawer" style="width:${width}px"></aside>`); document.body.appendChild(panel);
+  const close = () => { scrim.classList.remove("show"); panel.classList.remove("show"); setTimeout(() => panel.remove(), 240); scrim.onclick = null; };
+  scrim.onclick = close; requestAnimationFrame(() => { scrim.classList.add("show"); panel.classList.add("show"); });
+  return { panel, close };
+}
+// stepper wizard. steps: [{label, body(ctx, el), onNext(ctx)->bool|err}]
+function wizard(title, steps, onFinish) {
+  const ctx = {}; let i = 0; const { panel, close } = slideIn(520);
+  const draw = () => {
+    panel.innerHTML = `<div class="drawer-head"><strong>${esc(title)}</strong><button class="icon-btn dc">${ic("x", 16)}</button></div>
+      <div style="padding:16px 18px 0;display:flex;gap:6px">${steps.map((s, k) => `<div style="flex:1"><div style="height:3px;border-radius:999px;background:${k <= i ? "var(--c-brand)" : "var(--c-divider)"}"></div><div style="font-size:11.5px;margin-top:6px;color:${k === i ? "var(--c-brand)" : "var(--c-hint)"};font-weight:${k === i ? 600 : 400}">${k + 1}. ${esc(s.label)}</div></div>`).join("")}</div>
+      <div class="drawer-body wbody" style="padding:18px"></div>
+      <div style="display:flex;justify-content:space-between;gap:10px;padding:14px 18px;border-top:1px solid var(--c-divider);background:var(--c-sunken)">
+        <button class="btn back" ${i === 0 ? "disabled" : ""}>${t("back")}</button>
+        <button class="btn btn-primary nextb">${i === steps.length - 1 ? "Finish" : t("next")}</button></div>`;
+    panel.querySelector(".dc").onclick = close;
+    panel.querySelector(".back").onclick = () => { if (i > 0) { i--; draw(); } };
+    steps[i].body(ctx, panel.querySelector(".wbody"));
+    panel.querySelector(".nextb").onclick = async () => {
+      const nb = panel.querySelector(".nextb"); nb.disabled = true; nb.innerHTML = `<span class="spin"></span>`;
+      try { const r = steps[i].onNext ? await steps[i].onNext(ctx) : true; if (r === true) { if (i === steps.length - 1) { await onFinish(ctx); close(); } else { i++; draw(); } } else { toast(typeof r === "string" ? r : "check the form", true); draw(); } }
+      catch (e) { toast(e.message, true); draw(); }
+    };
+  };
+  draw();
+}
+function field(label, input) { return `<label style="display:block;margin-bottom:14px"><span style="display:block;font-size:12px;font-weight:600;color:var(--c-muted);margin-bottom:6px">${esc(label)}</span>${input}</label>`; }
+function addServerWizard() {
+  wizard("Add a server", [
+    { label: "Connect", body: (ctx, b) => { b.innerHTML = `<div style="font-weight:600;font-size:15px;margin-bottom:6px">Connect to the server</div><div class="muted" style="font-size:13px;margin-bottom:16px">Enter the host and SSH credentials. AdPix connects over SSH only — there is no agent.</div>${field("Host / IP address", `<input class="input mono" id="w_host" value="${esc(ctx.host || "")}" placeholder="10.0.0.13">`)}${field("SSH port & user", `<div style="display:flex;gap:10px"><input class="input mono" id="w_port" value="${esc(ctx.port || "22")}" style="width:90px"><input class="input mono" id="w_user" value="${esc(ctx.user || "root")}" style="flex:1"></div>`)}`; }, onNext: (ctx) => { ctx.host = document.getElementById("w_host").value.trim(); ctx.port = document.getElementById("w_port").value.trim() || "22"; ctx.user = document.getElementById("w_user").value.trim() || "root"; return ctx.host ? true : "host required"; } },
+    { label: "Verify SSH", body: async (ctx, b) => { b.innerHTML = `<div style="font-weight:600;font-size:15px;margin-bottom:14px">Verifying SSH…</div><div class="vres"><span class="spin"></span> connecting to ${esc(ctx.host)}…</div>`; try { const r = await api("/api/wizard/verify-server", { method: "POST", body: JSON.stringify({ host: ctx.host, port: Number(ctx.port), username: ctx.user }) }); ctx.verified = r.reachable; b.querySelector(".vres").innerHTML = r.reachable ? `<div class="badge b-pos" style="margin-bottom:12px"><span class="dot"></span>SSH reachable</div><div style="font-size:12px;color:var(--c-muted);margin-bottom:6px">Host key fingerprint</div><pre class="out" style="font-size:11px">${esc(r.fingerprint)}</pre><div class="mono muted" style="font-size:11.5px;margin-top:8px">${esc(r.detail)}</div>` : `<div class="badge b-neg"><span class="dot"></span>Cannot reach ${esc(ctx.host)}</div><div class="mono muted" style="font-size:11.5px;margin-top:8px">${esc(r.detail)}</div>`; } catch (e) { ctx.verified = false; b.querySelector(".vres").innerHTML = `<div class="badge b-neg"><span class="dot"></span>${esc(e.message)}</div>`; } }, onNext: (ctx) => ctx.verified ? true : "SSH not verified — fix credentials/host" },
+    { label: "Role", body: (ctx, b) => { b.innerHTML = `<div style="font-weight:600;font-size:15px;margin-bottom:14px">Name & role</div>${field("Server name", `<input class="input mono" id="w_name" value="${esc(ctx.name || ctx.host || "")}">`)}${field("Role", `<select class="input" id="w_role"><option value="node">node (HA serving)</option><option value="witness">witness (quorum)</option></select>`)}`; if (ctx.role) b.querySelector("#w_role").value = ctx.role; }, onNext: (ctx) => { ctx.name = document.getElementById("w_name").value.trim(); ctx.role = document.getElementById("w_role").value; return ctx.name ? true : "name required"; } },
+    { label: "Authorize", body: (ctx, b) => { b.innerHTML = `<div style="font-weight:600;font-size:15px;margin-bottom:8px">Authorize & add</div><div class="muted" style="font-size:13px;margin-bottom:14px">Adds <b class="mono">${esc(ctx.name)}</b> (${esc(ctx.user)}@${esc(ctx.host)}:${esc(ctx.port)}) as a <b>${esc(ctx.role)}</b>. The MCP key is authorized on the target.</div><pre class="out">server_add name=${esc(ctx.name)} host=${esc(ctx.host)} role=${esc(ctx.role)}</pre>`; } },
+  ], async (ctx) => { const r = await startJob("server_add", { name: ctx.name, host: ctx.host, port: Number(ctx.port), username: ctx.user, role: ctx.role, verify: false }); toast(`Adding ${ctx.name}…`); openDrawer(r.job.id); setTimeout(async () => { await loadFleet(); render(); }, 1500); });
+}
+// destructive action → slide-in verify (impact → type-to-confirm → run)
+function verifyAction(tool, args) {
+  if (!tool.destructive) return action(tool.name, args);
+  const target = args.cluster || args.server || args.name || args.service || "";
+  const { panel, close } = slideIn(480);
+  panel.innerHTML = `<div class="drawer-head"><strong style="color:var(--c-neg)">${ic("warn", 17)} Confirm destructive action</strong><button class="icon-btn dc">${ic("x", 16)}</button></div>
+    <div class="drawer-body" style="padding:18px"><div style="font-weight:600;font-size:15px;margin-bottom:8px">${esc(tool.title)}</div>
+    <pre class="out" style="margin-bottom:14px">${esc(tool.name)} ${esc(JSON.stringify(args))}</pre>
+    <div style="display:flex;gap:10px;background:var(--c-neg-bg);border:1px solid var(--c-neg);border-radius:10px;padding:13px 14px;margin-bottom:16px"><span style="color:var(--c-neg);flex:none">${ic("warn", 18)}</span><div style="font-size:12.5px;line-height:1.5">${esc(t("typeToConfirm"))}</div></div>
+    <input class="input ci" placeholder="${esc(target || "confirm")}"></div>
+    <div style="display:flex;justify-content:flex-end;gap:10px;padding:14px 18px;border-top:1px solid var(--c-divider);background:var(--c-sunken)"><button class="btn dc2">${t("cancel")}</button><button class="btn btn-danger run">Run action</button></div>`;
+  panel.querySelector(".dc").onclick = close; panel.querySelector(".dc2").onclick = close;
+  panel.querySelector(".run").onclick = async () => { if (target && panel.querySelector(".ci").value.trim() !== target) return toast(`Type "${target}" to confirm`, true); const b = panel.querySelector(".run"); b.disabled = true; b.innerHTML = `<span class="spin"></span>`; try { const r = await startDestructive(tool.name, args); toast(`Started ${tool.name}`); close(); openDrawer(r.job.id); } catch (e) { toast(e.message, true); b.disabled = false; b.textContent = "Run action"; } };
+}
+
 // ============================================================ command palette
 function openPalette() {
-  const items = [...NAV.flatMap((g) => g.items.map((id) => ({ label: STR[S.lang].nav[id], kind: "screen", id }))), ...S.catalog.filter((t) => t.readOnly).slice(0, 40).map((t) => ({ label: `Run ${t.name}`, kind: "tool", id: t.name }))];
-  const pal = el(`<div class="palette"><div class="box"><input placeholder="${esc(t("search"))}" autofocus><div class="opts"></div></div></div>`);
-  const inp = pal.querySelector("input"); const opts = pal.querySelector(".opts"); let sel = 0, filtered = items;
-  const draw = () => { opts.innerHTML = filtered.slice(0, 8).map((o, i) => `<div class="opt ${i === sel ? "sel" : ""}" data-i="${i}">${ic(o.kind === "screen" ? o.id : "play", 16)} <span>${esc(o.label)}</span></div>`).join(""); opts.querySelectorAll("[data-i]").forEach((e) => (e.onclick = () => pick(filtered[+e.dataset.i]))); };
+  const items = [...NAV.flatMap((g) => g.items.map((id) => ({ label: STR[S.lang].nav[id], kind: "screen", id }))), ...S.catalog.filter((x) => x.readOnly).slice(0, 40).map((x) => ({ label: `Run ${x.name}`, kind: "tool", id: x.name }))];
+  const pal = el(`<div class="palette"><div class="box"><input placeholder="${esc(t("search"))}"><div class="opts"></div></div></div>`);
+  const inp = pal.querySelector("input"), opts = pal.querySelector(".opts"); let sel = 0, fil = items;
+  const drw = () => { opts.innerHTML = fil.slice(0, 8).map((o, k) => `<div class="opt ${k === sel ? "sel" : ""}" data-i="${k}">${ic(o.kind === "screen" ? o.id : "play", 16)}<span>${esc(o.label)}</span></div>`).join(""); opts.querySelectorAll("[data-i]").forEach((e) => (e.onclick = () => pick(fil[+e.dataset.i]))); };
   const pick = (o) => { pal.remove(); if (!o) return; if (o.kind === "screen") { S.screen = o.id; S.sd = null; render(); } else action(o.id); };
-  inp.oninput = () => { const q = inp.value.toLowerCase(); filtered = items.filter((o) => o.label.toLowerCase().includes(q)); sel = 0; draw(); };
-  inp.onkeydown = (e) => { if (e.key === "ArrowDown") { sel = Math.min(sel + 1, Math.min(filtered.length, 8) - 1); draw(); } else if (e.key === "ArrowUp") { sel = Math.max(sel - 1, 0); draw(); } else if (e.key === "Enter") pick(filtered[sel]); else if (e.key === "Escape") pal.remove(); };
+  inp.oninput = () => { const q = inp.value.toLowerCase(); fil = items.filter((o) => o.label.toLowerCase().includes(q)); sel = 0; drw(); };
+  inp.onkeydown = (e) => { if (e.key === "ArrowDown") { sel = Math.min(sel + 1, Math.min(fil.length, 8) - 1); drw(); } else if (e.key === "ArrowUp") { sel = Math.max(sel - 1, 0); drw(); } else if (e.key === "Enter") pick(fil[sel]); else if (e.key === "Escape") pal.remove(); };
   pal.onclick = (e) => { if (e.target === pal) pal.remove(); };
-  document.body.appendChild(pal); draw(); inp.focus();
+  document.body.appendChild(pal); drw(); inp.focus();
 }
-document.addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.key === "k") { e.preventDefault(); if (S.mode && document.querySelector(".sidebar")) openPalette(); } });
+document.addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.key === "k") { e.preventDefault(); if (document.querySelector(".sidebar")) openPalette(); } });
 
-// ============================================================ activity drawer + SSE
+// ============================================================ activity drawer (design job cards)
 let drawerAbort = null;
 async function openDrawer(focusId) {
-  S.drawer = true;
-  let scrim = document.querySelector(".scrim"), drawer = document.querySelector(".drawer");
-  if (!scrim) { scrim = el(`<div class="scrim"></div>`); document.body.appendChild(scrim); scrim.onclick = closeDrawer; }
-  if (!drawer) { drawer = el(`<aside class="drawer"><div class="drawer-head"><strong>${t("activity")}</strong><button class="icon-btn" id="dc">${ic("x", 16)}</button></div><div class="drawer-body" id="db"></div></aside>`); document.body.appendChild(drawer); drawer.querySelector("#dc").onclick = closeDrawer; }
-  requestAnimationFrame(() => { scrim.classList.add("show"); drawer.classList.add("show"); });
-  const db = drawer.querySelector("#db");
-  try { const { jobs } = await listJobs(); db.innerHTML = jobs.length ? "" : `<div class="empty">${t("noJobs")}</div>`; jobs.slice(0, 12).forEach((j) => db.appendChild(jobItem(j, j.id === focusId))); if (focusId) { const it = db.querySelector(`[data-job="${focusId}"]`); if (it) liveStream(focusId, it); } } catch (e) { db.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  const { panel } = (() => { let scrim = document.querySelector(".scrim"); let drawer = document.querySelector(".drawer.activity"); if (!scrim) { scrim = el(`<div class="scrim"></div>`); document.body.appendChild(scrim); } if (!drawer) { drawer = el(`<aside class="drawer activity"><div class="drawer-head"><strong style="display:flex;align-items:center;gap:8px;color:var(--c-text)">${ic("wave", 17)} ${t("activity")}</strong><button class="icon-btn dc">${ic("x", 16)}</button></div><div class="drawer-body db" style="padding:14px 16px"></div></aside>`); document.body.appendChild(drawer); drawer.querySelector(".dc").onclick = closeDrawer; } scrim.onclick = closeDrawer; requestAnimationFrame(() => { scrim.classList.add("show"); drawer.classList.add("show"); }); return { panel: drawer }; })();
+  const db = panel.querySelector(".db");
+  try { const { jobs } = await listJobs(); db.innerHTML = jobs.length ? "" : `<div class="empty">${t("noJobs")}</div>`; jobs.slice(0, 12).forEach((j) => db.appendChild(jobCard(j, j.id === focusId))); if (focusId) { const it = db.querySelector(`[data-job="${focusId}"]`); if (it) liveStream(focusId, it); } } catch (e) { db.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
-function closeDrawer() { S.drawer = false; if (drawerAbort) drawerAbort.abort(); document.querySelector(".scrim")?.classList.remove("show"); document.querySelector(".drawer")?.classList.remove("show"); refreshJobBadge(); }
-function jobItem(j, open) {
-  const it = el(`<div class="job-item" data-job="${j.id}"><div class="top"><strong class="mono" style="font-size:12.5px">${esc(j.tool)}</strong>${badge(j.status, j.status)}</div>${j.status === "running" ? `<div class="bar"><i></i></div>` : ""}<div class="log" style="display:${open ? "block" : "none"};margin-top:8px"></div><div style="margin-top:8px;display:flex;gap:6px"><button class="btn btn-sm toggle">${open ? "Hide" : "Logs"}</button>${j.status === "running" ? `<button class="btn btn-sm btn-danger kill">${t("cancel")}</button>` : ""}</div></div>`);
+function closeDrawer() { if (drawerAbort) drawerAbort.abort(); document.querySelector(".scrim")?.classList.remove("show"); document.querySelector(".drawer.activity")?.classList.remove("show"); }
+function jobCard(j, open) {
+  const k = sc(j.status); const done = j.status !== "running" && j.status !== "queued";
+  const it = el(`<div class="job-item" data-job="${j.id}" style="border:1px solid var(--c-border);border-radius:10px;padding:13px;margin-bottom:12px;${open ? "box-shadow:var(--c-shadow-card)" : ""}">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><div style="min-width:0"><div style="font-size:13.5px;font-weight:500">${esc(j.tool)}</div><div style="font-family:var(--font-mono);font-size:11.5px;color:var(--c-muted)">${esc(j.key === "_global" ? "" : j.key)} · j-${esc(j.id.slice(0, 4))}</div></div><span style="font-size:11px;font-weight:600;padding:3px 10px;border-radius:999px;background:var(--c-${k}-bg);color:var(--c-${k})">${j.status === "succeeded" ? "Done" : j.status === "failed" ? "Failed" : j.status === "running" ? "Running" : esc(j.status)}</span></div>
+    <div style="height:6px;border-radius:999px;background:var(--c-sunken);overflow:hidden;margin-top:10px"><div class="pbar" style="height:100%;width:${done ? "100" : "40"}%;background:var(--c-${k});border-radius:999px;${j.status === "running" ? "animation:indet 1.1s var(--ease) infinite" : ""}"></div></div>
+    <div class="log" style="display:${open ? "block" : "none"};margin-top:10px"></div>
+    <div style="margin-top:8px;display:flex;gap:6px"><button class="btn btn-sm tg">${open ? "Hide" : "Logs"}</button>${j.status === "running" ? `<button class="btn btn-sm btn-danger kl">${t("cancel")}</button>` : ""}</div></div>`);
   const log = it.querySelector(".log");
-  it.querySelector(".toggle").onclick = () => { const sh = log.style.display === "none"; log.style.display = sh ? "block" : "none"; it.querySelector(".toggle").textContent = sh ? "Hide" : "Logs"; if (sh && !log.dataset.s) liveStream(j.id, it); };
-  it.querySelector(".kill")?.addEventListener("click", async () => { try { await cancelJob(j.id); toast("Canceled"); } catch (e) { toast(e.message, true); } });
+  it.querySelector(".tg").onclick = () => { const sh = log.style.display === "none"; log.style.display = sh ? "block" : "none"; it.querySelector(".tg").textContent = sh ? "Hide" : "Logs"; if (sh && !log.dataset.s) liveStream(j.id, it); };
+  it.querySelector(".kl")?.addEventListener("click", async () => { try { await cancelJob(j.id); toast("Canceled"); } catch (e) { toast(e.message, true); } });
   if (open) liveStream(j.id, it);
   return it;
 }
-function liveStream(id, it) { const log = it.querySelector(".log"); log.dataset.s = "1"; log.style.display = "block"; drawerAbort = new AbortController(); streamJob(id, (ev) => { if (ev.type === "log") { log.appendChild(document.createTextNode(ev.line + "\n")); log.scrollTop = log.scrollHeight; } if (ev.type === "status" || ev.type === "done") { const b = it.querySelector(".badge"); if (b && ev.status) b.outerHTML = badge(ev.status, ev.status); if (ev.type === "done") { it.querySelector(".bar")?.remove(); it.querySelector(".kill")?.remove(); refreshJobBadge(); } } }, drawerAbort.signal).catch(() => {}); }
+function liveStream(id, it) {
+  const log = it.querySelector(".log"); log.dataset.s = "1"; log.style.display = "block";
+  if (!log.classList.contains("log")) {} log.className = "log"; log.style.cssText = "display:block;margin-top:10px;font-family:var(--font-mono);font-size:11px;line-height:1.7;background:var(--c-code-bg);border-radius:8px;padding:10px 12px;max-height:200px;overflow:auto;white-space:pre-wrap";
+  drawerAbort = new AbortController();
+  streamJob(id, (ev) => { if (ev.type === "log") { const mark = /\$ \[/.test(ev.line) ? "› " : "✓ "; const color = /ERROR|fail/i.test(ev.line) ? "var(--c-neg)" : /\$ \[/.test(ev.line) ? "var(--c-hint)" : "var(--c-pos)"; const ln = el(`<div style="color:${color}">${esc(mark + ev.line.replace(/^\$ \[[^\]]*\]\s*/, ""))}</div>`); log.appendChild(ln); log.scrollTop = log.scrollHeight; } if (ev.type === "done") { const pb = it.querySelector(".pbar"); if (pb) { pb.style.width = "100%"; pb.style.animation = ""; pb.style.background = `var(--c-${sc(ev.status)})`; } it.querySelector(".kl")?.remove(); } }, drawerAbort.signal).catch(() => {});
+}
 
-// ============================================================ modals
-function modalShell(title, body, ok, onOk, danger = false) {
-  const m = el(`<div class="modal"><div class="box"><div class="mhead ${danger ? "danger" : ""}">${esc(title)}</div><div class="mbody"></div><div class="mfoot"><button class="btn cancel">${t("cancel")}</button><button class="btn ${danger ? "btn-danger" : "btn-primary"} ok">${esc(ok)}</button></div></div></div>`);
-  m.querySelector(".mbody").appendChild(body); m.querySelector(".cancel").onclick = () => m.remove(); m.querySelector(".ok").onclick = async () => { if ((await onOk()) !== false) m.remove(); }; return m;
-}
-function destructiveModal(tool, args) {
-  const target = args.cluster || args.server || args.name || args.service || "";
-  const body = el(`<div><p>${esc(tool.title)}</p><p class="mono" style="background:var(--c-sunken);padding:8px 10px;border-radius:8px;font-size:12px">${esc(tool.name)} ${esc(JSON.stringify(args))}</p>${tool.destructive ? `<p class="muted">${t("typeToConfirm")}</p><input class="input ci" placeholder="${esc(target || "confirm")}">` : ""}</div>`);
-  const m = modalShell(tool.destructive ? t("destructive") : "Confirm", body, t("confirm"), async () => {
-    if (tool.destructive && target && body.querySelector(".ci").value.trim() !== target) { toast(`Type "${target}" to confirm`, true); return false; }
-    try { const r = tool.destructive ? await startDestructive(tool.name, args) : await startJob(tool.name, args); toast(`Started ${tool.name}`); openDrawer(r.job.id); refreshJobBadge(); return true; } catch (e) { toast(e.message, true); return false; }
-  }, tool.destructive);
-  document.body.appendChild(m);
-}
-function addServerModal() {
-  const props = (S.catalog.find((t) => t.name === "server_add")?.params?.properties) || {}; const af = argForm(props);
-  document.body.appendChild(modalShell("Add a server", af, "Add", async () => { const a = readArgs(af); if (!a.name || !a.host) { toast("name + host required", true); return false; } try { const r = await startJob("server_add", a); toast("Adding…"); openDrawer(r.job.id); setTimeout(() => render(), 1500); return true; } catch (e) { toast(e.message, true); return false; } }));
-}
-// admin (settings)
-function panelCard(title, extra = "") { return el(`<div class="panel"><div class="head">${esc(title)}${extra}<button class="btn btn-sm refresh">${t("refresh")}</button></div><div class="card-pad"><div class="body"><div class="skel" style="width:60%"></div></div></div></div>`); }
-function adminUsers() { const c = panelCard("Users & roles"); const body = c.querySelector(".body"); const load = async () => { try { const { users } = await api("/api/admin/users"); body.innerHTML = `<table class="t"><thead><tr><th>User</th><th>Role</th><th>Scopes</th><th></th></tr></thead><tbody>${users.map((u) => `<tr><td class="mono">${esc(u.username)}</td><td><span class="tag">${esc(u.role)}</span></td><td class="muted">${esc((u.scopes || []).join(", "))}</td><td>${u.username === S.me.username ? "" : `<button class="btn btn-sm rm" data-u="${esc(u.username)}">Remove</button>`}</td></tr>`).join("")}</tbody></table><div style="margin-top:12px"><button class="btn btn-primary btn-sm add">+ Add user</button></div>`; body.querySelector(".add").onclick = () => addUserModal(load); body.querySelectorAll(".rm").forEach((b) => (b.onclick = async () => { if (confirm(`Remove ${b.dataset.u}?`)) { await api("/api/admin/users/remove", { method: "POST", body: JSON.stringify({ username: b.dataset.u }) }); load(); } })); } catch (e) { body.innerHTML = `<pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre>`; } }; c.querySelector(".refresh").onclick = load; load(); return c; }
-function addUserModal(after) { const body = el(`<div><label class="fld"><span class="lab">Username</span><input class="input" data-k="username"></label><label class="fld"><span class="lab">Password</span><input class="input" type="password" data-k="password"></label><label class="fld"><span class="lab">Role</span><select class="input" data-k="role"><option>viewer</option><option>operator</option><option>owner</option></select></label><label class="fld"><span class="lab">Scopes (comma; blank=all)</span><input class="input" data-k="scopes" placeholder="*"></label></div>`); document.body.appendChild(modalShell("Add user", body, "Create", async () => { const g = (k) => body.querySelector(`[data-k="${k}"]`).value.trim(); if (!g("username") || !g("password")) { toast("username + password required", true); return false; } try { const r = await api("/api/admin/users", { method: "POST", body: JSON.stringify({ username: g("username"), password: g("password"), role: g("role"), scopes: g("scopes") ? g("scopes").split(",").map((s) => s.trim()) : ["*"] }) }); showTotp(r); after && after(); return true; } catch (e) { toast(e.message, true); return false; } })); }
-function showTotp(r) { document.body.appendChild(modalShell("TOTP secret (shown once)", el(`<div><p>User <b>${esc(r.username)}</b> created. Add to an authenticator:</p><pre class="out">${esc(r.totpSecret)}</pre><p class="muted" style="word-break:break-all;font-size:12px">${esc(r.totpUri)}</p></div>`), t("close"), async () => true)); }
+// ============================================================ admin (settings)
+function panelCard(title) { return el(`<div style="${cardOpen}"><div style="${cardHead};display:flex;align-items:center;justify-content:space-between">${esc(title)}<button class="btn btn-sm refresh">${t("refresh")}</button></div><div class="card-pad"><div class="body"><div class="skel" style="width:60%"></div></div></div></div>`); }
+function adminUsers() { const c = panelCard("Users & roles"); const body = c.querySelector(".body"); const load = async () => { try { const { users } = await api("/api/admin/users"); body.innerHTML = `<table class="t"><thead><tr><th>User</th><th>Role</th><th>Scopes</th><th></th></tr></thead><tbody>${users.map((u) => `<tr><td class="mono">${esc(u.username)}</td><td><span class="tag">${esc(u.role)}</span></td><td class="muted">${esc((u.scopes || []).join(", "))}</td><td>${u.username === S.me.username ? "" : `<button class="btn btn-sm rm" data-u="${esc(u.username)}">Remove</button>`}</td></tr>`).join("")}</tbody></table><div style="margin-top:12px"><button class="btn btn-primary btn-sm add">+ Add user</button></div>`; body.querySelector(".add").onclick = () => addUserModal(load); body.querySelectorAll(".rm").forEach((x) => (x.onclick = async () => { if (confirm(`Remove ${x.dataset.u}?`)) { await api("/api/admin/users/remove", { method: "POST", body: JSON.stringify({ username: x.dataset.u }) }); load(); } })); } catch (e) { body.innerHTML = `<pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre>`; } }; c.querySelector(".refresh").onclick = load; load(); return c; }
+function addUserModal(after) { const { panel, close } = slideIn(440); panel.innerHTML = `<div class="drawer-head"><strong>Add user</strong><button class="icon-btn dc">${ic("x", 16)}</button></div><div class="drawer-body" style="padding:18px">${field("Username", `<input class="input" id="au_u">`)}${field("Password", `<input class="input" type="password" id="au_p">`)}${field("Role", `<select class="input" id="au_r"><option>viewer</option><option>operator</option><option>owner</option></select>`)}${field("Scopes (comma; blank=all)", `<input class="input" id="au_s" placeholder="*">`)}</div><div style="display:flex;justify-content:flex-end;gap:10px;padding:14px 18px;border-top:1px solid var(--c-divider);background:var(--c-sunken)"><button class="btn dc2">Cancel</button><button class="btn btn-primary ok">Create</button></div>`; panel.querySelector(".dc").onclick = close; panel.querySelector(".dc2").onclick = close; panel.querySelector(".ok").onclick = async () => { const g = (id) => panel.querySelector(id).value.trim(); if (!g("#au_u") || !g("#au_p")) return toast("username + password required", true); try { const r = await api("/api/admin/users", { method: "POST", body: JSON.stringify({ username: g("#au_u"), password: g("#au_p"), role: g("#au_r"), scopes: g("#au_s") ? g("#au_s").split(",").map((s) => s.trim()) : ["*"] }) }); close(); showTotp(r); after && after(); } catch (e) { toast(e.message, true); } }; }
+function showTotp(r) { const { panel, close } = slideIn(440); panel.innerHTML = `<div class="drawer-head"><strong>TOTP secret (shown once)</strong><button class="icon-btn dc">${ic("x", 16)}</button></div><div class="drawer-body" style="padding:18px"><p>User <b>${esc(r.username)}</b> created. Add to an authenticator:</p><pre class="out">${esc(r.totpSecret)}</pre><p class="muted" style="word-break:break-all;font-size:12px">${esc(r.totpUri)}</p></div>`; panel.querySelector(".dc").onclick = close; }
 function adminSessions() { const c = panelCard("Active sessions"); const body = c.querySelector(".body"); const load = async () => { try { const { sessions } = await api("/api/admin/sessions"); body.innerHTML = sessions.length ? `<table class="t"><thead><tr><th>User</th><th>IP</th><th>Last seen</th></tr></thead><tbody>${sessions.map((s) => `<tr><td class="mono">${esc(s.username)}</td><td class="muted">${esc(s.ip)}</td><td class="muted">${new Date(s.lastSeen).toLocaleTimeString()}</td></tr>`).join("")}</tbody></table>` : `<div class="empty">No active sessions.</div>`; } catch (e) { body.innerHTML = `<pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre>`; } }; c.querySelector(".refresh").onclick = load; load(); return c; }
-function adminAudit() { const c = panelCard("Audit log"); const body = c.querySelector(".body"); const load = async () => { try { const { entries, chain } = await api("/api/admin/audit"); body.innerHTML = `<div style="margin-bottom:8px">${chain.ok ? badge("chain intact", "pos") : badge("TAMPERED @ " + chain.brokenAtSeq, "neg")}</div><table class="t"><thead><tr><th>#</th><th>Actor</th><th>Action</th><th>Target</th></tr></thead><tbody>${entries.slice(0, 30).map((e) => `<tr><td class="muted">${e.seq}</td><td class="mono">${esc(e.actor)}</td><td class="mono">${esc(e.tool)}</td><td>${esc(e.target)}</td></tr>`).join("")}</tbody></table>`; } catch (e) { body.innerHTML = `<pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre>`; } }; c.querySelector(".refresh").onclick = load; load(); return c; }
-function adminKill() { const c = el(`<div class="panel card-pad"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><div><h3 style="margin:0 0 4px;font-size:14px;font-weight:600">Kill-switch</h3><div class="muted" style="font-size:13px">Disable destructive ops + revoke every session.</div></div><button class="btn btn-danger" id="k">${ic("security", 14)} Engage</button></div></div>`); c.querySelector("#k").onclick = async () => { if (!confirm("Engage the kill-switch? Revokes ALL sessions + blocks destructive ops.")) return; try { await api("/api/admin/kill", { method: "POST", body: JSON.stringify({ on: true }) }); toast("Kill-switch engaged — logging out"); setTimeout(() => location.reload(), 800); } catch (e) { toast(e.message, true); } }; return c; }
+function adminAudit() { const c = panelCard("Audit log"); const body = c.querySelector(".body"); const load = async () => { try { const { entries, chain } = await api("/api/admin/audit"); body.innerHTML = `<div style="margin-bottom:8px">${chain.ok ? pill("chain intact", "pos") : pill("TAMPERED @ " + chain.brokenAtSeq, "neg")}</div><table class="t"><thead><tr><th>#</th><th>Actor</th><th>Action</th><th>Target</th></tr></thead><tbody>${entries.slice(0, 30).map((e) => `<tr><td class="muted">${e.seq}</td><td class="mono">${esc(e.actor)}</td><td class="mono">${esc(e.tool)}</td><td>${esc(e.target)}</td></tr>`).join("")}</tbody></table>`; } catch (e) { body.innerHTML = `<pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre>`; } }; c.querySelector(".refresh").onclick = load; load(); return c; }
+function adminKill() { const c = el(`<div style="${cardOpen};padding:16px"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><div><h3 style="margin:0 0 4px;font-size:14px;font-weight:600">Kill-switch</h3><div class="muted" style="font-size:13px">Disable destructive ops + revoke every session.</div></div><button class="btn btn-danger" id="k">${ic("security", 14)} Engage</button></div></div>`); c.querySelector("#k").onclick = async () => { if (!confirm("Engage the kill-switch? Revokes ALL sessions + blocks destructive ops.")) return; try { await api("/api/admin/kill", { method: "POST", body: JSON.stringify({ on: true }) }); toast("Kill-switch engaged — logging out"); setTimeout(() => location.reload(), 800); } catch (e) { toast(e.message, true); } }; return c; }
 
 // ============================================================ auth gate
-function authShell(inner) { document.documentElement.dataset.theme = S.theme; document.getElementById("app").innerHTML = `<div style="min-height:100vh;display:grid;place-items:center;background:var(--c-bg);padding:24px"><div class="card" style="width:380px;max-width:92vw;padding:26px"><div style="display:flex;align-items:center;gap:10px;margin-bottom:18px">${LOGO}<span style="font-family:var(--font-display);font-weight:600;font-size:18px">AdPix Cloud</span></div>${inner}</div></div>`; }
-function renderLogin(msg = "") {
-  authShell(`${msg ? `<div class="badge b-neg" style="margin-bottom:12px"><span class="dot"></span>${esc(msg)}</div>` : ""}<label class="fld"><span class="lab">Username</span><input class="input" id="u"></label><label class="fld"><span class="lab">Password</span><input class="input" type="password" id="p"></label><label class="fld"><span class="lab">Authenticator code</span><input class="input mono" id="totp" inputmode="numeric" placeholder="000000"></label><button class="btn btn-primary" id="go" style="width:100%;justify-content:center;margin-top:6px">Sign in</button>`);
-  const go = async () => { try { const r = await api("/api/login", { method: "POST", body: JSON.stringify({ username: u.value.trim(), password: p.value, totp: totp.value.trim() }) }); S.csrf = r.csrf; sessionStorage.removeItem("adpix_token"); boot(); } catch (e) { renderLogin(e.message); } };
-  const u = document.getElementById("u"), p = document.getElementById("p"), totp = document.getElementById("totp");
-  document.getElementById("go").onclick = go; totp.onkeydown = (e) => { if (e.key === "Enter") go(); };
-}
-function renderSetup(msg = "") {
-  authShell(`<p class="muted" style="margin-top:0">First run — create the owner account. You'll get a TOTP secret for an authenticator app.</p>${msg ? `<div class="badge b-neg" style="margin-bottom:12px"><span class="dot"></span>${esc(msg)}</div>` : ""}<label class="fld"><span class="lab">Username</span><input class="input" id="u"></label><label class="fld"><span class="lab">Password</span><input class="input" type="password" id="p"></label><button class="btn btn-primary" id="go" style="width:100%;justify-content:center;margin-top:6px">Create owner</button>`);
-  document.getElementById("go").onclick = async () => { const u = document.getElementById("u").value.trim(), p = document.getElementById("p").value; if (!u || !p) return renderSetup("username + password required"); try { const r = await api("/api/setup", { method: "POST", body: JSON.stringify({ username: u, password: p }) }); authShell(`<p>Owner <b>${esc(r.username)}</b> created. Add this TOTP secret to your authenticator (shown once):</p><pre class="out">${esc(r.totpSecret)}</pre><p class="muted" style="word-break:break-all;font-size:12px">${esc(r.totpUri)}</p><button class="btn btn-primary" id="c" style="width:100%;justify-content:center;margin-top:10px">Continue to sign in</button>`); document.getElementById("c").onclick = () => renderLogin(); } catch (e) { renderSetup(e.message); } };
-}
+function authShell(inner) { document.documentElement.dataset.theme = S.theme; document.getElementById("app").innerHTML = `<div style="min-height:100vh;display:grid;place-items:center;background:var(--c-bg);padding:24px"><div class="card" style="width:380px;max-width:92vw;padding:26px;background:var(--c-card);border:1px solid var(--c-border);border-radius:12px"><div style="display:flex;align-items:center;gap:10px;margin-bottom:18px">${LOGO}<span style="font-family:var(--font-display);font-weight:600;font-size:18px">AdPix Cloud</span></div>${inner}</div></div>`; }
+function renderLogin(msg = "") { authShell(`${msg ? `<div class="badge b-neg" style="margin-bottom:12px"><span class="dot"></span>${esc(msg)}</div>` : ""}<label class="fld"><span class="lab">Username</span><input class="input" id="u"></label><label class="fld"><span class="lab">Password</span><input class="input" type="password" id="p"></label><label class="fld"><span class="lab">Authenticator code</span><input class="input mono" id="totp" inputmode="numeric" placeholder="000000"></label><button class="btn btn-primary" id="go" style="width:100%;justify-content:center;margin-top:6px">Sign in</button>`); const go = async () => { try { const r = await api("/api/login", { method: "POST", body: JSON.stringify({ username: u.value.trim(), password: p.value, totp: totp.value.trim() }) }); S.csrf = r.csrf; sessionStorage.removeItem("adpix_token"); boot(); } catch (e) { renderLogin(e.message); } }; const u = document.getElementById("u"), p = document.getElementById("p"), totp = document.getElementById("totp"); document.getElementById("go").onclick = go; totp.onkeydown = (e) => { if (e.key === "Enter") go(); }; }
+function renderSetup(msg = "") { authShell(`<p class="muted" style="margin-top:0">First run — create the owner account. You'll get a TOTP secret for an authenticator app.</p>${msg ? `<div class="badge b-neg" style="margin-bottom:12px"><span class="dot"></span>${esc(msg)}</div>` : ""}<label class="fld"><span class="lab">Username</span><input class="input" id="u"></label><label class="fld"><span class="lab">Password</span><input class="input" type="password" id="p"></label><button class="btn btn-primary" id="go" style="width:100%;justify-content:center;margin-top:6px">Create owner</button>`); document.getElementById("go").onclick = async () => { const u = document.getElementById("u").value.trim(), p = document.getElementById("p").value; if (!u || !p) return renderSetup("username + password required"); try { const r = await api("/api/setup", { method: "POST", body: JSON.stringify({ username: u, password: p }) }); authShell(`<p>Owner <b>${esc(r.username)}</b> created. Add this TOTP secret to your authenticator (shown once):</p><pre class="out">${esc(r.totpSecret)}</pre><p class="muted" style="word-break:break-all;font-size:12px">${esc(r.totpUri)}</p><button class="btn btn-primary" id="c" style="width:100%;justify-content:center;margin-top:10px">Continue to sign in</button>`); document.getElementById("c").onclick = () => renderLogin(); } catch (e) { renderSetup(e.message); } }; }
 
 // ============================================================ boot
 async function boot() {
   let me = null; try { me = await api("/api/me"); } catch {}
-  if (me) {
-    S.me = me.actor; S.mode = me.mode; if (me.csrf) S.csrf = me.csrf;
-    if (me.killed) { authShell(`<div class="badge b-neg"><span class="dot"></span>Kill-switch engaged</div><p class="muted">Destructive ops disabled, sessions revoked. An owner must release it.</p><button class="btn" id="r" style="width:100%;justify-content:center;margin-top:8px">Reload</button>`); document.getElementById("r").onclick = () => location.reload(); return; }
-    try { const { tools } = await api("/api/catalog"); S.catalog = tools; } catch (e) { authShell(`<div class="empty">Failed to load: ${esc(e.message)}</div>`); return; }
-    render(); return;
-  }
+  if (me) { S.me = me.actor; S.mode = me.mode; if (me.csrf) S.csrf = me.csrf; if (me.killed) { authShell(`<div class="badge b-neg"><span class="dot"></span>Kill-switch engaged</div><p class="muted">Destructive ops disabled, sessions revoked. An owner must release it.</p><button class="btn" id="r" style="width:100%;justify-content:center;margin-top:8px">Reload</button>`); document.getElementById("r").onclick = () => location.reload(); return; } try { const { tools } = await api("/api/catalog"); S.catalog = tools; } catch (e) { authShell(`<div class="empty">Failed to load: ${esc(e.message)}</div>`); return; } await loadFleet(); render(); return; }
   let status = {}; try { status = await fetch("/api/status").then((r) => r.json()); } catch {}
   if (status.adminsExist) return renderLogin();
   if (TOKEN) return renderSetup();

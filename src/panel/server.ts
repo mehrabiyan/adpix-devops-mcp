@@ -15,6 +15,7 @@ import { authorize } from "./rbac.js";
 import { appendAudit, readAudit, verifyChain } from "./audit.js";
 import { argsHash } from "./hash.js";
 import { resolveAccess, parseCookies, SESSION_COOKIE, type Actor, type AccessCtx } from "./access.js";
+import { buildFleet, verifyServer, parseTuneRows } from "./fleet.js";
 
 /**
  * The control-panel HTTP server. Phase 1 (loopback job engine + SPA) + Phase 2 hardening:
@@ -129,6 +130,32 @@ export function createPanelServer(opts: PanelOpts): Server {
         return;
       }
       if (path === "/api/catalog" && method === "GET") { sendJson(res, 200, { tools: buildCatalog() }); return; }
+
+      // ---- structured fleet model (dashboard + servers) ----
+      if (path === "/api/fleet" && method === "GET") {
+        try { sendJson(res, 200, await buildFleet(deps, engine.list())); }
+        catch (e) { sendJson(res, 200, { cluster: { name: "", vip: "", servers: 0 }, counts: { healthy: 0, degraded: 0, down: 0, activeJobs: 0 }, nodes: [], recentJobs: [], alerts: [], error: (e as Error).message }); }
+        return;
+      }
+      // ---- databases view (stat cards + tune diff) ----
+      if (path === "/api/db" && method === "GET") {
+        const eng = url.searchParams.get("engine") === "ch" ? "ch" : "pg";
+        const health = toolByName.get(`${eng}_health`); const tune = toolByName.get(`${eng}_tune`);
+        const az = authorize(actor.role, actor.scopes, catByName.get(`${eng}_health`)!, {});
+        if (!az.ok) { sendJson(res, 403, { error: az.reason }); return; }
+        let healthText = "", tuneText = "";
+        try { healthText = await health!.handler(deps, {}); } catch (e) { healthText = String(e); }
+        try { tuneText = await tune!.handler(deps, { apply: false }); } catch (e) { tuneText = String(e); }
+        sendJson(res, 200, { engine: eng, healthText, tuneText, tuneRows: parseTuneRows(tuneText) });
+        return;
+      }
+      // ---- add-server wizard: verify SSH (ad-hoc connect + fingerprint) ----
+      if (path === "/api/wizard/verify-server" && method === "POST") {
+        if (!["owner", "operator"].includes(actor.role)) { sendJson(res, 403, { error: "owner/operator only" }); return; }
+        const b = await readBody(req);
+        sendJson(res, 200, await verifyServer(deps, { host: String(b.host || ""), port: Number(b.port) || 22, username: String(b.username || "root") }));
+        return;
+      }
 
       // ---- admin (owner-only) ----
       if (path.startsWith("/api/admin/")) {
