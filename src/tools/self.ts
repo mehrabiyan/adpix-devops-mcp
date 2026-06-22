@@ -1,7 +1,7 @@
 import { z } from "zod";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { lastLines } from "../util.js";
+import { lastLines, shq } from "../util.js";
 import type { ToolDef } from "./types.js";
 
 /** Repo root of THIS running MCP server (dist/tools/self.js → ../../). */
@@ -11,18 +11,39 @@ export function selfRepoRoot(): string {
 
 export const selfTools: ToolDef[] = [
   {
+    name: "mcp_status",
+    title: "MCP version + update status",
+    description:
+      "Read-only: this MCP's current version + commit + branch, and how many commits it is behind its own " +
+      "GitHub origin (the MCP server + the panel UI are one repo). Powers the panel's 'Update AdPix Cloud' card.",
+    schema: {},
+    annotations: { readOnlyHint: true },
+    handler: async (deps) => {
+      const root = process.env.ADPIX_MCP_ROOT || selfRepoRoot();
+      const r = await deps.local(
+        `cd ${shq(root)} && git rev-parse --short HEAD && git log -1 --format=%s && git rev-parse --abbrev-ref HEAD && (git fetch -q origin 2>/dev/null; b=$(git rev-parse --abbrev-ref HEAD); git rev-list --count HEAD..origin/$b 2>/dev/null || echo '?')`,
+        { timeoutMs: 30_000 }
+      );
+      if (r.code !== 0) return `Not a git checkout at ${root} (or git unavailable): ${lastLines(r.stdout, 6)}`;
+      const [commit = "?", subject = "", branch = "?", behind = "?"] = r.stdout.trim().split("\n");
+      return `adpix-devops-mcp @ ${commit} (${branch})\n${subject}\n${behind === "0" ? "Up to date with origin." : `${behind} commit(s) behind origin/${branch} — run mcp_self_update to update.`}`;
+    },
+  },
+  {
     name: "mcp_self_update",
     title: "Update this MCP server",
     description:
-      "Update THIS adpix-devops-mcp installation (hosted mode): git pull its own repo, rebuild, and " +
-      "— when running under systemd — schedule a service restart 2s after replying so the response " +
+      "Update THIS adpix-devops-mcp installation (hosted mode): git pull its own repo, rebuild (incl. the panel " +
+      "UI), and — when running under systemd — schedule a service restart 2s after replying so the response " +
       "still reaches you. Refuses on local modifications. Clients reconnect automatically.",
     schema: {
       force: z.boolean().default(false).describe("Rebuild + restart even when already on the newest commit"),
+      confirm: z.boolean().default(false).describe("Required — this restarts the control plane itself"),
     },
-    annotations: { idempotentHint: true },
+    annotations: { destructiveHint: true, idempotentHint: true },
     handler: async (deps, args) => {
-      const a = args as { force: boolean };
+      const a = args as { force: boolean; confirm: boolean };
+      if (!a.confirm) return `REFUSED: mcp_self_update rebuilds + restarts the control plane itself (a brief self-outage). Re-run with confirm:true.`;
       const root = process.env.ADPIX_MCP_ROOT || selfRepoRoot();
       const g = (cmd: string) => `git -C '${root.replace(/'/g, "")}' ${cmd}`;
 

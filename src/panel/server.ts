@@ -23,6 +23,7 @@ import { buildSecurityView } from "./aggregate/security.js";
 import { buildMonitorView } from "./aggregate/monitor.js";
 import { buildQuorumView } from "./aggregate/cluster.js";
 import { buildDeployView } from "./aggregate/deploy.js";
+import { buildMcpStatus } from "./aggregate/mcp.js";
 import { classifyError } from "./errors.js";
 import { loadRegistry, saveRegistry } from "../registry.js";
 import { panelMcpKeyPath, ensureMcpKey, saveUploadedKey } from "./keys.js";
@@ -186,6 +187,13 @@ export function createPanelServer(opts: PanelOpts): Server {
         const az = authorize(actor.role, actor.scopes, catByName.get("cicd_status")!, {});
         if (!az.ok) { sendJson(res, 403, { error: az.reason }); return; }
         sendJson(res, 200, await buildDeployView(deps, url.searchParams.get("server") ?? undefined));
+        return;
+      }
+      // ---- this MCP's own version + update status ----
+      if (path === "/api/mcp" && method === "GET") {
+        const az = authorize(actor.role, actor.scopes, catByName.get("mcp_status")!, {});
+        if (!az.ok) { sendJson(res, 403, { error: az.reason }); return; }
+        sendJson(res, 200, await buildMcpStatus(deps));
         return;
       }
       // ---- databases view (structured stat cards + tune diff) ----

@@ -51,7 +51,7 @@ const GROUP: Record<string, string> = {
   secrets_preflight: "security", oidc_health: "security", edge_validate: "security", launch_smoke: "security",
   predeploy_gate: "security",
   // settings / self
-  ai_setup: "settings", ai_fix: "settings", mcp_self_update: "settings", capacity_plan: "settings",
+  ai_setup: "settings", ai_fix: "settings", mcp_self_update: "settings", mcp_status: "settings", stack_update: "deploys", capacity_plan: "settings",
   consult_topic: "settings", scale_assessment: "settings", watchdog_install: "settings", watchdog_status: "settings",
   // phase-3 ops
   container_control: "containers", metrics_query: "monitoring", schedule_job: "settings",

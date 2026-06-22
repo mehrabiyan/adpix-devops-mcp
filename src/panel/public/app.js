@@ -298,7 +298,9 @@ SCREENS.deploys = (c) => {
   cur.querySelector('[data-act="bg"]').onclick = () => verifyAction({ name: "bluegreen_deploy", title: "Blue-green deploy across the cluster", destructive: true }, {});
   cur.querySelector('[data-act="rb"]').onclick = () => verifyAction({ name: "adpix_update", title: "Rollback (redeploy the previous build)", destructive: false }, {});
   const cicd = el(`<div style="${cardOpen}"><div style="${cardHead};display:flex;align-items:center;justify-content:space-between">CI / CD pipeline<button class="btn btn-sm refresh">${t("refresh")}</button></div><div class="ccbody"><div class="card-pad"><div class="skel" style="width:60%"></div></div></div></div>`);
-  left.append(cur, cicd);
+  const stacks = el(`<div style="${cardOpen}"><div style="${cardHead}">Update from GitHub</div><div class="card-pad"><div class="muted" style="font-size:12.5px;margin-bottom:12px">Pull + rebuild + migrate, recreating <b>only stateless</b> services. Datastores (postgres / clickhouse / redis / minio) and their volumes are never recreated or deleted.</div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-sm" data-st="analytics">${ic("deploys", 14)} Update Analytics</button><button class="btn btn-sm" data-st="tagmanager">${ic("deploys", 14)} Update Tag Manager</button></div></div></div>`);
+  stacks.querySelectorAll("[data-st]").forEach((b) => (b.onclick = () => verifyAction({ name: "stack_update", title: `Update the ${b.dataset.st} stack — stateless-only + migrations (datastores preserved)`, destructive: true }, { stack: b.dataset.st, statelessOnly: true })));
+  left.append(cur, cicd, stacks);
   const right = el(`<div></div>`);
   right.innerHTML = (S.fleet && (S.fleet.nodes.length || S.fleet.cluster.name)) ? `<div style="${cardOpen}">${topologyCard(S.fleet)}</div>` : `<div style="${cardOpen}"><div style="${cardHead}">Cluster topology</div><div class="empty">No cluster defined.</div></div>`;
   g.append(left, right);
@@ -406,8 +408,21 @@ SCREENS.backups = (c) => {
   };
   draw();
 };
+function mcpUpdateCard() {
+  const card = el(`<div style="${cardOpen};margin-bottom:16px"><div style="${cardHead};display:flex;align-items:center;justify-content:space-between">AdPix Cloud · control plane<button class="btn btn-sm refresh">${t("refresh")}</button></div><div class="card-pad body"><div class="skel" style="width:50%"></div></div></div>`);
+  const body = card.querySelector(".body");
+  const load = async () => {
+    try {
+      const d = await api("/api/mcp"); const behind = d.behind;
+      body.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><div style="font-size:13.5px"><b class="mono">${esc(d.commit)}</b>${d.version ? ` · v${esc(d.version)}` : ""} <span class="muted">(${esc(d.branch)})</span></div><div class="muted" style="font-size:12.5px;margin-top:3px">${esc(d.subject || "")}</div><div style="margin-top:7px">${behind === 0 ? pill("up to date", "pos") : behind === "?" ? pill("origin unreachable", "idle") : pill(behind + " commit(s) behind", "warn")}</div></div>${S.me.role === "owner" ? `<button class="btn ${behind === 0 ? "" : "btn-primary"} upd">${behind === 0 ? "Rebuild + restart" : "Update + restart"}</button>` : ""}</div>${d.error ? `<div class="muted" style="font-size:12px;margin-top:8px">${esc(d.error)}</div>` : ""}`;
+      const u = body.querySelector(".upd"); if (u) u.onclick = () => confirmDanger("Update AdPix Cloud", `Pull the latest MCP server + panel UI from GitHub, rebuild, and restart the control plane. The panel briefly disconnects and reconnects. Type <b class="mono">update</b> to confirm.`, "update", async () => { await startDestructive("mcp_self_update", {}); toast("Updating + restarting — reconnect in a moment"); openDrawer(); }, "Update + restart");
+    } catch (e) { body.innerHTML = `<pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre>`; }
+  };
+  card.querySelector(".refresh").onclick = load; load(); return card;
+}
 SCREENS.settings = (c) => {
-  c.innerHTML = H(STR[S.lang].nav.settings, "Admins, sessions, audit, secrets, integrations.");
+  c.innerHTML = H(STR[S.lang].nav.settings, "Control-plane updates, admins, sessions, audit, secrets.");
+  c.appendChild(mcpUpdateCard());
   const grid = el(`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px;align-items:start"></div>`); c.appendChild(grid);
   const a = el(`<div style="display:flex;flex-direction:column;gap:16px"></div>`), b = el(`<div style="display:flex;flex-direction:column;gap:16px"></div>`); grid.append(a, b);
   if (S.me.role === "owner") { a.append(adminUsers(), adminSessions()); b.append(adminAudit(), adminKill()); }
