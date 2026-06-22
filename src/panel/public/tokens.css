@@ -1,0 +1,45 @@
+/* AdPix design tokens — imported from the AdPix Design System (colors/typography). */
+@import url("https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@400;500&family=Vazirmatn:wght@400;500;700&display=swap");
+
+:root {
+  /* brand orange */
+  --orange-50:#fef3ec; --orange-100:#fde0d1; --orange-400:#f28a5c; --orange-500:#f07b49; --orange-600:#e2622d; --orange-700:#bd4f22;
+  --amber-300:#f2af4c;
+  /* neutrals */
+  --white:#fff; --grey-900:#202124; --grey-700:#3c4043; --grey-600:#5f6368; --grey-400:#9aa0a6;
+  --grey-300:#dadce0; --grey-200:#e8eaed; --grey-100:#f1f3f4; --grey-50:#f8f9fa;
+  /* status */
+  --green-500:#188038; --green-50:#e6f4ea; --red-500:#d93025; --red-50:#fce8e6; --yellow-500:#f9ab00; --yellow-50:#fef7e0;
+  /* fonts */
+  --font-ui:"Roboto",-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  --font-mono:"Roboto Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  --font-display:"Fredoka","Trebuchet MS",system-ui,sans-serif;
+  --ease:cubic-bezier(.2,0,0,1);
+
+  /* semantic (light) */
+  --c-bg:var(--grey-50); --c-card:#fff; --c-elev:#fff; --c-sunken:var(--grey-100);
+  --c-border:var(--grey-300); --c-divider:var(--grey-100);
+  --c-text:var(--grey-900); --c-muted:var(--grey-600); --c-hint:var(--grey-400);
+  --c-brand:var(--orange-500); --c-brand-hover:var(--orange-600); --c-brand-tint:var(--orange-50);
+  --c-pos:var(--green-500); --c-pos-bg:var(--green-50);
+  --c-warn:#d98a00; --c-warn-bg:var(--yellow-50);
+  --c-neg:var(--red-500); --c-neg-bg:var(--red-50);
+  --c-idle:var(--grey-400); --c-idle-bg:var(--grey-100);
+  --c-topbar:#fff; --c-sidebar:#fff; --c-scrim:rgba(32,33,36,.42);
+  --c-shadow-card:0 1px 2px rgba(60,64,67,.10); --c-shadow-menu:0 8px 28px rgba(60,64,67,.22);
+  --c-code-bg:#f7f8fa;
+}
+
+[data-theme="dark"] {
+  --c-bg:#0e0e10; --c-card:#171719; --c-elev:#1d1d20; --c-sunken:#212125;
+  --c-border:#2a2a30; --c-divider:#222227;
+  --c-text:#ececee; --c-muted:#9b9ba3; --c-hint:#6a6a72;
+  --c-brand:#f07b49; --c-brand-hover:#f28a5c; --c-brand-tint:rgba(240,123,73,.16);
+  --c-pos:#46b96c; --c-pos-bg:rgba(70,185,108,.15);
+  --c-warn:#f0b13c; --c-warn-bg:rgba(240,177,60,.15);
+  --c-neg:#f0675c; --c-neg-bg:rgba(240,103,92,.15);
+  --c-idle:#6a6a72; --c-idle-bg:#212125;
+  --c-topbar:#141416; --c-sidebar:#141416; --c-scrim:rgba(0,0,0,.55);
+  --c-shadow-card:0 1px 2px rgba(0,0,0,.4); --c-shadow-menu:0 8px 28px rgba(0,0,0,.6);
+  --c-code-bg:#0b0b0d;
+}

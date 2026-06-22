@@ -60,6 +60,15 @@ async function main() {
     return;
   }
 
+  // Web control panel (loopback-first; reached via an SSH tunnel). Phase 1 of docs/control-panel.md.
+  if (args.includes("--panel")) {
+    const { launchPanel } = await import("./panel/launch.js");
+    const port = Number(argValue(args, "--port") ?? process.env.ADPIX_PANEL_PORT ?? 8931);
+    const host = argValue(args, "--host") ?? process.env.ADPIX_PANEL_HOST ?? "127.0.0.1";
+    await launchPanel({ port, host });
+    return;
+  }
+
   const httpMode = args.includes("--http") || process.env.MCP_TRANSPORT === "http";
 
   if (httpMode) {

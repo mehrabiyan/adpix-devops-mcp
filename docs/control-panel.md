@@ -1,8 +1,20 @@
 # AdPix Control Panel — design spec
 
-Status: **design only.** A self-service web control panel (cPanel / DigitalOcean-style)
-over the existing 72 MCP tools — manage the fleet, containers, backups, databases, deploys,
-HA, DNS and clients from a UI, no CLI.
+Status: **Phase 1 IMPLEMENTED** (loopback). Backend job engine + panel server + the "AdPix
+Cloud" SPA are built (`src/panel/*`, `npm start -- --panel`). Phase 2/3 below are pending.
+A self-service web control panel (cPanel / DigitalOcean-style) over the existing 72 MCP
+tools — manage the fleet, containers, backups, databases, deploys, HA, DNS and clients from
+a UI, no CLI.
+
+## Phase 1 — what shipped
+- `src/panel/store.ts` — job ledger (`$ADPIX_DEVOPS_HOME/jobs.json`, atomic, mode 600, secret-redacted args).
+- `src/panel/observed-deps.ts` — Deps decorator → redacted live logs + cooperative cancel for ALL tools, zero per-tool edits.
+- `src/panel/engine.ts` — bounded worker pool, per-target mutex, idempotency keys, boot reconciliation (in-flight → interrupted), SSE event bus.
+- `src/panel/catalog.ts` — catalog derived from `allTools` (groups + JSON-Schema params via zod-to-json-schema).
+- `src/panel/server.ts` — node:http server reusing the wizard guard (Host allowlist, token header, Origin/Sec-Fetch, JSON-only); routes: `/api/catalog`, `POST /api/tools/:name` (read-only sync), `POST /api/jobs` (async + confirm-gate), `GET /api/jobs[/:id][/cancel|/stream(SSE)]`; serves the SPA.
+- `src/panel/public/*` — the "AdPix Cloud" SPA (design tokens from the AdPix Design System): app shell + nav groups, dark/light, EN/FA + RTL, the live jobs/activity drawer with SSE log streaming, and a typed-confirm modal for destructive ops. Dashboard + Servers + Jobs are bespoke; every other nav section renders its group's tools as action cards with generic arg forms.
+- Run: `node dist/index.js --panel [--port 8931]` → prints a `#token=…` URL; reach it via `ssh -L 8931:127.0.0.1:8931 <server>`. Loopback-only (binds 127.0.0.1).
+- Tests: `test/panel.test.ts` (store, engine, catalog, live server + guard + jobs).
 
 ## 0. Feasibility — ~80% of the backend already exists
 The 72 tools ARE the operations (the "verbs"). The panel is **auth + a job engine + an SPA**

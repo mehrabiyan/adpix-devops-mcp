@@ -1,0 +1,1367 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/adpix-design-system-4513410e-e4e8-47b3-b54d-8a1801e3bae2/styles.css">
+<script src="_ds/adpix-design-system-4513410e-e4e8-47b3-b54d-8a1801e3bae2/_ds_bundle.js"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;700&display=swap">
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;height:100%}
+  :root{
+    --c-bg:var(--surface-canvas); --c-card:#ffffff; --c-elev:#ffffff; --c-sunken:var(--grey-100);
+    --c-border:var(--border); --c-divider:var(--grey-100); --c-text:var(--grey-900);
+    --c-muted:var(--grey-600); --c-hint:var(--grey-400);
+    --c-brand:var(--orange-500); --c-brand-hover:var(--orange-600); --c-brand-tint:var(--orange-50);
+    --c-pos:var(--green-500); --c-pos-bg:var(--green-50);
+    --c-warn:#d98a00; --c-warn-bg:var(--yellow-50);
+    --c-neg:var(--red-500); --c-neg-bg:var(--red-50);
+    --c-idle:var(--grey-400); --c-idle-bg:var(--grey-100);
+    --c-topbar:#ffffff; --c-sidebar:#ffffff; --c-scrim:rgba(32,33,36,.42);
+    --c-font:var(--font-ui); --c-mono:var(--font-mono);
+    --c-shadow-card:0 1px 2px rgba(60,64,67,.10); --c-shadow-menu:0 8px 28px rgba(60,64,67,.22);
+    --c-code-bg:#f7f8fa;
+  }
+  [data-theme="dark"]{
+    --c-bg:#0e0e10; --c-card:#171719; --c-elev:#1d1d20; --c-sunken:#212125;
+    --c-border:#2a2a30; --c-divider:#222227; --c-text:#ececee; --c-muted:#9b9ba3; --c-hint:#6a6a72;
+    --c-brand:#f07b49; --c-brand-hover:#f28a5c; --c-brand-tint:rgba(240,123,73,.16);
+    --c-pos:#46b96c; --c-pos-bg:rgba(70,185,108,.15);
+    --c-warn:#f0b13c; --c-warn-bg:rgba(240,177,60,.15);
+    --c-neg:#f0675c; --c-neg-bg:rgba(240,103,92,.15);
+    --c-idle:#6a6a72; --c-idle-bg:#212125;
+    --c-topbar:#141416; --c-sidebar:#141416; --c-scrim:rgba(0,0,0,.55);
+    --c-shadow-card:0 1px 2px rgba(0,0,0,.4); --c-shadow-menu:0 10px 32px rgba(0,0,0,.55);
+    --c-code-bg:#101012;
+  }
+  [data-locale="fa"]{ --c-font:"Vazirmatn", var(--font-ui); }
+  ::placeholder{color:var(--c-hint)}
+  *::-webkit-scrollbar{width:10px;height:10px}
+  *::-webkit-scrollbar-thumb{background:var(--c-border);border-radius:999px;border:2px solid transparent;background-clip:padding-box}
+  *::-webkit-scrollbar-track{background:transparent}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @keyframes blink{50%{opacity:0}}
+  @keyframes shimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}
+  @keyframes pop{from{transform:scale(.96);opacity:0}to{transform:scale(1);opacity:1}}
+  @keyframes toastin{from{transform:translateY(10px);opacity:0}to{transform:translateY(0);opacity:1}}
+  @keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.35}}
+</style>
+</helmet>
+
+<div dir="{{ dir }}" data-theme="{{ theme }}" data-locale="{{ locale }}" style="height:100vh;display:flex;flex-direction:column;font-family:var(--c-font);background:var(--c-bg);color:var(--c-text);font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased;overflow:hidden">
+
+  <!-- ===================== TOPBAR ===================== -->
+  <header style="height:56px;flex:none;display:flex;align-items:center;gap:14px;padding-inline:16px;background:var(--c-topbar);border-block-end:1px solid var(--c-border);z-index:20">
+    <div style="display:flex;align-items:center;gap:10px;min-width:200px">
+      <svg viewBox="0 0 150 130" width="26" height="22" aria-label="AdPix"><rect x="6" y="44" width="22" height="48" rx="11" fill="#F07C4A"/><rect x="36" y="10" width="22" height="116" rx="11" fill="#131313" style="fill:var(--c-text)"/><rect x="66" y="30" width="22" height="76" rx="11" fill="#F07C4A"/><rect x="96" y="10" width="22" height="116" rx="11" fill="#F2AF4E"/><rect x="126" y="48" width="22" height="40" rx="11" fill="#131313" style="fill:var(--c-text)"/></svg>
+      <span style="font-family:var(--font-display);font-weight:600;font-size:17px;letter-spacing:-.2px">AdPix <span style="color:var(--c-muted);font-weight:500">Cloud</span></span>
+    </div>
+    <button onClick="{{ cycleCluster }}" style="display:flex;align-items:center;gap:8px;height:34px;padding-inline:10px 8px;border:1px solid var(--c-border);background:var(--c-card);border-radius:999px;cursor:pointer;color:var(--c-text);font:inherit;font-size:13px">
+      <span style="width:7px;height:7px;border-radius:50%;background:var(--c-pos)"></span>
+      <span style="font-weight:500">{{ clusterName }}</span>
+      <span style="color:var(--c-hint);font-size:11px">{{ clusterRegion }}</span>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--c-hint)"><path d="M6 9l6 6 6-6"/></svg>
+    </button>
+    <button onClick="{{ openPalette }}" style="flex:1;max-width:520px;display:flex;align-items:center;gap:9px;height:36px;padding-inline:13px;border:1px solid var(--c-border);background:var(--c-sunken);border-radius:999px;cursor:text;color:var(--c-hint);font:inherit;font-size:13px;text-align:start">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <span style="flex:1;min-width:0;text-align:start;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ t.searchPlaceholder }}</span>
+      <kbd style="flex:none;font-family:var(--c-mono);font-size:11px;background:var(--c-card);border:1px solid var(--c-border);border-radius:6px;padding:2px 6px;color:var(--c-muted)">⌘K</kbd>
+    </button>
+    <div style="flex:1"></div>
+    <div style="display:flex;align-items:center;gap:4px">
+      <button onClick="{{ toggleLocale }}" title="Language" style="height:34px;padding-inline:11px;border:1px solid var(--c-border);background:var(--c-card);border-radius:999px;cursor:pointer;color:var(--c-text);font:inherit;font-size:12px;font-weight:600;letter-spacing:.3px">{{ localeLabel }}</button>
+      <button onClick="{{ toggleTheme }}" title="Theme" style="width:34px;height:34px;display:grid;place-items:center;border:1px solid var(--c-border);background:var(--c-card);border-radius:999px;cursor:pointer;color:var(--c-muted)">
+        <span style="display:{{ themeIconLight }}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/></svg></span>
+        <span style="display:{{ themeIconDark }}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M21 12.8A8 8 0 1 1 11.2 3a6.3 6.3 0 0 0 9.8 9.8Z"/></svg></span>
+      </button>
+      <button onClick="{{ openDrawer }}" title="Activity" style="position:relative;width:34px;height:34px;display:grid;place-items:center;border:1px solid var(--c-border);background:var(--c-card);border-radius:999px;cursor:pointer;color:var(--c-muted)">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M3 12h4l2 6 4-12 2 6h6"/></svg>
+        <span style="display:{{ runningDot }};position:absolute;top:6px;inset-inline-end:6px;width:8px;height:8px;border-radius:50%;background:var(--c-brand);border:2px solid var(--c-card);animation:pulse-dot 1.4s infinite"></span>
+      </button>
+      <button title="Notifications" style="width:34px;height:34px;display:grid;place-items:center;border:1px solid var(--c-border);background:var(--c-card);border-radius:999px;cursor:pointer;color:var(--c-muted)">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M6 9a6 6 0 1 1 12 0c0 5 2 6 2 6H4s2-1 2-6M10 20a2 2 0 0 0 4 0"/></svg>
+      </button>
+      <div style="width:32px;height:32px;border-radius:50%;background:var(--c-brand);color:#fff;display:grid;place-items:center;font-weight:600;font-size:13px;margin-inline-start:4px">SM</div>
+    </div>
+  </header>
+
+  <div style="flex:1;display:flex;min-height:0">
+    <!-- ===================== SIDEBAR ===================== -->
+    <aside style="width:{{ sidebarW }};flex:none;background:var(--c-sidebar);border-inline-end:1px solid var(--c-border);display:flex;flex-direction:column;transition:width .2s var(--ease-standard);overflow:hidden">
+      <nav style="flex:1;overflow-y:auto;padding:12px 10px">
+        <sc-for list="{{ navGroups }}" as="g" hint-placeholder-count="5">
+          <div style="margin-block-end:6px">
+            <div style="display:{{ groupLabelDisplay }};font-size:11px;font-weight:600;letter-spacing:.7px;text-transform:uppercase;color:var(--c-hint);padding:10px 12px 5px">{{ g.label }}</div>
+            <sc-for list="{{ g.items }}" as="it" hint-placeholder-count="2">
+              <button onClick="{{ it.onClick }}" title="{{ it.label }}" style="width:100%;display:flex;align-items:center;gap:11px;height:38px;padding-inline:12px;margin-block-end:2px;border:0;background:{{ it.bg }};color:{{ it.fg }};border-radius:999px;cursor:pointer;font:inherit;font-size:13.5px;font-weight:{{ it.weight }};text-align:start">
+                <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="flex:none"><path d="{{ it.iconPath }}"/></svg>
+                <span style="flex:1;display:{{ navTextDisplay }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ it.label }}</span>
+                <sc-if value="{{ it.badge }}" hint-placeholder-val="">
+                  <span style="display:{{ navTextDisplay }};font-size:11px;font-weight:600;min-width:18px;height:18px;padding-inline:5px;border-radius:999px;background:{{ it.badgeBg }};color:{{ it.badgeFg }};display:inline-flex;align-items:center;justify-content:center">{{ it.badge }}</span>
+                </sc-if>
+              </button>
+            </sc-for>
+          </div>
+        </sc-for>
+      </nav>
+      <div style="border-block-start:1px solid var(--c-border);padding:10px">
+        <button onClick="{{ toggleSidebar }}" style="width:100%;display:flex;align-items:center;gap:11px;height:36px;padding-inline:12px;border:0;background:transparent;color:var(--c-muted);border-radius:999px;cursor:pointer;font:inherit;font-size:13px">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" style="transform:{{ collapseIconRot }}"><path d="M15 6l-6 6 6 6"/></svg>
+          <span style="display:{{ navTextDisplay }}">{{ t.collapse }}</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- ===================== MAIN ===================== -->
+    <main style="flex:1;min-width:0;overflow-y:auto;background:var(--c-bg)">
+      <div style="max-width:1280px;margin:0 auto;padding:22px 26px 60px">
+
+        <!-- ===== DASHBOARD ===== -->
+        <sc-if value="{{ r_dashboard }}" hint-placeholder-val="{{ true }}">
+          <div style="display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-block-end:20px">
+            <div style="flex:1;min-width:240px">
+              <h1 style="margin:0;font-size:22px;font-weight:500;letter-spacing:-.3px">{{ t.fleetOverview }}</h1>
+              <div style="color:var(--c-muted);font-size:13px;margin-block-start:4px">{{ dashSubtitle }}</div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button onClick="{{ qaBackupAll }}" style="display:inline-flex;align-items:center;gap:7px;height:36px;padding-inline:14px;border:1px solid var(--c-border);background:var(--c-card);color:var(--c-text);border-radius:8px;cursor:pointer;font:inherit;font-size:13px;font-weight:500;box-shadow:var(--c-shadow-card)">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M3 5h18v4H3zM5 9v10h14V9M9 13h6"/></svg>{{ t.backupAll }}
+              </button>
+              <button onClick="{{ qaDeploy }}" style="display:inline-flex;align-items:center;gap:7px;height:36px;padding-inline:14px;border:1px solid var(--c-border);background:var(--c-card);color:var(--c-text);border-radius:8px;cursor:pointer;font:inherit;font-size:13px;font-weight:500;box-shadow:var(--c-shadow-card)">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 19V8M9 11l3-3 3 3M7 19a4 4 0 0 1 0-8 5 5 0 0 1 9.6-1.5A4 4 0 0 1 17 19"/></svg>{{ t.deploy }}
+              </button>
+              <button onClick="{{ goServers }}" style="display:inline-flex;align-items:center;gap:7px;height:36px;padding-inline:14px;border:0;background:var(--c-brand);color:#fff;border-radius:8px;cursor:pointer;font:inherit;font-size:13px;font-weight:600;box-shadow:var(--c-shadow-card)">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>{{ t.addNode }}
+              </button>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin-block-end:16px">
+            <sc-for list="{{ healthCards }}" as="c" hint-placeholder-count="4">
+              <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;padding:15px 16px;box-shadow:var(--c-shadow-card);position:relative;overflow:hidden">
+                <div style="position:absolute;inset-block:0;inset-inline-start:0;width:3px;background:{{ c.color }}"></div>
+                <div style="display:flex;align-items:center;gap:8px;color:var(--c-muted);font-size:12px;font-weight:500;text-transform:uppercase;letter-spacing:.5px">{{ c.label }}</div>
+                <div style="display:flex;align-items:baseline;gap:8px;margin-block-start:8px">
+                  <span style="font-size:30px;font-weight:400;letter-spacing:-.5px;color:{{ c.valColor }}">{{ c.value }}</span>
+                  <span style="font-size:12px;color:var(--c-muted)">{{ c.sub }}</span>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1.35fr 1fr;gap:16px;margin-block-end:16px">
+            <!-- topology -->
+            <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);overflow:hidden">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 16px;border-block-end:1px solid var(--c-divider)">
+                <span style="font-weight:500;font-size:14px">{{ t.clusterTopology }}</span>
+                <span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--c-pos);font-weight:500"><span style="width:7px;height:7px;border-radius:50%;background:var(--c-pos)"></span>{{ t.quorumHealthy }}</span>
+              </div>
+              <div style="padding:8px 12px 14px">
+                <svg viewBox="0 0 560 240" width="100%" style="display:block">
+                  <line x1="280" y1="64" x2="150" y2="170" stroke="var(--c-border)" stroke-width="2"/>
+                  <line x1="280" y1="64" x2="410" y2="170" stroke="var(--c-border)" stroke-width="2"/>
+                  <line x1="150" y1="170" x2="410" y2="170" stroke="var(--c-border)" stroke-width="2"/>
+                  <line x1="150" y1="170" x2="280" y2="170" stroke="var(--c-brand)" stroke-width="2" stroke-dasharray="5 5"/>
+                  <line x1="410" y1="170" x2="280" y2="170" stroke="var(--c-brand)" stroke-width="2" stroke-dasharray="5 5"/>
+                  <!-- VIP -->
+                  <g>
+                    <rect x="244" y="152" width="72" height="36" rx="8" fill="var(--c-brand-tint)" stroke="var(--c-brand)" stroke-width="1.5"/>
+                    <text x="280" y="168" text-anchor="middle" font-size="11" font-weight="700" fill="var(--c-brand)" font-family="var(--c-mono)">VIP</text>
+                    <text x="280" y="181" text-anchor="middle" font-size="9.5" fill="var(--c-brand)" font-family="var(--c-mono)">.10</text>
+                  </g>
+                  <!-- witness -->
+                  <g>
+                    <rect x="232" y="20" width="96" height="44" rx="9" fill="var(--c-card)" stroke="{{ topo.witnessColor }}" stroke-width="2"/>
+                    <circle cx="248" cy="42" r="5" fill="{{ topo.witnessColor }}"/>
+                    <text x="262" y="39" font-size="12" font-weight="600" fill="var(--c-text)" font-family="var(--c-mono)">witness</text>
+                    <text x="262" y="52" font-size="9.5" fill="var(--c-muted)">3rd vote</text>
+                  </g>
+                  <!-- node-a -->
+                  <g>
+                    <rect x="78" y="170" width="144" height="52" rx="9" fill="var(--c-card)" stroke="{{ topo.nodeAColor }}" stroke-width="2"/>
+                    <circle cx="96" cy="190" r="5" fill="{{ topo.nodeAColor }}"/>
+                    <text x="110" y="188" font-size="12" font-weight="600" fill="var(--c-text)" font-family="var(--c-mono)">node-a</text>
+                    <text x="110" y="201" font-size="9.5" fill="var(--c-muted)">pg primary · ch r1</text>
+                    <text x="110" y="214" font-size="9.5" fill="var(--c-muted)">cpu 46% · mem 62%</text>
+                  </g>
+                  <!-- node-b -->
+                  <g>
+                    <rect x="338" y="170" width="144" height="52" rx="9" fill="var(--c-card)" stroke="{{ topo.nodeBColor }}" stroke-width="2"/>
+                    <circle cx="356" cy="190" r="5" fill="{{ topo.nodeBColor }}"/>
+                    <text x="370" y="188" font-size="12" font-weight="600" fill="var(--c-text)" font-family="var(--c-mono)">node-b</text>
+                    <text x="370" y="201" font-size="9.5" fill="var(--c-muted)">pg standby · ch r2</text>
+                    <text x="370" y="214" font-size="9.5" fill="var(--c-warn)">cpu 71% · mem 84%</text>
+                  </g>
+                </svg>
+              </div>
+            </div>
+
+            <!-- node health -->
+            <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);overflow:hidden">
+              <div style="padding:13px 16px;border-block-end:1px solid var(--c-divider);font-weight:500;font-size:14px">{{ t.nodeHealth }}</div>
+              <div>
+                <sc-for list="{{ nodeRows }}" as="n" hint-placeholder-count="3">
+                  <button onClick="{{ n.onClick }}" style="width:100%;text-align:start;border:0;background:transparent;border-block-end:1px solid var(--c-divider);padding:12px 16px;cursor:pointer;display:block;color:inherit;font:inherit">
+                    <div style="display:flex;align-items:center;gap:8px;margin-block-end:9px">
+                      <span style="font-family:var(--c-mono);font-size:13px;font-weight:500">{{ n.name }}</span>
+                      <span style="font-size:11px;color:var(--c-hint);text-transform:uppercase;letter-spacing:.4px">{{ n.role }}</span>
+                      <span style="flex:1"></span>
+                      <span style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:500;padding:2px 8px;border-radius:999px;background:{{ n.bg }};color:{{ n.color }}"><span style="width:6px;height:6px;border-radius:50%;background:{{ n.color }}"></span>{{ n.statusLabel }}</span>
+                    </div>
+                    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+                      <sc-for list="{{ n.metrics }}" as="m" hint-placeholder-count="3">
+                        <div>
+                          <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--c-muted);margin-block-end:4px"><span>{{ m.label }}</span><span style="font-family:var(--c-mono);color:{{ m.color }}">{{ m.val }}%</span></div>
+                          <div style="height:5px;border-radius:999px;background:var(--c-sunken);overflow:hidden"><div style="height:100%;width:{{ m.val }}%;background:{{ m.color }};border-radius:999px"></div></div>
+                        </div>
+                      </sc-for>
+                    </div>
+                  </button>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+            <!-- recent jobs -->
+            <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);overflow:hidden">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 16px;border-block-end:1px solid var(--c-divider)">
+                <span style="font-weight:500;font-size:14px">{{ t.recentJobs }}</span>
+                <button onClick="{{ goJobs }}" style="border:0;background:transparent;color:var(--c-brand);font:inherit;font-size:12.5px;font-weight:500;cursor:pointer">{{ t.viewAll }} →</button>
+              </div>
+              <sc-for list="{{ recentJobs }}" as="j" hint-placeholder-count="4">
+                <div style="display:flex;align-items:center;gap:11px;padding:11px 16px;border-block-end:1px solid var(--c-divider)">
+                  <span style="width:8px;height:8px;border-radius:50%;background:{{ j.color }};flex:none;{{ j.pulse }}"></span>
+                  <div style="flex:1;min-width:0">
+                    <div style="font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ j.title }}</div>
+                    <div style="font-size:11.5px;color:var(--c-muted);font-family:var(--c-mono)">{{ j.target }}</div>
+                  </div>
+                  <span style="font-size:11.5px;color:var(--c-hint)">{{ j.when }}</span>
+                </div>
+              </sc-for>
+            </div>
+
+            <!-- alerts -->
+            <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);overflow:hidden">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 16px;border-block-end:1px solid var(--c-divider)">
+                <span style="font-weight:500;font-size:14px">{{ t.activeAlerts }}</span>
+                <span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--c-warn-bg);color:var(--c-warn)">{{ alertCount }}</span>
+              </div>
+              <sc-for list="{{ alerts }}" as="a" hint-placeholder-count="2">
+                <div style="display:flex;gap:11px;padding:12px 16px;border-block-end:1px solid var(--c-divider)">
+                  <span style="width:3px;border-radius:999px;background:{{ a.color }};flex:none;align-self:stretch"></span>
+                  <div style="flex:1;min-width:0">
+                    <div style="font-size:13px;font-weight:500">{{ a.title }}</div>
+                    <div style="font-size:12px;color:var(--c-muted);margin-block-start:2px">{{ a.why }}</div>
+                    <button onClick="{{ a.onFix }}" style="margin-block-start:7px;border:1px solid var(--c-border);background:var(--c-card);color:var(--c-text);border-radius:7px;padding:4px 10px;font:inherit;font-size:12px;font-weight:500;cursor:pointer">{{ a.fix }}</button>
+                  </div>
+                  <span style="font-size:11.5px;color:var(--c-hint);white-space:nowrap">{{ a.when }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- ===== SERVERS ===== -->
+        <sc-if value="{{ r_servers }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;align-items:center;gap:16px;margin-block-end:20px">
+            <div style="flex:1">
+              <h1 style="margin:0;font-size:22px;font-weight:500;letter-spacing:-.3px">{{ t.nav.servers }}</h1>
+              <div style="color:var(--c-muted);font-size:13px;margin-block-start:4px">{{ serversSubtitle }}</div>
+            </div>
+            <button onClick="{{ openWizard }}" style="display:inline-flex;align-items:center;gap:7px;height:38px;padding-inline:15px;border:0;background:var(--c-brand);color:#fff;border-radius:8px;cursor:pointer;font:inherit;font-size:13px;font-weight:600;box-shadow:var(--c-shadow-card)">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>{{ t.addServerBtn }}
+            </button>
+          </div>
+          <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);overflow:hidden">
+            <div style="display:grid;grid-template-columns:1.4fr .8fr 1.1fr 1.1fr 1fr .8fr;gap:12px;padding:11px 18px;border-block-end:1px solid var(--c-border);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--c-hint)">
+              <span>{{ th.name }}</span><span>{{ th.role }}</span><span>{{ th.host }}</span><span>{{ th.os }}</span><span>{{ th.status }}</span><span style="text-align:end">{{ th.lastSeen }}</span>
+            </div>
+            <sc-for list="{{ serverRows }}" as="n" hint-placeholder-count="3">
+              <button onClick="{{ n.onOpen }}" style="width:100%;display:grid;grid-template-columns:1.4fr .8fr 1.1fr 1.1fr 1fr .8fr;gap:12px;align-items:center;padding:13px 18px;border:0;border-block-end:1px solid var(--c-divider);background:transparent;cursor:pointer;color:inherit;font:inherit;text-align:start">
+                <span style="display:flex;align-items:center;gap:9px"><span style="width:8px;height:8px;border-radius:50%;background:{{ n.color }};flex:none"></span><span style="font-family:var(--c-mono);font-size:13px;font-weight:500">{{ n.name }}</span></span>
+                <span style="font-size:12.5px;color:var(--c-muted)">{{ n.roleLabel }}</span>
+                <span style="font-family:var(--c-mono);font-size:12.5px;color:var(--c-muted)">{{ n.host }}</span>
+                <span style="font-size:12.5px;color:var(--c-muted)">{{ n.os }}</span>
+                <span><span style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:500;padding:2px 9px;border-radius:999px;background:{{ n.bg }};color:{{ n.color }}"><span style="width:6px;height:6px;border-radius:50%;background:{{ n.color }}"></span>{{ n.statusLabel }}</span></span>
+                <span style="text-align:end;font-size:12px;color:var(--c-hint);font-family:var(--c-mono)">{{ n.lastSeen }}</span>
+              </button>
+            </sc-for>
+          </div>
+        </sc-if>
+
+        <!-- ===== SERVER DETAIL / CONTAINERS ===== -->
+        <sc-if value="{{ r_serverDetail }}" hint-placeholder-val="{{ false }}">
+          <button onClick="{{ goServers }}" style="display:inline-flex;align-items:center;gap:6px;border:0;background:transparent;color:var(--c-muted);font:inherit;font-size:12.5px;cursor:pointer;margin-block-end:12px;padding:0">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transform:{{ backArrowRot }}"><path d="M15 6l-6 6 6 6"/></svg>{{ t.nav.servers }}
+          </button>
+          <div style="display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-block-end:18px">
+            <div style="flex:1;min-width:220px">
+              <div style="display:flex;align-items:center;gap:10px">
+                <h1 style="margin:0;font-size:22px;font-weight:500;letter-spacing:-.3px;font-family:var(--c-mono)">{{ sd.name }}</h1>
+                <span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:500;padding:3px 10px;border-radius:999px;background:{{ sd.bg }};color:{{ sd.color }}"><span style="width:7px;height:7px;border-radius:50%;background:{{ sd.color }}"></span>{{ sd.statusLabel }}</span>
+              </div>
+              <div style="color:var(--c-muted);font-size:13px;margin-block-start:5px;font-family:var(--c-mono)">{{ sd.host }} · {{ sd.os }} · v{{ sd.version }} · {{ sd.lastSeen }}</div>
+            </div>
+            <div style="display:flex;gap:8px">
+              <button onClick="{{ sd.onBackup }}" style="height:36px;padding-inline:13px;border:1px solid var(--c-border);background:var(--c-card);color:var(--c-text);border-radius:8px;cursor:pointer;font:inherit;font-size:13px;font-weight:500">{{ t.backupNow }}</button>
+              <button onClick="{{ sd.onRestart }}" style="height:36px;padding-inline:13px;border:1px solid var(--c-border);background:var(--c-card);color:var(--c-text);border-radius:8px;cursor:pointer;font:inherit;font-size:13px;font-weight:500">{{ t.restartAll }}</button>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-block-end:16px">
+            <sc-for list="{{ sd.gauges }}" as="g" hint-placeholder-count="4">
+              <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;padding:14px 16px;box-shadow:var(--c-shadow-card)">
+                <div style="font-size:11.5px;color:var(--c-muted);text-transform:uppercase;letter-spacing:.5px">{{ g.label }}</div>
+                <div style="font-size:26px;font-weight:400;letter-spacing:-.5px;margin-block:6px 8px;color:{{ g.color }}">{{ g.value }}</div>
+                <div style="height:5px;border-radius:999px;background:var(--c-sunken);overflow:hidden"><div style="height:100%;width:{{ g.pct }}%;background:{{ g.color }};border-radius:999px"></div></div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1.05fr 1fr;gap:16px;align-items:start">
+            <!-- containers -->
+            <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);overflow:hidden">
+              <div style="padding:13px 16px;border-block-end:1px solid var(--c-divider);font-weight:500;font-size:14px;display:flex;justify-content:space-between;align-items:center">{{ t.containers }}<span style="font-size:11.5px;color:var(--c-hint);font-weight:400">{{ sd.containerSummary }}</span></div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--c-divider)">
+                <sc-for list="{{ sd.containers }}" as="c" hint-placeholder-count="8">
+                  <div style="background:var(--c-card);padding:12px 14px">
+                    <div style="display:flex;align-items:center;gap:8px;margin-block-end:8px">
+                      <span style="width:8px;height:8px;border-radius:50%;background:{{ c.color }};flex:none;{{ c.pulse }}"></span>
+                      <span style="font-family:var(--c-mono);font-size:13px;font-weight:500;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ c.name }}</span>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--c-muted);margin-block-end:9px"><span>{{ c.state }}</span><span style="font-family:var(--c-mono)">{{ c.cpu }}% · {{ c.ram }}</span></div>
+                    <div style="display:flex;gap:5px">
+                      <button onClick="{{ c.onRestart }}" title="Restart" style="flex:1;height:28px;border:1px solid var(--c-border);background:var(--c-card);color:var(--c-muted);border-radius:6px;cursor:pointer;display:grid;place-items:center"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v4h4"/></svg></button>
+                      <button onClick="{{ c.onStop }}" title="Stop" style="flex:1;height:28px;border:1px solid var(--c-border);background:var(--c-card);color:var(--c-muted);border-radius:6px;cursor:pointer;display:grid;place-items:center"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+
+            <!-- log viewer -->
+            <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);overflow:hidden;display:flex;flex-direction:column">
+              <div style="padding:11px 14px;border-block-end:1px solid var(--c-divider);display:flex;align-items:center;gap:8px">
+                <span style="font-weight:500;font-size:14px;flex:none">{{ t.logs }}</span>
+                <div style="flex:1;display:flex;align-items:center;gap:7px;background:var(--c-sunken);border-radius:999px;padding:5px 11px;margin-inline-start:6px">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--c-hint)" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+                  <input value="{{ logSearch }}" onInput="{{ onLogSearch }}" placeholder="{{ t.filterLogs }}" style="flex:1;border:0;background:transparent;color:var(--c-text);font:inherit;font-size:12px;outline:none;font-family:var(--c-mono)"/>
+                </div>
+                <button onClick="{{ toggleFollow }}" style="flex:none;display:inline-flex;align-items:center;gap:6px;height:28px;padding-inline:10px;border:1px solid {{ followBorder }};background:{{ followBg }};color:{{ followColor }};border-radius:999px;cursor:pointer;font:inherit;font-size:11.5px;font-weight:500"><span style="width:6px;height:6px;border-radius:50%;background:{{ followColor }};{{ followPulse }}"></span>{{ t.follow }}</button>
+              </div>
+              <div style="font-family:var(--c-mono);font-size:11.5px;line-height:1.75;background:var(--c-code-bg);padding:11px 14px;height:300px;overflow-y:auto;color:var(--c-muted)">
+                <sc-for list="{{ logLines }}" as="ln" hint-placeholder-count="12">
+                  <div style="display:flex;gap:9px"><span style="color:var(--c-hint);flex:none">{{ ln.ts }}</span><span style="color:{{ ln.lvlColor }};flex:none;width:42px;text-transform:uppercase;font-size:10px;padding-block-start:1px">{{ ln.lvl }}</span><span style="color:var(--c-text)">{{ ln.msg }}</span></div>
+                </sc-for>
+                <sc-if value="{{ logsEmpty }}" hint-placeholder-val="{{ false }}"><div style="color:var(--c-hint);padding-block:12px">{{ t.noLogMatch }}</div></sc-if>
+                <span style="display:{{ logCursor }};color:var(--c-brand)">▍</span>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- ===== JOBS & AUDIT ===== -->
+        <sc-if value="{{ r_jobs }}" hint-placeholder-val="{{ false }}">
+          <div style="margin-block-end:20px">
+            <h1 style="margin:0;font-size:22px;font-weight:500;letter-spacing:-.3px">{{ t.nav.jobs }}</h1>
+            <div style="color:var(--c-muted);font-size:13px;margin-block-start:4px">{{ jobsSubtitle }}</div>
+          </div>
+          <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);overflow:hidden;margin-block-end:16px">
+            <div style="padding:13px 16px;border-block-end:1px solid var(--c-divider);font-weight:500;font-size:14px">{{ t.liveJobs }}</div>
+            <sc-for list="{{ drawerJobs }}" as="j" hint-placeholder-count="3">
+              <div style="padding:13px 16px;border-block-end:1px solid var(--c-divider)">
+                <div style="display:flex;align-items:center;gap:11px;margin-block-end:9px">
+                  <span style="width:9px;height:9px;border-radius:50%;background:{{ j.color }};flex:none;{{ j.pulse }}"></span>
+                  <span style="font-size:13.5px;font-weight:500;flex:1">{{ j.title }}</span>
+                  <span style="font-family:var(--c-mono);font-size:11.5px;color:var(--c-muted)">{{ j.target }} · {{ j.id }}</span>
+                  <span style="font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;background:{{ j.bg }};color:{{ j.color }}">{{ j.statusLabel }}</span>
+                  <sc-if value="{{ j.cancelable }}" hint-placeholder-val="{{ false }}"><button onClick="{{ j.onCancel }}" style="border:1px solid var(--c-border);background:var(--c-card);color:var(--c-neg);border-radius:6px;padding:3px 10px;font:inherit;font-size:11.5px;font-weight:500;cursor:pointer">{{ t.cancel }}</button></sc-if>
+                </div>
+                <div style="display:flex;align-items:center;gap:12px"><div style="flex:1;height:6px;border-radius:999px;background:var(--c-sunken);overflow:hidden"><div style="height:100%;width:{{ j.progress }}%;background:{{ j.color }};border-radius:999px;transition:width .4s linear"></div></div><span style="font-family:var(--c-mono);font-size:11.5px;color:var(--c-muted);width:38px;text-align:end">{{ j.progress }}%</span></div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);overflow:hidden">
+            <div style="padding:13px 16px;border-block-end:1px solid var(--c-divider);font-weight:500;font-size:14px;display:flex;align-items:center;gap:8px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--c-muted)" stroke-width="1.8"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></svg>{{ t.auditLog }}<span style="font-size:11px;color:var(--c-hint);font-weight:400;margin-inline-start:auto">{{ t.immutable }}</span></div>
+            <div style="display:grid;grid-template-columns:1fr 1.5fr 1.3fr .6fr .7fr;gap:12px;padding:9px 16px;border-block-end:1px solid var(--c-border);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--c-hint)"><span>{{ t.who }}</span><span>{{ t.action }}</span><span>{{ t.args }}</span><span>{{ t.time }}</span><span style="text-align:end">{{ t.outcome }}</span></div>
+            <sc-for list="{{ auditRows }}" as="a" hint-placeholder-count="6">
+              <div style="display:grid;grid-template-columns:1fr 1.5fr 1.3fr .6fr .7fr;gap:12px;align-items:center;padding:11px 16px;border-block-end:1px solid var(--c-divider);font-size:12.5px">
+                <span style="display:flex;align-items:center;gap:7px"><span style="width:22px;height:22px;border-radius:50%;background:var(--c-sunken);color:var(--c-muted);display:grid;place-items:center;font-size:10px;font-weight:600;flex:none">{{ a.initials }}</span><span><span style="display:block;font-weight:500">{{ a.who }}</span><span style="font-size:10.5px;color:var(--c-hint)">{{ a.role }}</span></span></span>
+                <span>{{ a.action }}</span>
+                <span style="font-family:var(--c-mono);font-size:11.5px;color:var(--c-muted)">{{ a.args }}</span>
+                <span style="font-family:var(--c-mono);font-size:11.5px;color:var(--c-hint)">{{ a.time }}</span>
+                <span style="text-align:end"><span style="font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;background:{{ a.bg }};color:{{ a.color }}">{{ a.outcome }}</span></span>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+
+        <!-- ===== BACKUPS ===== -->
+        <sc-if value="{{ r_backups }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-block-end:18px">
+            <div style="flex:1;min-width:220px">
+              <h1 style="margin:0;font-size:22px;font-weight:500;letter-spacing:-.3px">{{ t.nav.backups }}</h1>
+              <div style="color:var(--c-muted);font-size:13px;margin-block-start:4px">{{ backupsSubtitle }}</div>
+            </div>
+            <button onClick="{{ onCreateBackup }}" style="display:inline-flex;align-items:center;gap:7px;height:38px;padding-inline:15px;border:0;background:var(--c-brand);color:#fff;border-radius:8px;cursor:pointer;font:inherit;font-size:13px;font-weight:600;box-shadow:var(--c-shadow-card)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>{{ t.createBackup }}</button>
+          </div>
+          <div style="display:inline-flex;gap:3px;background:var(--c-sunken);border-radius:999px;padding:3px;margin-block-end:16px">
+            <button onClick="{{ tabBackupList }}" style="height:32px;padding-inline:16px;border:0;border-radius:999px;cursor:pointer;font:inherit;font-size:12.5px;font-weight:500;background:{{ bkListBg }};color:{{ bkListColor }};box-shadow:{{ bkListShadow }}">{{ t.backupsList }}</button>
+            <button onClick="{{ tabBackupSchedule }}" style="height:32px;padding-inline:16px;border:0;border-radius:999px;cursor:pointer;font:inherit;font-size:12.5px;font-weight:500;background:{{ bkSchedBg }};color:{{ bkSchedColor }};box-shadow:{{ bkSchedShadow }}">{{ t.schedule }}</button>
+          </div>
+
+          <sc-if value="{{ bkListActive }}" hint-placeholder-val="{{ true }}">
+            <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);overflow:hidden">
+              <div style="display:grid;grid-template-columns:1fr .9fr .8fr .7fr .7fr .7fr 1fr;gap:12px;padding:11px 18px;border-block-end:1px solid var(--c-border);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--c-hint)"><span>{{ th.server }}</span><span>{{ th.type }}</span><span>{{ th.size }}</span><span>{{ th.age }}</span><span>{{ th.verified }}</span><span>{{ th.offHost }}</span><span style="text-align:end">{{ th.actions }}</span></div>
+              <sc-for list="{{ backupRows }}" as="b" hint-placeholder-count="6">
+                <div style="display:grid;grid-template-columns:1fr .9fr .8fr .7fr .7fr .7fr 1fr;gap:12px;align-items:center;padding:12px 18px;border-block-end:1px solid var(--c-divider);font-size:12.5px">
+                  <span style="font-family:var(--c-mono);font-weight:500">{{ b.server }}</span>
+                  <span><span style="font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;background:{{ b.typeBg }};color:{{ b.typeColor }};font-family:var(--c-mono)">{{ b.type }}</span></span>
+                  <span style="font-family:var(--c-mono);color:var(--c-muted)">{{ b.size }}</span>
+                  <span style="color:var(--c-hint);font-family:var(--c-mono)">{{ b.age }}</span>
+                  <span style="color:{{ b.verColor }};font-size:14px">{{ b.verified }}</span>
+                  <span style="color:{{ b.offColor }};font-size:14px">{{ b.offHost }}</span>
+                  <span style="display:flex;gap:6px;justify-content:flex-end"><button onClick="{{ b.onDownload }}" style="border:1px solid var(--c-border);background:var(--c-card);color:var(--c-muted);border-radius:6px;padding:4px 9px;font:inherit;font-size:11.5px;cursor:pointer">{{ t.download }}</button><button onClick="{{ b.onRestore }}" style="border:1px solid var(--c-neg);background:transparent;color:var(--c-neg);border-radius:6px;padding:4px 11px;font:inherit;font-size:11.5px;font-weight:500;cursor:pointer">{{ t.restore }}</button></span>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+          <sc-if value="{{ bkSchedActive }}" hint-placeholder-val="{{ false }}">
+            <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);max-width:560px">
+              <div style="padding:16px 20px;border-block-end:1px solid var(--c-divider)"><div style="font-weight:500;font-size:14px">{{ t.scheduleTitle }}</div><div style="font-size:12.5px;color:var(--c-muted);margin-block-start:3px">{{ t.scheduleDesc }}</div></div>
+              <div style="padding:20px">
+                <label style="display:block;font-size:12px;font-weight:500;color:var(--c-muted);margin-block-end:6px">{{ t.cronSchedule }}</label>
+                <input value="0 */6 * * *" style="width:100%;height:40px;padding-inline:12px;border:1.5px solid var(--c-border);border-radius:8px;background:var(--c-card);color:var(--c-text);font:inherit;font-family:var(--c-mono);font-size:13px;outline:none;margin-block-end:5px"/>
+                <div style="font-size:11.5px;color:var(--c-hint);margin-block-end:18px">{{ t.cronHint }}</div>
+                <div style="display:flex;gap:14px;margin-block-end:18px"><div style="flex:1"><label style="display:block;font-size:12px;font-weight:500;color:var(--c-muted);margin-block-end:6px">{{ t.retentionDays }}</label><input value="30" style="width:100%;height:40px;padding-inline:12px;border:1.5px solid var(--c-border);border-radius:8px;background:var(--c-card);color:var(--c-text);font:inherit;font-family:var(--c-mono);font-size:13px;outline:none"/></div><div style="flex:1"><label style="display:block;font-size:12px;font-weight:500;color:var(--c-muted);margin-block-end:6px">{{ t.offHostTarget }}</label><input value="s3://adpix-backups" style="width:100%;height:40px;padding-inline:12px;border:1.5px solid var(--c-border);border-radius:8px;background:var(--c-card);color:var(--c-text);font:inherit;font-family:var(--c-mono);font-size:13px;outline:none"/></div></div>
+              </div>
+              <div style="display:flex;justify-content:flex-end;gap:10px;padding:14px 20px;background:var(--c-sunken);border-block-start:1px solid var(--c-border)"><button onClick="{{ onSaveSchedule }}" style="height:36px;padding-inline:16px;border:0;background:var(--c-brand);color:#fff;border-radius:8px;font:inherit;font-size:13px;font-weight:600;cursor:pointer">{{ t.saveChanges }}</button></div>
+            </div>
+          </sc-if>
+        </sc-if>
+
+        <!-- ===== DATABASES ===== -->
+        <sc-if value="{{ r_databases }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-block-end:18px">
+            <div style="flex:1;min-width:220px">
+              <h1 style="margin:0;font-size:22px;font-weight:500;letter-spacing:-.3px">{{ t.nav.databases }}</h1>
+              <div style="color:var(--c-muted);font-size:13px;margin-block-start:4px">{{ dbSubtitle }}</div>
+            </div>
+            <button onClick="{{ onOptimize }}" style="display:inline-flex;align-items:center;gap:7px;height:38px;padding-inline:15px;border:1px solid var(--c-border);background:var(--c-card);color:var(--c-text);border-radius:8px;cursor:pointer;font:inherit;font-size:13px;font-weight:500;box-shadow:var(--c-shadow-card)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>{{ t.optimize }}</button>
+          </div>
+          <div style="display:inline-flex;gap:3px;background:var(--c-sunken);border-radius:999px;padding:3px;margin-block-end:16px">
+            <button onClick="{{ tabPg }}" style="height:32px;padding-inline:18px;border:0;border-radius:999px;cursor:pointer;font:inherit;font-size:12.5px;font-weight:500;background:{{ pgBg }};color:{{ pgColor }};box-shadow:{{ pgShadow }};font-family:var(--c-mono)">Postgres</button>
+            <button onClick="{{ tabCh }}" style="height:32px;padding-inline:18px;border:0;border-radius:999px;cursor:pointer;font:inherit;font-size:12.5px;font-weight:500;background:{{ chBg }};color:{{ chColor }};box-shadow:{{ chShadow }};font-family:var(--c-mono)">ClickHouse</button>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:14px;margin-block-end:16px">
+            <sc-for list="{{ dbStatRows }}" as="st" hint-placeholder-count="6">
+              <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;padding:14px 16px;box-shadow:var(--c-shadow-card)">
+                <div style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--c-muted)"><span style="width:6px;height:6px;border-radius:50%;background:{{ st.dot }}"></span>{{ st.label }}</div>
+                <div style="font-size:22px;font-weight:400;letter-spacing:-.3px;margin-block-start:7px;font-family:var(--c-mono);color:{{ st.color }}">{{ st.value }}</div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1.1fr 1fr;gap:16px;align-items:start">
+            <!-- tune -->
+            <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);overflow:hidden">
+              <div style="padding:14px 16px;border-block-end:1px solid var(--c-divider)"><div style="font-weight:500;font-size:14px">{{ t.tuneTitle }}</div><div style="font-size:12.5px;color:var(--c-muted);margin-block-start:3px">{{ t.tuneDesc }}</div></div>
+              <div style="display:grid;grid-template-columns:1.3fr 1fr auto 1fr;gap:8px;padding:9px 16px;border-block-end:1px solid var(--c-border);font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:var(--c-hint)"><span>{{ t.setting }}</span><span style="text-align:end">{{ t.before }}</span><span></span><span>{{ t.after }}</span></div>
+              <sc-for list="{{ tuneRows }}" as="r" hint-placeholder-count="5">
+                <div style="display:grid;grid-template-columns:1.3fr 1fr auto 1fr;gap:8px;align-items:center;padding:9px 16px;border-block-end:1px solid var(--c-divider);font-family:var(--c-mono);font-size:12px">
+                  <span style="color:var(--c-text)">{{ r.setting }}</span>
+                  <span style="text-align:end;color:var(--c-muted);text-decoration:line-through">{{ r.before }}</span>
+                  <span style="color:var(--c-hint)">→</span>
+                  <span style="color:var(--c-pos);font-weight:500">{{ r.after }}</span>
+                </div>
+              </sc-for>
+              <div style="display:flex;justify-content:flex-end;padding:13px 16px;background:var(--c-sunken)"><button onClick="{{ onApplyTuning }}" style="height:36px;padding-inline:16px;border:0;background:var(--c-brand);color:#fff;border-radius:8px;font:inherit;font-size:13px;font-weight:600;cursor:pointer">{{ t.applyTuning }}</button></div>
+            </div>
+
+            <!-- retention -->
+            <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);overflow:hidden">
+              <div style="padding:14px 16px;border-block-end:1px solid var(--c-divider)"><div style="font-weight:500;font-size:14px">{{ t.retentionTitle }}</div><div style="font-size:12.5px;color:var(--c-muted);margin-block-start:3px">{{ t.retentionDesc }}</div></div>
+              <div style="padding:18px 16px">
+                <label style="display:block;font-size:12px;font-weight:500;color:var(--c-muted);margin-block-end:6px">{{ t.keepDataFor }}</label>
+                <div style="display:flex;gap:8px;margin-block-end:18px">
+                  <input value="12" style="width:80px;height:40px;padding-inline:12px;border:1.5px solid var(--c-border);border-radius:8px;background:var(--c-card);color:var(--c-text);font:inherit;font-family:var(--c-mono);font-size:13px;outline:none"/>
+                  <div style="flex:1;height:40px;display:flex;align-items:center;padding-inline:12px;border:1.5px solid var(--c-border);border-radius:8px;color:var(--c-muted);font-size:13px">{{ t.months }}</div>
+                </div>
+                <div style="display:flex;gap:10px;background:var(--c-neg-bg);border:1px solid var(--c-neg);border-radius:10px;padding:13px 14px;margin-block-end:16px">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--c-neg)" stroke-width="2" style="flex:none;margin-block-start:1px"><path d="M12 9v4M12 17h.01M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+                  <div style="font-size:12.5px;color:var(--c-text);line-height:1.5">{{ retentionImpact }}</div>
+                </div>
+                <button onClick="{{ onRetention }}" style="width:100%;height:40px;border:0;background:var(--c-neg);color:#fff;border-radius:8px;font:inherit;font-size:13px;font-weight:600;cursor:pointer">{{ t.applyRetention }}</button>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- ===== DEPLOYS ===== -->
+        <sc-if value="{{ r_deploys }}" hint-placeholder-val="{{ false }}">
+          <div style="margin-block-end:18px"><h1 style="margin:0;font-size:22px;font-weight:500;letter-spacing:-.3px">{{ t.nav.deploys }}</h1><div style="color:var(--c-muted);font-size:13px;margin-block-start:4px">{{ deploySubtitle }}</div></div>
+          <div style="display:grid;grid-template-columns:1.1fr 1fr;gap:16px;align-items:start">
+            <div style="display:flex;flex-direction:column;gap:16px">
+              <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);padding:18px 20px">
+                <div style="font-size:12px;color:var(--c-muted);text-transform:uppercase;letter-spacing:.5px">{{ t.deployCurrent }}</div>
+                <div style="display:flex;align-items:baseline;gap:10px;margin-block:8px 4px"><span style="font-size:26px;font-weight:400;letter-spacing:-.5px">v2.8.1</span><span style="font-family:var(--c-mono);font-size:12.5px;color:var(--c-muted)">a3f9c2e · main</span></div>
+                <div style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--c-muted);margin-block-end:16px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--c-pos)" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>{{ t.autoRollback }}</div>
+                <div style="display:flex;gap:8px"><button onClick="{{ onUpdate }}" style="height:38px;padding-inline:16px;border:0;background:var(--c-brand);color:#fff;border-radius:8px;font:inherit;font-size:13px;font-weight:600;cursor:pointer">{{ t.update }}</button><button onClick="{{ onBlueGreen }}" style="height:38px;padding-inline:16px;border:1px solid var(--c-border);background:var(--c-card);color:var(--c-text);border-radius:8px;font:inherit;font-size:13px;font-weight:500;cursor:pointer">{{ t.blueGreen }}</button><button onClick="{{ onRollback }}" style="height:38px;padding-inline:16px;border:1px solid var(--c-border);background:var(--c-card);color:var(--c-text);border-radius:8px;font:inherit;font-size:13px;font-weight:500;cursor:pointer">{{ t.rollback }}</button></div>
+              </div>
+              <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);overflow:hidden">
+                <div style="padding:13px 16px;border-block-end:1px solid var(--c-divider);font-weight:500;font-size:14px">{{ t.rollingProgress }}</div>
+                <sc-for list="{{ deployNodes }}" as="d" hint-placeholder-count="3">
+                  <div style="padding:12px 16px;border-block-end:1px solid var(--c-divider)">
+                    <div style="display:flex;align-items:center;gap:9px;margin-block-end:8px"><span style="width:8px;height:8px;border-radius:50%;background:{{ d.color }};{{ d.pulse }}"></span><span style="font-family:var(--c-mono);font-size:13px;font-weight:500;flex:1">{{ d.name }}</span><span style="font-size:11.5px;color:{{ d.color }};font-weight:500">{{ d.label }}</span></div>
+                    <div style="height:6px;border-radius:999px;background:var(--c-sunken);overflow:hidden"><div style="height:100%;width:{{ d.progress }}%;background:{{ d.color }};border-radius:999px;transition:width .4s linear"></div></div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+            <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);overflow:hidden">
+              <div style="padding:13px 16px;border-block-end:1px solid var(--c-divider);display:flex;align-items:center;justify-content:space-between"><span style="font-weight:500;font-size:14px">{{ t.cicd }}</span><span style="font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;background:var(--c-pos-bg);color:var(--c-pos)">{{ t.lastResult }}: ✓</span></div>
+              <div style="display:flex;gap:0;border-block-end:1px solid var(--c-divider)"><div style="flex:1;padding:14px 16px;border-inline-end:1px solid var(--c-divider)"><div style="font-size:11.5px;color:var(--c-muted)">Schedule</div><div style="font-family:var(--c-mono);font-size:14px;margin-block-start:5px">0 3 * * *</div></div><div style="flex:1;padding:14px 16px"><div style="font-size:11.5px;color:var(--c-muted)">{{ t.commitsBehind }}</div><div style="font-size:14px;margin-block-start:5px"><span style="font-family:var(--c-mono);color:var(--c-warn);font-weight:500">3</span> commits</div></div></div>
+              <div style="padding:6px 0">
+                <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--c-hint);padding:10px 16px 6px">{{ t.deployHistory }}</div>
+                <sc-for list="{{ deployHist }}" as="h" hint-placeholder-count="4">
+                  <div style="display:flex;align-items:center;gap:11px;padding:9px 16px">
+                    <span style="width:9px;height:9px;border-radius:50%;border:2px solid {{ h.color }};flex:none"></span>
+                    <span style="font-family:var(--c-mono);font-size:13px;font-weight:500;width:64px">{{ h.version }}</span>
+                    <span style="font-size:12.5px;color:{{ h.color }};flex:1">{{ h.action }}</span>
+                    <span style="font-size:11.5px;color:var(--c-hint)">{{ h.when }} · {{ h.who }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- ===== HIGH AVAILABILITY ===== -->
+        <sc-if value="{{ r_ha }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-block-end:18px"><div style="flex:1;min-width:220px"><h1 style="margin:0;font-size:22px;font-weight:500;letter-spacing:-.3px">{{ t.nav.ha }}</h1><div style="color:var(--c-muted);font-size:13px;margin-block-start:4px">{{ haSubtitle }}</div></div><div style="display:flex;gap:8px"><button onClick="{{ onStandupHa }}" style="height:38px;padding-inline:15px;border:1px solid var(--c-border);background:var(--c-card);color:var(--c-text);border-radius:8px;cursor:pointer;font:inherit;font-size:13px;font-weight:500;box-shadow:var(--c-shadow-card)">{{ t.standUpHa }}</button><button onClick="{{ onFailover }}" style="height:38px;padding-inline:15px;border:1px solid var(--c-neg);background:transparent;color:var(--c-neg);border-radius:8px;cursor:pointer;font:inherit;font-size:13px;font-weight:600">{{ t.failover }}</button></div></div>
+          <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);overflow:hidden;margin-block-end:16px">
+            <div style="padding:13px 16px;border-block-end:1px solid var(--c-divider);display:flex;align-items:center;justify-content:space-between"><span style="font-weight:500;font-size:14px">{{ t.topology }}</span><span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--c-pos);font-weight:500"><span style="width:7px;height:7px;border-radius:50%;background:var(--c-pos)"></span>{{ t.quorumHealthy }} · 3/3</span></div>
+            <div style="padding:8px 12px 14px"><svg viewBox="0 0 560 220" width="100%" style="display:block">
+              <line x1="280" y1="58" x2="150" y2="160" stroke="var(--c-border)" stroke-width="2"/><line x1="280" y1="58" x2="410" y2="160" stroke="var(--c-border)" stroke-width="2"/><line x1="150" y1="160" x2="410" y2="160" stroke="var(--c-brand)" stroke-width="2" stroke-dasharray="5 5"/>
+              <rect x="232" y="18" width="96" height="42" rx="9" fill="var(--c-card)" stroke="var(--c-pos)" stroke-width="2"/><circle cx="248" cy="39" r="5" fill="var(--c-pos)"/><text x="262" y="36" font-size="12" font-weight="600" fill="var(--c-text)" font-family="var(--c-mono)">witness</text><text x="262" y="49" font-size="9.5" fill="var(--c-muted)">arbiter · 3rd vote</text>
+              <rect x="78" y="158" width="148" height="50" rx="9" fill="var(--c-card)" stroke="var(--c-pos)" stroke-width="2"/><circle cx="96" cy="178" r="5" fill="var(--c-pos)"/><text x="110" y="176" font-size="12" font-weight="600" fill="var(--c-text)" font-family="var(--c-mono)">node-a</text><text x="110" y="189" font-size="9.5" fill="var(--c-muted)">pg primary · redis master</text><text x="110" y="201" font-size="9.5" fill="var(--c-muted)">ch r1</text>
+              <rect x="334" y="158" width="148" height="50" rx="9" fill="var(--c-card)" stroke="var(--c-warn)" stroke-width="2"/><circle cx="352" cy="178" r="5" fill="var(--c-warn)"/><text x="366" y="176" font-size="12" font-weight="600" fill="var(--c-text)" font-family="var(--c-mono)">node-b</text><text x="366" y="189" font-size="9.5" fill="var(--c-muted)">pg standby · redis replica</text><text x="366" y="201" font-size="9.5" fill="var(--c-warn)">ch r2 · keeper lag</text>
+            </svg></div>
+          </div>
+          <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);overflow:hidden">
+            <div style="padding:13px 16px;border-block-end:1px solid var(--c-divider);font-weight:500;font-size:14px">{{ t.quorumStatus }}</div>
+            <div style="display:grid;grid-template-columns:1fr 1.6fr 1.2fr .8fr;gap:12px;padding:9px 16px;border-block-end:1px solid var(--c-border);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--c-hint)"><span>{{ t.component }}</span><span>{{ t.members }}</span><span>{{ t.arbiter }}</span><span style="text-align:end">{{ th.status }}</span></div>
+            <sc-for list="{{ quorumRows }}" as="q" hint-placeholder-count="3">
+              <div style="display:grid;grid-template-columns:1fr 1.6fr 1.2fr .8fr;gap:12px;align-items:center;padding:12px 16px;border-block-end:1px solid var(--c-divider);font-size:12.5px"><span style="font-weight:500;font-family:var(--c-mono)">{{ q.component }}</span><span style="color:var(--c-muted);font-family:var(--c-mono);font-size:11.5px">{{ q.members }}</span><span style="color:var(--c-muted);font-size:11.5px">{{ q.arbiter }}</span><span style="text-align:end"><span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;background:{{ q.bg }};color:{{ q.color }}"><span style="width:6px;height:6px;border-radius:50%;background:{{ q.color }}"></span>{{ q.statusLabel }}</span></span></div>
+            </sc-for>
+          </div>
+        </sc-if>
+
+        <!-- ===== DNS & CONNECT ===== -->
+        <sc-if value="{{ r_dns }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-block-end:18px"><div style="flex:1;min-width:220px"><h1 style="margin:0;font-size:22px;font-weight:500;letter-spacing:-.3px">{{ t.nav.dns }}</h1><div style="color:var(--c-muted);font-size:13px;margin-block-start:4px">{{ dnsSubtitle }}</div></div><button onClick="{{ onVerifyDns }}" style="height:38px;padding-inline:15px;border:1px solid var(--c-border);background:var(--c-card);color:var(--c-text);border-radius:8px;cursor:pointer;font:inherit;font-size:13px;font-weight:500;box-shadow:var(--c-shadow-card);display:inline-flex;align-items:center;gap:7px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M20 6 9 17l-5-5"/></svg>{{ t.verifyResolves }}</button></div>
+          <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);overflow:hidden;margin-block-end:18px">
+            <div style="padding:13px 16px;border-block-end:1px solid var(--c-divider);font-weight:500;font-size:14px">{{ t.dnsRecords }}</div>
+            <div style="display:grid;grid-template-columns:1.3fr .6fr 1.6fr .5fr .6fr .5fr;gap:12px;padding:9px 16px;border-block-end:1px solid var(--c-border);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--c-hint)"><span>{{ t.recordName }}</span><span>{{ t.recordType }}</span><span>{{ t.recordValue }}</span><span>{{ t.ttl }}</span><span>{{ t.proxied }}</span><span style="text-align:end"></span></div>
+            <sc-for list="{{ dnsRows }}" as="d" hint-placeholder-count="5">
+              <div style="display:grid;grid-template-columns:1.3fr .6fr 1.6fr .5fr .6fr .5fr;gap:12px;align-items:center;padding:11px 16px;border-block-end:1px solid var(--c-divider);font-family:var(--c-mono);font-size:12px"><span style="color:var(--c-text)">{{ d.name }}</span><span style="color:var(--c-brand);font-weight:500">{{ d.type }}</span><span style="color:var(--c-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ d.value }}</span><span style="color:var(--c-hint)">{{ d.ttl }}</span><span style="font-size:13px;color:{{ d.proxColor }}">{{ d.proxied }}</span><span style="text-align:end"><button onClick="{{ d.onCopy }}" title="Copy" style="border:1px solid var(--c-border);background:var(--c-card);color:var(--c-muted);border-radius:6px;padding:4px 8px;cursor:pointer;display:inline-grid;place-items:center"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button></span></div>
+            </sc-for>
+          </div>
+          <div style="font-weight:500;font-size:14px;margin-block-end:12px">{{ t.clientConnect }}</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px">
+            <sc-for list="{{ connectCards }}" as="c" hint-placeholder-count="3">
+              <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);padding:16px">
+                <div style="display:flex;align-items:center;gap:9px;margin-block-end:6px"><span style="width:30px;height:30px;border-radius:8px;background:var(--c-brand-tint);color:var(--c-brand);display:grid;place-items:center;font-weight:700;font-family:var(--c-mono);font-size:13px">{{ c.glyph }}</span><span style="font-size:14px;font-weight:600">{{ c.name }}</span></div>
+                <div style="font-size:12px;color:var(--c-muted);margin-block-end:12px;line-height:1.5">{{ c.desc }}</div>
+                <div style="font-size:11px;color:var(--c-muted);margin-block-end:5px">{{ c.endpointLabel }}</div>
+                <div style="display:flex;align-items:center;gap:6px;background:var(--c-code-bg);border:1px solid var(--c-divider);border-radius:7px;padding:7px 10px;font-family:var(--c-mono);font-size:11.5px;color:var(--c-text)"><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ c.token }}</span><button onClick="{{ c.onToken }}" style="border:0;background:transparent;color:var(--c-brand);cursor:pointer;font:inherit;font-size:11px;font-weight:600;white-space:nowrap">{{ c.tokenBtn }}</button></div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+
+        <!-- ===== MONITORING ===== -->
+        <sc-if value="{{ r_monitoring }}" hint-placeholder-val="{{ false }}">
+          <div style="margin-block-end:18px"><h1 style="margin:0;font-size:22px;font-weight:500;letter-spacing:-.3px">{{ t.nav.monitoring }}</h1><div style="color:var(--c-muted);font-size:13px;margin-block-start:4px">{{ monSubtitle }}</div></div>
+          <div style="display:grid;grid-template-columns:1.2fr 1fr;gap:16px;align-items:start;margin-block-end:16px">
+            <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);overflow:hidden">
+              <div style="padding:13px 16px;border-block-end:1px solid var(--c-divider);font-weight:500;font-size:14px">{{ t.healthProbes }}</div>
+              <div style="display:grid;grid-template-columns:1.4fr 1fr .6fr .7fr .7fr;gap:10px;padding:9px 16px;border-block-end:1px solid var(--c-border);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:var(--c-hint)"><span>{{ t.route }}</span><span>Service</span><span>HTTP</span><span>{{ t.ttfb }}</span><span style="text-align:end">{{ th.status }}</span></div>
+              <sc-for list="{{ probeRows }}" as="p" hint-placeholder-count="4">
+                <div style="display:grid;grid-template-columns:1.4fr 1fr .6fr .7fr .7fr;gap:10px;align-items:center;padding:11px 16px;border-block-end:1px solid var(--c-divider);font-size:12.5px"><span style="font-family:var(--c-mono);font-weight:500">{{ p.route }}</span><span style="color:var(--c-muted)">{{ p.service }}</span><span style="font-family:var(--c-mono);color:var(--c-pos)">{{ p.http }}</span><span style="font-family:var(--c-mono);color:var(--c-muted)">{{ p.ttfb }}</span><span style="text-align:end"><span style="width:9px;height:9px;border-radius:50%;background:{{ p.color }};display:inline-block"></span></span></div>
+              </sc-for>
+            </div>
+            <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);overflow:hidden">
+              <div style="padding:13px 16px;border-block-end:1px solid var(--c-divider);font-weight:500;font-size:14px">{{ t.tlsExpiry }}</div>
+              <sc-for list="{{ certRows }}" as="c" hint-placeholder-count="3">
+                <div style="display:flex;align-items:center;gap:11px;padding:13px 16px;border-block-end:1px solid var(--c-divider)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="{{ c.color }}" stroke-width="1.9"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg><span style="flex:1;font-family:var(--c-mono);font-size:12.5px">{{ c.host }}</span><span style="font-size:11.5px;color:{{ c.color }};font-weight:500">{{ t.expiresIn }} {{ c.expires }}</span></div>
+              </sc-for>
+            </div>
+          </div>
+          <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);overflow:hidden;margin-block-end:16px">
+            <div style="padding:13px 16px;border-block-end:1px solid var(--c-divider);font-weight:500;font-size:14px">{{ t.hostMetrics }}</div>
+            <sc-for list="{{ nodeRows }}" as="n" hint-placeholder-count="3">
+              <div style="padding:13px 16px;border-block-end:1px solid var(--c-divider)">
+                <div style="display:flex;align-items:center;gap:8px;margin-block-end:10px"><span style="font-family:var(--c-mono);font-size:13px;font-weight:500">{{ n.name }}</span><span style="font-size:11px;color:var(--c-hint);text-transform:uppercase;letter-spacing:.4px">{{ n.role }}</span></div>
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
+                  <sc-for list="{{ n.metrics }}" as="m" hint-placeholder-count="3">
+                    <div><div style="display:flex;justify-content:space-between;font-size:11px;color:var(--c-muted);margin-block-end:5px"><span>{{ m.label }}</span><span style="font-family:var(--c-mono);color:{{ m.color }}">{{ m.val }}%</span></div><div style="height:6px;border-radius:999px;background:var(--c-sunken);overflow:hidden"><div style="height:100%;width:{{ m.val }}%;background:{{ m.color }};border-radius:999px;transition:width .4s"></div></div></div>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr;gap:16px">
+            <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);overflow:hidden">
+              <div style="padding:13px 16px;border-block-end:1px solid var(--c-divider);display:flex;align-items:center;justify-content:space-between"><span style="font-weight:500;font-size:14px">{{ t.grafanaPanel }}</span><span style="font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;background:var(--c-warn-bg);color:var(--c-warn)">Soon</span></div>
+              <div style="height:200px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:repeating-linear-gradient(45deg,var(--c-sunken),var(--c-sunken) 12px,transparent 12px,transparent 24px);color:var(--c-hint)"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg><span style="font-size:12.5px;max-width:340px;text-align:center">{{ t.grafanaSoon }}</span></div>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- ===== SECURITY ===== -->
+        <sc-if value="{{ r_security }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-block-end:16px"><div style="flex:1;min-width:220px"><h1 style="margin:0;font-size:22px;font-weight:500;letter-spacing:-.3px">{{ t.nav.security }}</h1><div style="color:var(--c-muted);font-size:13px;margin-block-start:4px">{{ secSubtitle }}</div></div><div style="display:flex;gap:8px"><button onClick="{{ onHarden }}" style="height:38px;padding-inline:15px;border:1px solid var(--c-border);background:var(--c-card);color:var(--c-text);border-radius:8px;cursor:pointer;font:inherit;font-size:13px;font-weight:500;box-shadow:var(--c-shadow-card)">{{ t.runHarden }}</button><button onClick="{{ onPatch }}" style="height:38px;padding-inline:15px;border:0;background:var(--c-brand);color:#fff;border-radius:8px;cursor:pointer;font:inherit;font-size:13px;font-weight:600">{{ t.applyPatches }}</button></div></div>
+          <div style="display:flex;align-items:center;gap:11px;background:var(--c-warn-bg);border:1px solid var(--c-warn);border-radius:10px;padding:13px 16px;margin-block-end:16px"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--c-warn)" stroke-width="2" style="flex:none"><path d="M12 9v4M12 17h.01M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg><span style="font-size:13px;color:var(--c-text);font-weight:500">{{ t.launchGate }}</span></div>
+          <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);overflow:hidden">
+            <div style="padding:13px 16px;border-block-end:1px solid var(--c-divider);display:flex;align-items:center;gap:14px"><span style="font-weight:500;font-size:14px;flex:none">{{ t.securityAudit }}</span><div style="flex:1;display:flex;height:7px;border-radius:999px;overflow:hidden;background:var(--c-sunken)"><div style="width:{{ secPassPct }}%;background:var(--c-pos)"></div><div style="width:{{ secWarnPct }}%;background:var(--c-warn)"></div><div style="width:{{ secFailPct }}%;background:var(--c-neg)"></div></div><span style="flex:none;font-size:11.5px;color:var(--c-muted);font-family:var(--c-mono)">{{ secScoreText }}</span></div>
+            <sc-for list="{{ findingRows }}" as="f" hint-placeholder-count="6">
+              <div style="display:flex;align-items:flex-start;gap:12px;padding:13px 16px;border-block-end:1px solid var(--c-divider)">
+                <span style="width:22px;height:22px;border-radius:50%;background:{{ f.bg }};color:{{ f.color }};display:grid;place-items:center;flex:none;font-size:12px;font-weight:700;margin-block-start:1px">{{ f.icon }}</span>
+                <div style="flex:1;min-width:0"><div style="font-size:13.5px;font-weight:500">{{ f.title }}</div><div style="font-size:12px;color:var(--c-muted);margin-block-start:2px">{{ f.detail }}</div></div>
+                <span style="font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;background:{{ f.bg }};color:{{ f.color }}">{{ f.label }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+
+        <!-- ===== SETTINGS ===== -->
+        <sc-if value="{{ r_settings }}" hint-placeholder-val="{{ false }}">
+          <div style="margin-block-end:18px"><h1 style="margin:0;font-size:22px;font-weight:500;letter-spacing:-.3px">{{ t.nav.settings }}</h1><div style="color:var(--c-muted);font-size:13px;margin-block-start:4px">{{ setSubtitle }}</div></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start">
+            <div style="display:flex;flex-direction:column;gap:16px">
+              <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);overflow:hidden">
+                <div style="padding:14px 16px;border-block-end:1px solid var(--c-divider)"><div style="font-weight:500;font-size:14px">{{ t.secrets }}</div><div style="font-size:12px;color:var(--c-muted);margin-block-start:3px">{{ t.neverShown }}</div></div>
+                <sc-for list="{{ secretRows }}" as="sx" hint-placeholder-count="3">
+                  <div style="display:flex;align-items:center;gap:11px;padding:12px 16px;border-block-end:1px solid var(--c-divider)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--c-hint)" stroke-width="1.9"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg><span style="flex:1;font-family:var(--c-mono);font-size:12.5px">{{ sx.key }}</span><span style="font-family:var(--c-mono);font-size:13px;color:var(--c-hint);letter-spacing:2px">••••••••</span></div>
+                </sc-for>
+              </div>
+              <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);overflow:hidden">
+                <div style="padding:14px 16px;border-block-end:1px solid var(--c-divider);font-weight:500;font-size:14px">{{ t.apiKeyTitle }}</div>
+                <div style="padding:16px;display:flex;align-items:center;gap:8px"><div style="flex:1;background:var(--c-code-bg);border:1px solid var(--c-divider);border-radius:7px;padding:9px 11px;font-family:var(--c-mono);font-size:12px;color:var(--c-text)">apx_live_••••••••••••7f3a</div><button onClick="{{ onRotateKey }}" style="height:38px;padding-inline:14px;border:1px solid var(--c-border);background:var(--c-card);color:var(--c-text);border-radius:8px;font:inherit;font-size:12.5px;font-weight:500;cursor:pointer">{{ t.rotate }}</button></div>
+              </div>
+              <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);overflow:hidden">
+                <div style="padding:14px 16px;border-block-end:1px solid var(--c-divider)"><div style="font-weight:500;font-size:14px">{{ t.smtp }}</div><div style="font-size:12px;color:var(--c-muted);margin-block-start:3px">{{ t.smtpDesc }}</div></div>
+                <div style="padding:18px 16px">
+                  <div style="display:flex;gap:12px;margin-block-end:16px"><div style="flex:2"><label style="display:block;font-size:12px;font-weight:500;color:var(--c-muted);margin-block-end:6px">{{ t.smtpHost }}</label><input value="smtp.adpix.io" style="width:100%;height:40px;padding-inline:12px;border:1.5px solid var(--c-border);border-radius:8px;background:var(--c-card);color:var(--c-text);font:inherit;font-family:var(--c-mono);font-size:13px;outline:none"/></div><div style="flex:1"><label style="display:block;font-size:12px;font-weight:500;color:var(--c-muted);margin-block-end:6px">{{ t.smtpPort }}</label><input value="587" style="width:100%;height:40px;padding-inline:12px;border:1.5px solid var(--c-border);border-radius:8px;background:var(--c-card);color:var(--c-text);font:inherit;font-family:var(--c-mono);font-size:13px;outline:none"/></div></div>
+                  <label style="display:block;font-size:12px;font-weight:500;color:var(--c-muted);margin-block-end:6px">{{ t.smtpEncryption }}</label>
+                  <div style="display:inline-flex;gap:3px;background:var(--c-sunken);border-radius:999px;padding:3px;margin-block-end:16px">
+                    <sc-for list="{{ smtpEncOpts }}" as="o" hint-placeholder-count="3"><button onClick="{{ o.onPick }}" style="height:30px;padding-inline:15px;border:0;border-radius:999px;cursor:pointer;font:inherit;font-size:12.5px;font-weight:500;background:{{ o.bg }};color:{{ o.color }};box-shadow:{{ o.shadow }}">{{ o.label }}</button></sc-for>
+                  </div>
+                  <div style="display:flex;gap:12px;margin-block-end:16px"><div style="flex:1"><label style="display:block;font-size:12px;font-weight:500;color:var(--c-muted);margin-block-end:6px">{{ t.smtpFrom }}</label><input value="ops@adpix.io" style="width:100%;height:40px;padding-inline:12px;border:1.5px solid var(--c-border);border-radius:8px;background:var(--c-card);color:var(--c-text);font:inherit;font-family:var(--c-mono);font-size:13px;outline:none"/></div><div style="flex:1"><label style="display:block;font-size:12px;font-weight:500;color:var(--c-muted);margin-block-end:6px">{{ t.smtpUser }}</label><input value="apx-mailer" style="width:100%;height:40px;padding-inline:12px;border:1.5px solid var(--c-border);border-radius:8px;background:var(--c-card);color:var(--c-text);font:inherit;font-family:var(--c-mono);font-size:13px;outline:none"/></div></div>
+                  <label style="display:block;font-size:12px;font-weight:500;color:var(--c-muted);margin-block-end:6px">{{ t.smtpPassword }}</label>
+                  <input type="password" value="supersecret" style="width:100%;height:40px;padding-inline:12px;border:1.5px solid var(--c-border);border-radius:8px;background:var(--c-card);color:var(--c-text);font:inherit;font-family:var(--c-mono);font-size:13px;outline:none"/>
+                </div>
+                <div style="display:flex;justify-content:flex-end;gap:10px;padding:14px 16px;background:var(--c-sunken);border-block-start:1px solid var(--c-border)"><button onClick="{{ onSendTest }}" style="height:36px;padding-inline:14px;border:1px solid var(--c-border);background:var(--c-card);color:var(--c-text);border-radius:8px;font:inherit;font-size:13px;font-weight:500;cursor:pointer">{{ t.sendTest }}</button><button onClick="{{ onSaveSmtp }}" style="height:36px;padding-inline:16px;border:0;background:var(--c-brand);color:#fff;border-radius:8px;font:inherit;font-size:13px;font-weight:600;cursor:pointer">{{ t.saveChanges }}</button></div>
+              </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:16px">
+              <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);overflow:hidden">
+                <div style="padding:14px 16px;border-block-end:1px solid var(--c-divider);display:flex;align-items:center;justify-content:space-between"><span style="font-weight:500;font-size:14px">{{ t.usersRoles }}</span><button onClick="{{ onAddUser }}" style="border:1px solid var(--c-border);background:var(--c-card);color:var(--c-text);border-radius:7px;padding:5px 11px;font:inherit;font-size:12px;font-weight:500;cursor:pointer">{{ t.addUser }}</button></div>
+                <sc-for list="{{ userRows }}" as="u" hint-placeholder-count="4">
+                  <div style="display:flex;align-items:center;gap:11px;padding:11px 16px;border-block-end:1px solid var(--c-divider)"><span style="width:30px;height:30px;border-radius:50%;background:var(--c-brand);color:#fff;display:grid;place-items:center;font-size:11px;font-weight:600;flex:none">{{ u.initials }}</span><div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:500">{{ u.name }}</div><div style="font-size:11.5px;color:var(--c-hint);font-family:var(--c-mono)">{{ u.email }}</div></div><span style="font-size:11px;font-weight:600;padding:2px 10px;border-radius:999px;background:{{ u.roleBg }};color:{{ u.roleColor }}">{{ u.role }}</span></div>
+                </sc-for>
+              </div>
+              <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);overflow:hidden">
+                <div style="padding:14px 16px;border-block-end:1px solid var(--c-divider);font-weight:500;font-size:14px">{{ t.webhooksTitle }}</div>
+                <sc-for list="{{ webhookRows }}" as="w" hint-placeholder-count="3">
+                  <div style="display:flex;align-items:center;gap:11px;padding:12px 16px;border-block-end:1px solid var(--c-divider)"><div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:500">{{ w.name }}</div><div style="font-size:11px;color:var(--c-hint);font-family:var(--c-mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ w.url }} · {{ w.events }}</div></div><button onClick="{{ w.onToggle }}" style="width:40px;height:23px;border-radius:999px;border:0;background:{{ w.trackBg }};position:relative;cursor:pointer;flex:none;transition:background .15s"><span style="position:absolute;top:2px;inset-inline-start:{{ w.knobX }};width:19px;height:19px;border-radius:50%;background:#fff;transition:inset-inline-start .15s;box-shadow:0 1px 2px rgba(0,0,0,.3)"></span></button></div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- MORE SCREENS APPENDED HERE -->
+        <div data-screens-end></div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ===================== ACTIVITY DRAWER ===================== -->
+  <div onClick="{{ closeDrawer }}" style="position:fixed;inset:0;background:var(--c-scrim);opacity:{{ drawerScrimOpacity }};pointer-events:{{ drawerPointer }};transition:opacity .2s var(--ease-standard);z-index:40"></div>
+  <aside style="position:fixed;inset-block:0;inset-inline-end:0;width:min(420px,92vw);background:var(--c-card);border-inline-start:1px solid var(--c-border);box-shadow:var(--c-shadow-menu);transform:{{ drawerTransform }};transition:transform .22s var(--ease-standard);z-index:41;display:flex;flex-direction:column">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:15px 18px;border-block-end:1px solid var(--c-border)">
+      <div style="display:flex;align-items:center;gap:9px"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--c-brand)" stroke-width="1.9"><path d="M3 12h4l2 6 4-12 2 6h6"/></svg><span style="font-weight:600;font-size:15px">{{ t.activity }}</span></div>
+      <button onClick="{{ closeDrawer }}" style="width:30px;height:30px;display:grid;place-items:center;border:0;background:transparent;color:var(--c-muted);cursor:pointer;border-radius:7px;font-size:18px">✕</button>
+    </div>
+    <div style="flex:1;overflow-y:auto;padding:14px">
+      <sc-for list="{{ drawerJobs }}" as="j" hint-placeholder-count="3">
+        <div style="border:1px solid var(--c-border);border-radius:10px;margin-block-end:12px;overflow:hidden">
+          <div style="display:flex;align-items:center;gap:10px;padding:12px 14px">
+            <span style="width:9px;height:9px;border-radius:50%;background:{{ j.color }};flex:none;{{ j.pulse }}"></span>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:13px;font-weight:500">{{ j.title }}</div>
+              <div style="font-size:11.5px;color:var(--c-muted);font-family:var(--c-mono)">{{ j.target }} · {{ j.id }}</div>
+            </div>
+            <span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;background:{{ j.bg }};color:{{ j.color }}">{{ j.statusLabel }}</span>
+          </div>
+          <div style="padding:0 14px 12px">
+            <div style="height:6px;border-radius:999px;background:var(--c-sunken);overflow:hidden;margin-block-end:10px"><div style="height:100%;width:{{ j.progress }}%;background:{{ j.color }};border-radius:999px;transition:width .4s linear"></div></div>
+            <div style="font-family:var(--c-mono);font-size:11px;line-height:1.7;background:var(--c-code-bg);border:1px solid var(--c-divider);border-radius:8px;padding:9px 11px;max-height:120px;overflow-y:auto;color:var(--c-muted)">
+              <sc-for list="{{ j.log }}" as="line" hint-placeholder-count="3"><div>{{ line }}</div></sc-for>
+              <span style="display:{{ j.cursor }};color:var(--c-brand)">▍</span>
+            </div>
+            <sc-if value="{{ j.cancelable }}" hint-placeholder-val="">
+              <button onClick="{{ j.onCancel }}" style="margin-block-start:10px;border:1px solid var(--c-neg);background:transparent;color:var(--c-neg);border-radius:7px;padding:5px 12px;font:inherit;font-size:12px;font-weight:500;cursor:pointer">{{ t.cancel }}</button>
+            </sc-if>
+          </div>
+        </div>
+      </sc-for>
+      <sc-if value="{{ drawerEmpty }}" hint-placeholder-val="">
+        <div style="text-align:center;padding:48px 20px;color:var(--c-hint)">
+          <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" style="margin-block-end:10px"><path d="M3 12h4l2 6 4-12 2 6h6"/></svg>
+          <div style="font-size:13px">{{ t.noActivity }}</div>
+        </div>
+      </sc-if>
+    </div>
+  </aside>
+
+  <!-- ===================== ADD-SERVER WIZARD ===================== -->
+  <div onClick="{{ closeWizard }}" style="position:fixed;inset:0;background:var(--c-scrim);opacity:{{ wizScrimOpacity }};pointer-events:{{ wizPointer }};transition:opacity .2s var(--ease-standard);z-index:44"></div>
+  <aside style="position:fixed;inset-block:0;inset-inline-end:0;width:min(480px,94vw);background:var(--c-card);border-inline-start:1px solid var(--c-border);box-shadow:var(--c-shadow-menu);transform:{{ wizTransform }};transition:transform .22s var(--ease-standard);z-index:45;display:flex;flex-direction:column">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-block-end:1px solid var(--c-border)">
+      <span style="font-weight:600;font-size:15px">{{ t.addServerTitle }}</span>
+      <button onClick="{{ closeWizard }}" style="width:30px;height:30px;border:0;background:transparent;color:var(--c-muted);cursor:pointer;border-radius:7px;font-size:18px">✕</button>
+    </div>
+    <div style="display:flex;gap:6px;padding:16px 20px;border-block-end:1px solid var(--c-divider)">
+      <sc-for list="{{ wizSteps }}" as="st" hint-placeholder-count="4">
+        <div style="flex:1">
+          <div style="height:4px;border-radius:999px;background:{{ st.barColor }}"></div>
+          <div style="font-size:11px;margin-block-start:7px;color:{{ st.labelColor }};font-weight:{{ st.weight }}">{{ st.num }}. {{ st.label }}</div>
+        </div>
+      </sc-for>
+    </div>
+    <div style="flex:1;overflow-y:auto;padding:22px 20px">
+      <div style="font-size:15px;font-weight:600;margin-block-end:5px">{{ wizHeading }}</div>
+      <div style="font-size:13px;color:var(--c-muted);margin-block-end:20px;line-height:1.5">{{ wizDesc }}</div>
+
+      <sc-if value="{{ wizStep0 }}" hint-placeholder-val="{{ true }}">
+        <label style="display:block;font-size:12px;font-weight:500;color:var(--c-muted);margin-block-end:6px">{{ t.wHostLabel }}</label>
+        <input value="{{ wizHost }}" onInput="{{ onWizHost }}" placeholder="10.0.0.13" style="width:100%;height:40px;padding-inline:12px;border:1.5px solid var(--c-border);border-radius:8px;background:var(--c-card);color:var(--c-text);font:inherit;font-family:var(--c-mono);font-size:13px;outline:none;margin-block-end:16px"/>
+        <label style="display:block;font-size:12px;font-weight:500;color:var(--c-muted);margin-block-end:6px">{{ t.wPortUser }}</label>
+        <div style="display:flex;gap:10px"><input value="22" style="width:90px;height:40px;padding-inline:12px;border:1.5px solid var(--c-border);border-radius:8px;background:var(--c-card);color:var(--c-text);font:inherit;font-family:var(--c-mono);font-size:13px;outline:none"/><input value="root" style="flex:1;height:40px;padding-inline:12px;border:1.5px solid var(--c-border);border-radius:8px;background:var(--c-card);color:var(--c-text);font:inherit;font-family:var(--c-mono);font-size:13px;outline:none"/></div>
+      </sc-if>
+      <sc-if value="{{ wizStep1 }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-block-end:9px"><span style="font-size:12.5px;font-weight:500;color:var(--c-muted)">{{ diagLabel }}</span><span style="font-family:var(--c-mono);font-size:12px;color:var(--c-brand);font-weight:500">{{ diagProgress }}%</span></div>
+        <div style="height:6px;border-radius:999px;background:var(--c-sunken);overflow:hidden;margin-block-end:16px"><div style="height:100%;width:{{ diagProgress }}%;background:var(--c-brand);border-radius:999px;transition:width .35s linear"></div></div>
+        <div style="display:flex;flex-direction:column;gap:1px">
+          <sc-for list="{{ wizDiagChecks }}" as="d" hint-placeholder-count="8">
+            <div style="display:flex;align-items:center;gap:11px;padding:9px 2px;opacity:{{ d.opacity }};transition:opacity .25s">
+              <span style="width:20px;height:20px;border-radius:50%;flex:none;display:grid;place-items:center;border:2px solid {{ d.ringColor }};color:{{ d.color }};font-size:11px;font-weight:700">
+                <span style="display:{{ d.spinnerShow }};width:10px;height:10px;border:2px solid var(--c-brand);border-block-start-color:transparent;border-radius:50%;animation:spin .7s linear infinite"></span>
+                <span style="display:{{ d.iconShow }}">{{ d.icon }}</span>
+              </span>
+              <span style="flex:1;font-size:13px">{{ d.label }}</span>
+              <span style="font-family:var(--c-mono);font-size:11.5px;color:var(--c-muted)">{{ d.detail }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+      <sc-if value="{{ wizStep2 }}" hint-placeholder-val="">
+        <sc-for list="{{ wizRoles }}" as="ro" hint-placeholder-count="2">
+          <button onClick="{{ ro.onPick }}" style="width:100%;display:flex;align-items:flex-start;gap:12px;text-align:start;border:1.5px solid {{ ro.border }};background:{{ ro.bg }};border-radius:10px;padding:14px;margin-block-end:10px;cursor:pointer;color:inherit;font:inherit">
+            <span style="width:18px;height:18px;border-radius:50%;border:2px solid {{ ro.dotBorder }};flex:none;margin-block-start:1px;display:grid;place-items:center"><span style="width:8px;height:8px;border-radius:50%;background:{{ ro.dotFill }}"></span></span>
+            <span><span style="font-size:14px;font-weight:600;display:block">{{ ro.title }}</span><span style="font-size:12.5px;color:var(--c-muted)">{{ ro.desc }}</span></span>
+          </button>
+        </sc-for>
+      </sc-if>
+      <sc-if value="{{ wizStep3 }}" hint-placeholder-val="">
+        <div style="display:flex;align-items:center;gap:10px;background:var(--c-pos-bg);border:1px solid var(--c-pos);border-radius:10px;padding:13px 15px;margin-block-end:16px;color:var(--c-pos);font-size:13px;font-weight:500"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>{{ t.wKeyOk }}</div>
+        <label style="display:block;font-size:12px;font-weight:500;color:var(--c-muted);margin-block-end:6px">{{ t.wFingerprint }}</label>
+        <div style="font-family:var(--c-mono);font-size:12px;background:var(--c-code-bg);border:1px solid var(--c-divider);border-radius:8px;padding:11px 13px;color:var(--c-muted);word-break:break-all">SHA256:t9Kc+8s2Lm0aQv7Rb1xH3nP6dWfYj4Uk8eZ2gT5cN</div>
+      </sc-if>
+    </div>
+    <div style="display:flex;justify-content:space-between;gap:10px;padding:16px 20px;border-block-start:1px solid var(--c-border);background:var(--c-sunken)">
+      <button onClick="{{ wizBack }}" style="height:38px;padding-inline:16px;border:1px solid var(--c-border);background:var(--c-card);color:var(--c-text);border-radius:8px;font:inherit;font-size:13px;font-weight:500;cursor:pointer;visibility:{{ wizBackVis }}">{{ t.back }}</button>
+      <button onClick="{{ wizNext }}" style="height:38px;padding-inline:18px;border:0;background:var(--c-brand);color:#fff;border-radius:8px;font:inherit;font-size:13px;font-weight:600;cursor:pointer">{{ wizNextLabel }}</button>
+    </div>
+  </aside>
+
+  <!-- ===================== DESTRUCTIVE MODAL ===================== -->
+  <div style="position:fixed;inset:0;display:{{ modalDisplay }};align-items:center;justify-content:center;background:var(--c-scrim);z-index:50;padding:20px" onClick="{{ closeModal }}">
+    <div onClick="{{ stop }}" style="width:min(480px,100%);background:var(--c-card);border-radius:14px;box-shadow:var(--c-shadow-menu);overflow:hidden;animation:pop .16s var(--ease-standard)">
+      <div style="display:flex;align-items:center;gap:10px;padding:16px 20px;background:var(--c-neg-bg);border-block-end:1px solid var(--c-border)">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--c-neg)" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+        <span style="font-weight:600;font-size:15px;color:var(--c-neg)">{{ modal.title }}</span>
+      </div>
+      <div style="padding:18px 20px">
+        <p style="margin:0 0 14px;font-size:13.5px;color:var(--c-text);line-height:1.55">{{ modal.body }}</p>
+        <div style="border:1px solid var(--c-border);border-radius:10px;overflow:hidden;margin-block-end:16px">
+          <sc-for list="{{ modal.impact }}" as="row" hint-placeholder-count="2">
+            <div style="display:flex;justify-content:space-between;gap:12px;padding:9px 13px;border-block-end:1px solid var(--c-divider);font-size:12.5px">
+              <span style="color:var(--c-muted)">{{ row.label }}</span>
+              <span style="font-family:var(--c-mono);font-weight:500;color:{{ row.color }}">{{ row.value }}</span>
+            </div>
+          </sc-for>
+        </div>
+        <label style="display:block;font-size:12.5px;color:var(--c-muted);margin-block-end:7px">{{ modal.confirmHint }} <span style="font-family:var(--c-mono);color:var(--c-text);font-weight:600;background:var(--c-sunken);padding:1px 6px;border-radius:5px">{{ modal.confirmWord }}</span></label>
+        <input value="{{ confirmText }}" onInput="{{ onConfirmInput }}" placeholder="{{ modal.confirmWord }}" style="width:100%;height:40px;padding-inline:12px;border:1.5px solid var(--c-border);border-radius:8px;background:var(--c-card);color:var(--c-text);font:inherit;font-family:var(--c-mono);font-size:13px;outline:none"/>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:10px;padding:14px 20px;background:var(--c-sunken);border-block-start:1px solid var(--c-border)">
+        <button onClick="{{ closeModal }}" style="height:38px;padding-inline:16px;border:1px solid var(--c-border);background:var(--c-card);color:var(--c-text);border-radius:8px;font:inherit;font-size:13px;font-weight:500;cursor:pointer">{{ t.cancel }}</button>
+        <button onClick="{{ confirmAction }}" disabled="{{ confirmDisabled }}" style="height:38px;padding-inline:16px;border:0;background:{{ confirmBtnBg }};color:#fff;border-radius:8px;font:inherit;font-size:13px;font-weight:600;cursor:{{ confirmCursor }};opacity:{{ confirmOpacity }}">{{ modal.cta }}</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== COMMAND PALETTE ===================== -->
+  <div style="position:fixed;inset:0;display:{{ paletteDisplay }};align-items:flex-start;justify-content:center;background:var(--c-scrim);z-index:60;padding-block-start:12vh" onClick="{{ closePalette }}">
+    <div onClick="{{ stop }}" style="width:min(580px,94vw);background:var(--c-card);border-radius:14px;box-shadow:var(--c-shadow-menu);overflow:hidden;animation:pop .14s var(--ease-standard)">
+      <div style="display:flex;align-items:center;gap:11px;padding:14px 18px;border-block-end:1px solid var(--c-border)">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--c-hint)" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input value="{{ paletteQuery }}" onInput="{{ onPaletteInput }}" placeholder="{{ t.palettePlaceholder }}" autofocus style="flex:1;border:0;background:transparent;color:var(--c-text);font:inherit;font-size:15px;outline:none"/>
+        <kbd style="font-family:var(--c-mono);font-size:11px;background:var(--c-sunken);border:1px solid var(--c-border);border-radius:6px;padding:2px 7px;color:var(--c-muted)">esc</kbd>
+      </div>
+      <div style="max-height:50vh;overflow-y:auto;padding:8px">
+        <sc-for list="{{ paletteResults }}" as="r" hint-placeholder-count="5">
+          <button onClick="{{ r.onPick }}" style="width:100%;display:flex;align-items:center;gap:12px;padding:10px 12px;border:0;background:{{ r.bg }};color:var(--c-text);border-radius:9px;cursor:pointer;font:inherit;text-align:start">
+            <span style="width:30px;height:30px;flex:none;display:grid;place-items:center;border-radius:8px;background:var(--c-sunken);color:var(--c-muted)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="{{ r.iconPath }}"/></svg></span>
+            <div style="flex:1;min-width:0"><div style="font-size:13.5px;font-weight:500">{{ r.label }}</div><div style="font-size:11.5px;color:var(--c-muted)">{{ r.kind }}</div></div>
+            <span style="font-size:11px;color:var(--c-hint);font-family:var(--c-mono)">{{ r.hint }}</span>
+          </button>
+        </sc-for>
+        <sc-if value="{{ paletteEmpty }}" hint-placeholder-val="">
+          <div style="text-align:center;padding:34px;color:var(--c-hint);font-size:13px">{{ t.noResults }}</div>
+        </sc-if>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== TOASTS ===================== -->
+  <div style="position:fixed;inset-block-end:20px;inset-inline:0;display:flex;flex-direction:column;align-items:center;gap:8px;z-index:70;pointer-events:none">
+    <sc-for list="{{ toasts }}" as="to" hint-placeholder-count="0">
+      <div style="display:flex;align-items:center;gap:10px;background:var(--c-text);color:var(--c-bg);padding:11px 16px;border-radius:10px;box-shadow:var(--c-shadow-menu);font-size:13px;font-weight:500;animation:toastin .2s var(--ease-standard);pointer-events:auto;max-width:90vw">
+        <span style="width:8px;height:8px;border-radius:50%;background:{{ to.color }};flex:none"></span>{{ to.msg }}
+      </div>
+    </sc-for>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:&quot;100%&quot;,&quot;height&quot;:&quot;100%&quot;},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;light&quot;,&quot;dark&quot;],&quot;default&quot;:&quot;light&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;locale&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;en&quot;,&quot;fa&quot;],&quot;default&quot;:&quot;en&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  constructor(props){
+    super(props);
+    this.ICONS = {
+      dashboard:"M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z",
+      servers:"M3 4h18v6H3zM3 14h18v6H3zM7 7h.01M7 17h.01",
+      ha:"M12 5a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM5 21a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM19 21a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM12 5v4M12 9l-6 6M12 9l6 6",
+      databases:"M12 3c4.4 0 8 1.3 8 3s-3.6 3-8 3-8-1.3-8-3 3.6-3 8-3zM4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6",
+      backups:"M3 5h18v4H3zM5 9v10h14V9M9 13h6",
+      deploys:"M12 19V8M9 11l3-3 3 3M7 19a4 4 0 0 1 0-8 5 5 0 0 1 9.6-1.5A4 4 0 0 1 17 19",
+      dns:"M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3 12h18M12 3c2.6 2.7 2.6 15.3 0 18M12 3c-2.6 2.7-2.6 15.3 0 18",
+      monitoring:"M3 12h4l3 8 4-16 3 8h4",
+      jobs:"M8 6h13M8 12h13M8 18h13M3 6l1 1 2-2M3 12l1 1 2-2M3 18l1 1 2-2",
+      security:"M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z",
+      settings:"M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2l-.4-2.6H9.9l-.4 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2l.4 2.6h4.2l.4-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2z",
+      restore:"M3 12a9 9 0 1 0 3-6.7M3 4v4h4",
+      bolt:"M13 2 4 14h7l-1 8 9-12h-7z"
+    };
+    this.NAV = [
+      {key:"overview", items:[{id:"dashboard",icon:"dashboard"}]},
+      {key:"fleet", items:[{id:"servers",icon:"servers",badge:"3"},{id:"ha",icon:"ha"}]},
+      {key:"data", items:[{id:"databases",icon:"databases"},{id:"backups",icon:"backups"}]},
+      {key:"delivery", items:[{id:"deploys",icon:"deploys",badge:"2"},{id:"dns",icon:"dns"}]},
+      {key:"observe", items:[{id:"monitoring",icon:"monitoring"},{id:"jobs",icon:"jobs",badge:"!"}]},
+      {key:"govern", items:[{id:"security",icon:"security"},{id:"settings",icon:"settings"}]}
+    ];
+    this.STR = {
+      en:{searchPlaceholder:"Search servers, screens, actions…",palettePlaceholder:"Type a command or search…",
+        collapse:"Collapse",activity:"Activity",noActivity:"No active jobs. Everything is idle.",noResults:"No matches.",
+        cancel:"Cancel",viewAll:"View all",fleetOverview:"Fleet overview",backupAll:"Backup all",deploy:"Deploy",addNode:"Add server",
+        clusterTopology:"Cluster topology",quorumHealthy:"Quorum healthy",nodeHealth:"Node health",recentJobs:"Recent jobs",
+        activeAlerts:"Active alerts",addServerBtn:"Add server",addServerTitle:"Add a server",back:"Back",next:"Next",finish:"Authorize & add",wHostLabel:"Host / IP address",wPortUser:"SSH port & user",wKeyOk:"SSH key authorized successfully",wFingerprint:"Host key fingerprint",backupNow:"Backup now",restartAll:"Restart all",containers:"Containers",logs:"Logs",filterLogs:"Filter logs",follow:"Follow",noLogMatch:"No log lines match your filter.",liveJobs:"Live jobs",auditLog:"Audit log",immutable:"Immutable · append-only",who:"Who",action:"Action",args:"Args",time:"Time",outcome:"Outcome",createBackup:"Create backup",backupsList:"Backups",schedule:"Schedule",download:"Download",restore:"Restore",saveChanges:"Save changes",scheduleTitle:"Backup schedule",scheduleDesc:"Verified snapshots run on a timer and replicate off-host.",cronSchedule:"Cron schedule",cronHint:"Every 6 hours · next run 18:00 UTC",retentionDays:"Retention (days)",offHostTarget:"Off-host target",optimize:"Optimize",tuneTitle:"Tune settings",tuneDesc:"Review the before → after diff, then apply. Applying restarts the engine.",setting:"Setting",before:"Before",after:"After",applyTuning:"Apply tuning",retentionTitle:"Retention policy",retentionDesc:"Drops partitions older than the window. This is permanent.",keepDataFor:"Keep data for",months:"months",applyRetention:"Apply retention",deployCurrent:"Current deploy",update:"Update",rollback:"Rollback",blueGreen:"Blue-green deploy",cicd:"CI / CD pipeline",deployHistory:"Deploy history",commitsBehind:"commits behind",lastResult:"Last result",autoRollback:"Auto-rollback on a failed health check is enabled.",rollingProgress:"Rolling progress · node by node",topology:"Topology",quorumStatus:"Quorum status",standUpHa:"Stand up HA",failover:"Failover",component:"Component",members:"Members",arbiter:"Arbiter / quorum",dnsRecords:"Required DNS records",verifyResolves:"Verify resolves",clientConnect:"Client connect",revealToken:"Reveal token once",proxied:"Proxied",ttl:"TTL",recordValue:"Value",recordName:"Name",recordType:"Type",copyVal:"Copy",healthProbes:"Health probes",route:"Route",ttfb:"TTFB",tlsExpiry:"TLS certificate expiry",hostMetrics:"Host metrics",grafanaPanel:"Grafana panel",grafanaSoon:"Embedded Grafana — connect a data source to enable this panel.",expiresIn:"Expires in",hostCol:"Host",securityAudit:"Security audit",harden:"Harden",patch:"Patch",launchGate:"Launch gate · 1 finding must be resolved before go-live",runHarden:"Run harden (dry-run)",applyPatches:"Apply patches",secrets:"Secrets",apiKeyTitle:"API key",usersRoles:"Users & roles",webhooksTitle:"Webhooks & alert channels",addUser:"Add user",rotate:"Rotate",neverShown:"Stored encrypted · never shown",connectDesc:"Point a client at the cluster with a scoped bearer token.",enabled:"Enabled",smtp:"SMTP / email",smtpDesc:"Used for alert digests, user invites and scheduled reports.",smtpHost:"SMTP host",smtpPort:"Port",smtpEncryption:"Encryption",smtpFrom:"From address",smtpUser:"Username",smtpPassword:"Password",sendTest:"Send test",
+        nav:{dashboard:"Dashboard",servers:"Servers",ha:"High availability",databases:"Databases",backups:"Backups",deploys:"Deploys",dns:"DNS & connect",monitoring:"Monitoring",jobs:"Jobs & audit",security:"Security",settings:"Settings"},
+        grp:{overview:"Overview",fleet:"Fleet",data:"Data",delivery:"Delivery",observe:"Observe",govern:"Govern"}},
+      fa:{searchPlaceholder:"جستجوی سرور، صفحه، عملیات…",palettePlaceholder:"یک فرمان بنویسید یا جستجو کنید…",
+        collapse:"جمع کردن",activity:"فعالیت",noActivity:"کار فعالی نیست. همه‌چیز بی‌کار است.",noResults:"موردی یافت نشد.",
+        cancel:"لغو",viewAll:"مشاهده همه",fleetOverview:"نمای کلی فلیت",backupAll:"پشتیبان‌گیری همه",deploy:"استقرار",addNode:"افزودن سرور",
+        clusterTopology:"توپولوژی خوشه",quorumHealthy:"حد نصاب سالم",nodeHealth:"سلامت گره‌ها",recentJobs:"کارهای اخیر",
+        activeAlerts:"هشدارهای فعال",addServerBtn:"افزودن سرور",addServerTitle:"افزودن سرور",back:"قبلی",next:"بعدی",finish:"تأیید و افزودن",wHostLabel:"میزبان / آدرس IP",wPortUser:"پورت و کاربر SSH",wKeyOk:"کلید SSH با موفقیت مجاز شد",wFingerprint:"اثر انگشت کلید میزبان",backupNow:"پشتیبان‌گیری",restartAll:"راه‌اندازی مجدد همه",containers:"کانتینرها",logs:"لاگ‌ها",filterLogs:"فیلتر لاگ",follow:"دنبال‌کردن",noLogMatch:"خطی مطابق فیلتر یافت نشد.",liveJobs:"کارهای زنده",auditLog:"گزارش ممیزی",immutable:"تغییرناپذیر · فقط افزودنی",who:"کاربر",action:"عملیات",args:"آرگومان",time:"زمان",outcome:"نتیجه",createBackup:"ساخت پشتیبان",backupsList:"پشتیبان‌ها",schedule:"زمان‌بندی",download:"دانلود",restore:"بازیابی",saveChanges:"ذخیره تغییرات",scheduleTitle:"زمان‌بندی پشتیبان",scheduleDesc:"اسنپ‌شات‌های تأییدشده طبق زمان‌بند اجرا و خارج از میزبان تکثیر می‌شوند.",cronSchedule:"زمان‌بند Cron",cronHint:"هر ۶ ساعت · اجرای بعدی ۱۸:۰۰ UTC",retentionDays:"نگه‌داری (روز)",offHostTarget:"مقصد خارج میزبان",optimize:"بهینه‌سازی",tuneTitle:"تنظیم پیکربندی",tuneDesc:"تفاوت قبل ← بعد را بررسی و سپس اعمال کنید. اعمال، موتور را راه‌اندازی مجدد می‌کند.",setting:"تنظیم",before:"قبل",after:"بعد",applyTuning:"اعمال تنظیمات",retentionTitle:"سیاست نگه‌داری",retentionDesc:"پارتیشن‌های قدیمی‌تر از بازه را حذف می‌کند. این عمل دائمی است.",keepDataFor:"نگه‌داری داده برای",months:"ماه",applyRetention:"اعمال نگه‌داری",deployCurrent:"استقرار فعلی",update:"به‌روزرسانی",rollback:"بازگشت",blueGreen:"استقرار آبی-سبز",cicd:"خط لوله CI / CD",deployHistory:"تاریخچه استقرار",commitsBehind:"کامیت عقب",lastResult:"آخرین نتیجه",autoRollback:"بازگشت خودکار در صورت شکست بررسی سلامت فعال است.",rollingProgress:"پیشرفت تدریجی · گره به گره",topology:"توپولوژی",quorumStatus:"وضعیت حد نصاب",standUpHa:"راه‌اندازی HA",failover:"تعویض اضطراری",component:"مؤلفه",members:"اعضا",arbiter:"داور / حد نصاب",dnsRecords:"رکوردهای DNS موردنیاز",verifyResolves:"بررسی resolve",clientConnect:"اتصال کلاینت",revealToken:"نمایش یک‌بارهٔ توکن",proxied:"پراکسی",ttl:"TTL",recordValue:"مقدار",recordName:"نام",recordType:"نوع",copyVal:"کپی",healthProbes:"پروب‌های سلامت",route:"مسیر",ttfb:"TTFB",tlsExpiry:"انقضای گواهی TLS",hostMetrics:"متریک میزبان",grafanaPanel:"پنل Grafana",grafanaSoon:"Grafana جاسازی‌شده — برای فعال‌سازی یک منبع داده متصل کنید.",expiresIn:"انقضا در",hostCol:"میزبان",securityAudit:"ممیزی امنیت",harden:"سخت‌سازی",patch:"وصله",launchGate:"دروازه راه‌اندازی · ۱ مورد باید پیش از عرضه حل شود",runHarden:"اجرای سخت‌سازی (آزمایشی)",applyPatches:"اعمال وصله‌ها",secrets:"اسرار",apiKeyTitle:"کلید API",usersRoles:"کاربران و نقش‌ها",webhooksTitle:"وب‌هوک و کانال‌های هشدار",addUser:"افزودن کاربر",rotate:"چرخش",neverShown:"رمزگذاری‌شده · هرگز نمایش داده نمی‌شود",connectDesc:"یک کلاینت را با توکن محدودشده به خوشه متصل کنید.",enabled:"فعال",smtp:"SMTP / ایمیل",smtpDesc:"برای خلاصه‌های هشدار، دعوت کاربران و گزارش‌های زمان‌بندی‌شده.",smtpHost:"میزبان SMTP",smtpPort:"پورت",smtpEncryption:"رمزگذاری",smtpFrom:"آدرس فرستنده",smtpUser:"نام کاربری",smtpPassword:"رمز عبور",sendTest:"ارسال آزمایشی",
+        nav:{dashboard:"داشبورد",servers:"سرورها",ha:"دسترس‌پذیری بالا",databases:"پایگاه‌داده",backups:"پشتیبان‌گیری",deploys:"استقرار",dns:"DNS و اتصال",monitoring:"پایش",jobs:"کارها و ممیزی",security:"امنیت",settings:"تنظیمات"},
+        grp:{overview:"نمای کلی",fleet:"فلیت",data:"داده",delivery:"تحویل",observe:"مشاهده",govern:"حاکمیت"}}
+    };
+    this.servers = [
+      {id:"witness",name:"witness",role:"witness",host:"10.0.0.4",os:"Debian 12",status:"healthy",version:"2.8.1",lastSeen:"just now",cpu:14,mem:38,disk:22,why:""},
+      {id:"node-a",name:"node-a",role:"node",host:"10.0.0.11",os:"Ubuntu 24.04",status:"healthy",version:"2.8.1",lastSeen:"12s ago",cpu:46,mem:62,disk:54,why:"",primary:true},
+      {id:"node-b",name:"node-b",role:"node",host:"10.0.0.12",os:"Ubuntu 24.04",status:"degraded",version:"2.8.1",lastSeen:"48s ago",cpu:71,mem:84,disk:67,why:"ClickHouse merge backlog rising"}
+    ];
+    this.CONTAINERS={
+      "node-a":[["ingest",12,"180 MB","healthy"],["api",18,"320 MB","healthy"],["web",6,"140 MB","healthy"],["worker",22,"410 MB","healthy"],["identity-job",9,"260 MB","healthy"],["postgres",14,"1.2 GB","healthy"],["clickhouse",31,"2.4 GB","healthy"],["caddy",3,"60 MB","healthy"],["redis",5,"120 MB","healthy"]],
+      "node-b":[["ingest",16,"210 MB","healthy"],["api",21,"360 MB","healthy"],["web",7,"150 MB","healthy"],["worker",28,"480 MB","healthy"],["identity-job",11,"280 MB","healthy"],["postgres",19,"1.4 GB","healthy"],["clickhouse",62,"3.6 GB","degraded"],["caddy",4,"64 MB","healthy"],["redis",6,"130 MB","healthy"]],
+      "witness":[["caddy",2,"48 MB","healthy"],["redis-sentinel",3,"70 MB","healthy"],["ch-keeper",4,"110 MB","healthy"],["pg-witness",2,"40 MB","healthy"]]
+    };
+    this.LOGS=[
+      ["12:04:51","info","caddy: serving app.adpix.io · 200 GET /api/health 4ms"],
+      ["12:04:51","info","api: request id=7f3a route=/v1/events status=200 18ms"],
+      ["12:04:52","info","ingest: flushed 1,284 events to clickhouse buffer"],
+      ["12:04:52","debug","worker: attribution batch 318 · 0 retries"],
+      ["12:04:53","warn","clickhouse: merge backlog 312 parts (threshold 256)"],
+      ["12:04:53","info","postgres: checkpoint complete · 142 buffers written"],
+      ["12:04:54","info","identity-job: stitched 96 anon→user links to CRM"],
+      ["12:04:54","info","redis: sentinel ok · master node-a:6379"],
+      ["12:04:55","error","clickhouse: too many parts, delaying INSERT 250ms"],
+      ["12:04:55","info","api: request id=7f3b route=/v1/track status=204 6ms"],
+      ["12:04:56","info","caddy: TLS cert app.adpix.io valid 14d"],
+      ["12:04:56","debug","ingest: backpressure 0.0 · queue depth 4"],
+      ["12:04:57","info","web: prerendered /dashboard in 22ms"],
+      ["12:04:57","warn","worker: ROAS recompute lag 8s on channel paid_search"],
+      ["12:04:58","info","postgres: streaming replication lag 0.4s to node-b"],
+      ["12:04:58","info","api: request id=7f3c route=/v1/funnels status=200 41ms"]
+    ];
+    this.DIAG=[["TCP port 22 reachable","24 ms","pass"],["SSH host key","ed25519 accepted","pass"],["Authentication","publickey","pass"],["OS & kernel","Ubuntu 24.04 · 6.8","pass"],["Resources","8 vCPU · 16 GB · 320 GB","pass"],["Docker engine","27.1 present","pass"],["Ports 80 / 443 free","available","pass"],["Clock skew","+0.3s · NTP ok","warn"]];
+    this.DEPLOYHIST=[["v2.8.1","deployed","12:58","sara.m","success"],["v2.8.0","deployed","yesterday","ci-bot","success"],["v2.7.4","rolled back","3d ago","ci-bot","failed"],["v2.7.3","deployed","5d ago","sara.m","success"]];
+    this.QUORUM=[["PostgreSQL","node-a primary · node-b standby","witness arbiter","healthy"],["Redis","node-a master · node-b replica","3× Sentinel","healthy"],["ClickHouse","node-a r1 · node-b r2","ch-keeper quorum","degraded"]];
+    this.DNS=[["app.adpix.io","A","203.0.113.10","300",true],["api.adpix.io","A","203.0.113.10","300",true],["adpix.io","MX","10 mail.adpix.io","3600",false],["_acme-challenge","TXT","verify=8fK2…","60",false],["vip.adpix.io","A","203.0.113.10","60",false]];
+    this.PROBES=[["/","app web","200","42 ms","healthy"],["/api/health","api","200","11 ms","healthy"],["/api/track","ingest","204","8 ms","healthy"],["/grafana","monitoring","200","63 ms","healthy"]];
+    this.CERTS=[["app.adpix.io","14 days","warn"],["api.adpix.io","68 days","ok"],["vip.adpix.io","68 days","ok"]];
+    this.FINDINGS=[["SSH password auth disabled","pass","Key-only access enforced on all nodes."],["Firewall default-deny","pass","Only 80 / 443 / 22 exposed; VIP stays internal."],["Secrets encrypted at rest","pass","Docker secrets + age-encrypted env files."],["Automatic security updates","warn","unattended-upgrades is not enabled on node-b."],["Containers running as root","warn","2 of 9 services run as uid 0."],["Off-host backup encryption","fail","node-b full backup is replicated unencrypted."]];
+    this.USERS=[["Sara Mehrabi","sara.m@adpix.io","owner"],["Omid Karimi","omid.k@adpix.io","operator"],["CI Bot","ci@adpix.io","operator"],["Lena Voss","lena.v@adpix.io","viewer"]];
+    this.WEBHOOKS=[["Slack #ops","hooks.slack.com/services/…","all jobs",true],["PagerDuty","events.pagerduty.com/v2/…","failures only",true],["Email digest","ops@adpix.io","daily",false]];
+    this.DBSTATS={
+      postgres:[["Connections","82 / 200","ok"],["Cache hit ratio","99.2%","ok"],["Replication lag","0.4 s","ok"],["Transactions / s","1,240","ok"],["Dead tuples","2.1%","ok"],["Disk used","54%","ok"]],
+      clickhouse:[["Active parts","312","warn"],["Merge backlog","4 merges","warn"],["Inserts / s","18,400","ok"],["Compression","11.2×","ok"],["Replication queue","2","ok"],["Disk used","67%","warn"]]
+    };
+    this.TUNE={
+      postgres:[["shared_buffers","2 GB","4 GB"],["effective_cache_size","6 GB","12 GB"],["max_connections","200","300"],["work_mem","16 MB","32 MB"],["wal_buffers","16 MB","64 MB"]],
+      clickhouse:[["max_threads","8","16"],["background_pool_size","8","16"],["parts_to_throw_insert","300","600"],["merge_max_block_size","8192","16384"]]
+    };
+    this.BACKUPS=[
+      ["node-a","postgres","1.8 GB","2m",true,true],
+      ["node-a","clickhouse","9.2 GB","2m",true,true],
+      ["node-b","postgres","1.7 GB","1h",true,true],
+      ["node-b","clickhouse","8.9 GB","1h",true,false],
+      ["node-a","full","12.4 GB","6h",true,true],
+      ["node-b","full","11.8 GB","yesterday",false,true]
+    ];
+    this.AUDIT=[
+      ["sara.m","operator","Created verified backup","node-a · postgres","12:02","success"],
+      ["ci-bot","automation","Rolling deploy v2.8.1","cluster prod","11:58","success"],
+      ["omid.k","owner","Updated retention policy","clickhouse · 12mo","11:40","success"],
+      ["sara.m","operator","Failover dry-run","postgres primary","10:21","success"],
+      ["ci-bot","automation","Renewed TLS certificate","app.adpix.io","09:00","success"],
+      ["viewer","viewer","Attempted secret reveal","settings","08:47","denied"],
+      ["omid.k","owner","Removed node node-c","cluster prod","yesterday","success"]
+    ];
+    this._jobSeq = 3923;
+    this.state = {
+      route:"dashboard",
+      theme: props.theme || "light",
+      locale: props.locale || "en",
+      sidebarCollapsed:false,
+      clusterIdx:0,
+      drawerOpen:false,
+      paletteOpen:false,
+      paletteQuery:"",
+      logSearch:"", logFollow:true,
+      modal:null,
+      confirmText:"",
+      toasts:[],
+      jobs:[
+        {id:"j-3921",title:"Rolling deploy v2.8.1",target:"cluster prod",kind:"deploy",status:"running",progress:62,when:"now",log:["› deploy v2.8.1 started","✓ node-a drained from VIP","✓ node-a pulled image · health ok","› node-b draining…"]},
+        {id:"j-3922",title:"ClickHouse OPTIMIZE",target:"node-b",kind:"db",status:"queued",progress:0,when:"queued",log:[]},
+        {id:"j-3920",title:"Verified backup · postgres",target:"node-a",kind:"backup",status:"done",progress:100,when:"2m ago",log:["✓ pg_dump complete · 1.8 GB","✓ checksum verified","✓ uploaded to off-host s3://adpix-backups"]}
+      ]
+    };
+    this.clusters = [{name:"prod",region:"eu-west"},{name:"staging",region:"us-east"}];
+    this._logPool = {
+      deploy:["✓ image pulled","✓ migrations applied","› draining node from VIP","✓ health probe 200 OK","› rejoining VIP","✓ container up"],
+      backup:["› snapshotting volume","✓ pg_dump streaming","✓ checksum verified","› uploading to off-host","✓ retention pruned"],
+      db:["› acquiring lock","✓ merging parts","✓ vacuum analyze","✓ stats refreshed"],
+      restore:["⚠ stopping services","› downloading snapshot","✓ checksum ok","› replaying WAL","✓ services restarted"],
+      generic:["› working…","✓ step complete","✓ verified"]
+    };
+  }
+  componentDidMount(){
+    this._tick = setInterval(()=>this._advance(), 750);
+    this._key = (e)=>{
+      const k=(e.key||"").toLowerCase();
+      if((e.metaKey||e.ctrlKey)&&k==="k"){e.preventDefault();this.setState(s=>({paletteOpen:!s.paletteOpen,paletteQuery:""}));}
+      else if(k==="escape"){this.setState({paletteOpen:false,modal:null,drawerOpen:false});}
+    };
+    window.addEventListener("keydown",this._key);
+  }
+  componentWillUnmount(){ clearInterval(this._tick); clearInterval(this._diagTimer); window.removeEventListener("keydown",this._key); }
+  _startDiag(){ clearInterval(this._diagTimer); this.setState({wizDiag:0,wizDiagRunning:true}); this._diagTimer=setInterval(()=>{ this.setState(s=>{ const n=(s.wizDiag||0)+1; if(n>=this.DIAG.length){ clearInterval(this._diagTimer); return {wizDiag:this.DIAG.length,wizDiagRunning:false}; } return {wizDiag:n}; }); },420); }
+  _advance(){
+    let changed=false;
+    const jobs = this.state.jobs.map(j=>{
+      if(j.status!=="running") return j;
+      changed=true;
+      const inc = 4+Math.floor(Math.random()*9);
+      const pool = this._logPool[j.kind]||this._logPool.generic;
+      const np = Math.min(100, j.progress+inc);
+      const log = j.log.slice();
+      if(Math.random()>0.35) log.push(pool[Math.floor(Math.random()*pool.length)]);
+      if(np>=100){ log.push("✓ done"); this._queueToast(j.title+" complete","pos"); return {...j,progress:100,status:"done",when:"just now",log}; }
+      return {...j,progress:np,log:log.slice(-7)};
+    });
+    if(changed) this.setState({jobs});
+  }
+  _queueToast(msg,tone){
+    const id="to-"+Date.now()+Math.random();
+    this.setState(s=>({toasts:[...s.toasts,{id,msg,tone}]}));
+    setTimeout(()=>this.setState(s=>({toasts:s.toasts.filter(t=>t.id!==id)})),3600);
+  }
+  go=(id)=>{ this.setState({route:id,paletteOpen:false}); }
+  toggleSidebar=()=>this.setState(s=>({sidebarCollapsed:!s.sidebarCollapsed}));
+  toggleTheme=()=>this.setState(s=>({theme:s.theme==="light"?"dark":"light"}));
+  toggleLocale=()=>this.setState(s=>({locale:s.locale==="en"?"fa":"en"}));
+  cycleCluster=()=>this.setState(s=>({clusterIdx:(s.clusterIdx+1)%this.clusters.length}));
+  openDrawer=()=>this.setState({drawerOpen:true});
+  closeDrawer=()=>this.setState({drawerOpen:false});
+  openPalette=()=>this.setState({paletteOpen:true,paletteQuery:""});
+  closePalette=()=>this.setState({paletteOpen:false});
+  onPaletteInput=(e)=>this.setState({paletteQuery:e.target.value});
+  closeModal=()=>this.setState({modal:null,confirmText:""});
+  onConfirmInput=(e)=>this.setState({confirmText:e.target.value});
+  stop=(e)=>{ e.stopPropagation(); };
+  runJob=(spec)=>{
+    const id="j-"+(this._jobSeq++);
+    const job={id,title:spec.title,target:spec.target,kind:spec.kind||"generic",status:"running",progress:5,when:"now",log:["› "+spec.title+" started"]};
+    this.setState(s=>({jobs:[job,...s.jobs],drawerOpen:true}));
+    this._queueToast(spec.title+" queued","brand");
+  }
+  cancelJob=(id)=>{
+    this.setState(s=>({jobs:s.jobs.map(j=>j.id===id?{...j,status:"failed",when:"cancelled",log:[...j.log,"✕ cancelled by operator"]}:j)}));
+    this._queueToast("Job cancelled","warn");
+  }
+  openConfirm=(spec)=>this.setState({modal:spec,confirmText:""});
+  confirmAction=()=>{
+    const m=this.state.modal;
+    if(!m || this.state.confirmText!==m.confirmWord) return;
+    this.setState({modal:null,confirmText:""});
+    if(m.action) this.runJob(m.action);
+  }
+  copy=(text,label)=>{ try{navigator.clipboard&&navigator.clipboard.writeText(text);}catch(e){} this._queueToast((label||"Copied")+" to clipboard","pos"); }
+
+  onLogSearch=(e)=>this.setState({logSearch:e.target.value});
+  toggleFollow=()=>this.setState(s=>({logFollow:!s.logFollow}));
+  tabBackupList=()=>this.setState({backupTab:"list"});
+  tabBackupSchedule=()=>this.setState({backupTab:"schedule"});
+  onCreateBackup=()=>this.runJob({title:"Verified backup · all",target:"cluster prod",kind:"backup"});
+  onSaveSchedule=()=>this._queueToast("Backup schedule saved","pos");
+  tabPg=()=>this.setState({dbTab:"postgres"});
+  tabCh=()=>this.setState({dbTab:"clickhouse"});
+  onOptimize=()=>this.runJob({title:"OPTIMIZE "+(this.state.dbTab||"postgres"),target:"node-a · node-b",kind:"db"});
+  onApplyTuning=()=>this.runJob({title:"Apply "+(this.state.dbTab||"postgres")+" tuning",target:"cluster prod",kind:"db"});
+  onUpdate=()=>this.runJob({title:"Update to latest",target:"cluster prod",kind:"deploy"});
+  onRollback=()=>this.runJob({title:"Rollback to v2.8.0",target:"cluster prod",kind:"deploy"});
+  onBlueGreen=()=>this.runJob({title:"Blue-green deploy",target:"cluster prod",kind:"deploy"});
+  onStandupHa=()=>this.runJob({title:"Stand up HA",target:"cluster prod",kind:"generic"});
+  onVerifyDns=()=>this._queueToast(this.state.locale==="fa"?"همه رکوردها به‌درستی resolve شدند":"All records resolve correctly","pos");
+  revealToken=(id)=>this.setState(s=>({tokensRevealed:Object.assign({},s.tokensRevealed,{[id]:true})}));
+  onHarden=()=>this.runJob({title:"Security harden (dry-run)",target:"cluster prod",kind:"generic"});
+  onPatch=()=>this.runJob({title:"Apply security patches",target:"cluster prod",kind:"generic"});
+  onAddUser=()=>this._queueToast(this.state.locale==="fa"?"دعوت کاربر ارسال شد":"User invite sent","pos");
+  onRotateKey=()=>this._queueToast(this.state.locale==="fa"?"کلید API چرخانده شد":"API key rotated","pos");
+  onSendTest=()=>this._queueToast(this.state.locale==="fa"?"ایمیل آزمایشی به ops@adpix.io ارسال شد":"Test email sent to ops@adpix.io","pos");
+  onSaveSmtp=()=>this._queueToast(this.state.locale==="fa"?"تنظیمات SMTP ذخیره شد":"SMTP settings saved","pos");
+  onToggleWebhook=(name,cur)=>{this.setState(s=>{const w=Object.assign({},s.whState);w[name]=!cur;return{whState:w};});this._queueToast(this.state.locale==="fa"?"کانال هشدار به‌روزرسانی شد":"Alert channel updated","brand");};
+  onFailover=()=>{const isFa=this.state.locale==="fa";this.openConfirm({title:(isFa?"تعویض اضطراری · ":"Promote standby · ")+"node-b",body:isFa?"این عملیات node-b را به پرایمری Postgres ترفیع می‌دهد و VIP را جابه‌جا می‌کند. اتصالات فعال در حین جابه‌جایی قطع می‌شوند.":"This promotes node-b to Postgres primary and moves the VIP. Active connections are dropped during the switchover.",impact:[{label:isFa?"پرایمری جدید":"New primary",value:"node-b",color:"var(--c-text)"},{label:isFa?"قطعی":"Disruption",value:"~15s",color:"var(--c-warn)"},{label:"VIP",value:"203.0.113.10",color:"var(--c-text)"}],confirmHint:isFa?"برای تأیید node-b را تایپ کنید:":"Type node-b to confirm:",confirmWord:"node-b",cta:isFa?"اجرای تعویض":"Run failover",action:{title:"Failover to node-b",target:"postgres primary",kind:"generic"}});};
+  onRetention=()=>{const db=this.state.dbTab||"postgres";const isFa=this.state.locale==="fa";const rows=db==="clickhouse"?"~12.4M":"~3.2M";const sz=db==="clickhouse"?"8.1 GB":"2.1 GB";this.openConfirm({title:(isFa?"اعمال نگه‌داری · ":"Apply retention · ")+db,body:isFa?"این عملیات همه پارتیشن‌های قدیمی‌تر از ۱۲ ماه را برای همیشه حذف می‌کند و داده قابل بازیابی نیست.":("This permanently drops all "+db+" partitions older than 12 months. The data cannot be recovered."),impact:[{label:isFa?"ردیف‌های حذف‌شده":"Rows deleted",value:rows,color:"var(--c-neg)"},{label:isFa?"فضای آزادشده":"Space freed",value:sz,color:"var(--c-text)"},{label:isFa?"بازه":"Cutoff",value:"> 12 "+(isFa?"ماه":"months"),color:"var(--c-text)"}],confirmHint:isFa?"برای تأیید DELETE را تایپ کنید:":"Type DELETE to confirm:",confirmWord:"DELETE",cta:isFa?"اعمال نگه‌داری":"Apply retention",action:{title:"Apply "+db+" retention TTL",target:"cluster prod",kind:"db"}});};
+  openWizard=()=>{clearInterval(this._diagTimer);this.setState({wizardOpen:true,wizardStep:0,wizardHost:"",wizardRole:"node",wizDiag:0,wizDiagRunning:false});};
+  closeWizard=()=>this.setState({wizardOpen:false});
+  onWizHost=(e)=>this.setState({wizardHost:e.target.value});
+  wizBack=()=>this.setState(s=>({wizardStep:Math.max(0,(s.wizardStep||0)-1)}));
+  wizNext=()=>{
+    const st=this.state.wizardStep||0;
+    if(st>=3){ this.setState({wizardOpen:false}); this.runJob({title:"Add server "+(this.state.wizardHost||"node-c"),target:(this.state.wizardHost||"10.0.0.13"),kind:"generic"}); }
+    else { this.setState(s=>({wizardStep:(s.wizardStep||0)+1})); if(st===0) this._startDiag(); }
+  }
+  _meta(status){
+    const m={
+      healthy:{label:"Healthy",fa:"سالم",color:"var(--c-pos)",bg:"var(--c-pos-bg)"},
+      degraded:{label:"Degraded",fa:"کاهش‌یافته",color:"var(--c-warn)",bg:"var(--c-warn-bg)"},
+      down:{label:"Down",fa:"از کار افتاده",color:"var(--c-neg)",bg:"var(--c-neg-bg)"},
+      idle:{label:"Idle",fa:"بی‌کار",color:"var(--c-idle)",bg:"var(--c-idle-bg)"}
+    };
+    return m[status]||m.idle;
+  }
+  _jobMeta(status){
+    const m={running:{label:"Running",color:"var(--c-brand)",bg:"var(--c-brand-tint)"},queued:{label:"Queued",color:"var(--c-idle)",bg:"var(--c-idle-bg)"},done:{label:"Done",color:"var(--c-pos)",bg:"var(--c-pos-bg)"},failed:{label:"Failed",color:"var(--c-neg)",bg:"var(--c-neg-bg)"}};
+    return m[status]||m.queued;
+  }
+  _metricColor(v){ return v>=80?"var(--c-neg)":v>=65?"var(--c-warn)":"var(--c-brand)"; }
+
+  renderVals(){
+    const s=this.state;
+    const L=this.STR[s.locale]||this.STR.en;
+    const isFa=s.locale==="fa";
+    const collapsed=s.sidebarCollapsed;
+    const tr=(id)=>L.nav[id]||this.STR.en.nav[id]||id;
+
+    const navGroups=this.NAV.map(g=>({
+      label:(L.grp[g.key]||g.key),
+      items:g.items.map(it=>{
+        const active = s.route===it.id || (it.id==="servers"&&s.route==="server-detail");
+        return {
+          label:tr(it.id), iconPath:this.ICONS[it.icon],
+          active, onClick:()=>this.go(it.id),
+          bg: active?"var(--c-brand-tint)":"transparent",
+          fg: active?"var(--c-brand)":"var(--c-text)",
+          weight: active?600:500,
+          badge: it.badge||"",
+          badgeBg: it.badge==="!"?"var(--c-warn)":(active?"var(--c-brand)":"var(--c-sunken)"),
+          badgeFg: it.badge==="!"?"#fff":(active?"#fff":"var(--c-muted)")
+        };
+      })
+    }));
+
+    const nodes=this.servers;
+    const counts={healthy:0,degraded:0,down:0};
+    nodes.forEach(n=>counts[n.status]!==undefined&&counts[n.status]++);
+    const runningJobs=s.jobs.filter(j=>j.status==="running").length;
+
+    const healthCards=[
+      {label:isFa?"سالم":"Healthy",value:String(counts.healthy),sub:isFa?"سرور":"servers",color:"var(--c-pos)",valColor:"var(--c-text)"},
+      {label:isFa?"کاهش‌یافته":"Degraded",value:String(counts.degraded),sub:isFa?"نیازمند توجه":"need attention",color:"var(--c-warn)",valColor:"var(--c-text)"},
+      {label:isFa?"از کار افتاده":"Down",value:String(counts.down),sub:isFa?"بحرانی":"critical",color:"var(--c-neg)",valColor:"var(--c-text)"},
+      {label:isFa?"کارهای فعال":"Active jobs",value:String(runningJobs),sub:isFa?"در حال اجرا":"running",color:"var(--c-brand)",valColor:"var(--c-text)"}
+    ];
+
+    const nodeRows=nodes.map(n=>{
+      const meta=this._meta(n.status);
+      return {
+        name:n.name, role:n.role.toUpperCase(), statusLabel:isFa?meta.fa:meta.label, color:meta.color, bg:meta.bg,
+        onClick:()=>this.setState({route:"server-detail",selectedServer:n.id}),
+        metrics:[
+          {label:"CPU",val:n.cpu,color:this._metricColor(n.cpu)},
+          {label:"MEM",val:n.mem,color:this._metricColor(n.mem)},
+          {label:"DISK",val:n.disk,color:this._metricColor(n.disk)}
+        ]
+      };
+    });
+
+    const topo={
+      witnessColor:this._meta("healthy").color,
+      nodeAColor:this._meta("healthy").color,
+      nodeBColor:this._meta("degraded").color
+    };
+
+    const jobView=(j)=>{
+      const jm=this._jobMeta(j.status);
+      return {...j, statusLabel:jm.label, color:jm.color, bg:jm.bg,
+        pulse: j.status==="running"?"animation:pulse-dot 1.3s infinite":"",
+        cursor: j.status==="running"?"inline":"none",
+        cancelable: j.status==="running"||j.status==="queued",
+        onCancel:()=>this.cancelJob(j.id)
+      };
+    };
+    const recentJobs=s.jobs.slice(0,4).map(jobView);
+    const drawerJobs=s.jobs.map(jobView);
+
+    const alerts=[
+      {title:"node-b memory at 84%",why:"ClickHouse merge backlog rising — parts 312 / merges 4",fix:isFa?"اجرای OPTIMIZE":"Run OPTIMIZE",when:"3m",color:"var(--c-warn)",onFix:()=>this.runJob({title:"ClickHouse OPTIMIZE",target:"node-b",kind:"db"})},
+      {title:"TLS cert for app.adpix.io",why:"Expires in 14 days — auto-renew scheduled via Caddy",fix:isFa?"تمدید اکنون":"Renew now",when:"1h",color:"var(--c-warn)",onFix:()=>this.runJob({title:"Renew TLS cert",target:"caddy · node-a",kind:"generic"})}
+    ];
+
+    // command palette
+    const screens=this.NAV.flatMap(g=>g.items).map(it=>({type:"screen",id:it.id,label:tr(it.id),iconPath:this.ICONS[it.icon]}));
+    const serverItems=this.servers.map(n=>({type:"server",id:n.id,label:n.name,iconPath:this.ICONS.servers}));
+    const actions=[
+      {type:"action",label:isFa?"پشتیبان‌گیری از همه سرورها":"Backup all servers",iconPath:this.ICONS.backups,run:()=>this.runJob({title:"Backup all servers",target:"cluster prod",kind:"backup"})},
+      {type:"action",label:isFa?"استقرار آخرین نسخه":"Deploy latest version",iconPath:this.ICONS.deploys,run:()=>this.runJob({title:"Rolling deploy",target:"cluster prod",kind:"deploy"})},
+      {type:"action",label:isFa?"تغییر پوسته":"Toggle theme",iconPath:this.ICONS.settings,run:this.toggleTheme}
+    ];
+    const q=s.paletteQuery.trim().toLowerCase();
+    const all=[...screens,...serverItems,...actions];
+    const filtered=q?all.filter(x=>x.label.toLowerCase().includes(q)):all.slice(0,7);
+    const kindLabel={screen:isFa?"رفتن به":"Go to screen",server:isFa?"سرور":"Server",action:isFa?"عملیات":"Quick action"};
+    const paletteResults=filtered.map((x)=>({
+      label:x.label, iconPath:x.iconPath, kind:kindLabel[x.type], hint:x.type==="screen"?"↵":"",
+      bg:"transparent",
+      onPick: x.type==="screen" ? ()=>this.go(x.id) : x.type==="server" ? ()=>this.setState({route:"server-detail",selectedServer:x.id,paletteOpen:false}) : ()=>{ this.setState({paletteOpen:false}); x.run(); }
+    }));
+
+    const toasts=s.toasts.map(t=>({...t,color:t.tone==="pos"?"var(--c-pos)":t.tone==="warn"?"var(--c-warn)":t.tone==="neg"?"var(--c-neg)":"var(--c-brand)"}));
+
+    const m=s.modal;
+    const matches = m && s.confirmText===m.confirmWord;
+    const cl=this.clusters[s.clusterIdx];
+    // --- Servers + wizard ---
+    const serverRows=this.servers.map(n=>{const meta=this._meta(n.status);return{name:n.name,roleLabel:isFa?(n.role==="witness"?"شاهد":"گره"):(n.role==="witness"?"Witness":"Node"),host:n.host,os:n.os,statusLabel:isFa?meta.fa:meta.label,color:meta.color,bg:meta.bg,lastSeen:n.lastSeen,onOpen:()=>this.setState({route:"server-detail",selectedServer:n.id})};});
+    const th={name:isFa?"نام":"Name",role:isFa?"نقش":"Role",host:isFa?"میزبان":"Host",os:isFa?"سیستم‌عامل":"OS",status:isFa?"وضعیت":"Status",lastSeen:isFa?"آخرین بازدید":"Last seen",server:isFa?"سرور":"Server",type:isFa?"نوع":"Type",size:isFa?"حجم":"Size",age:isFa?"سن":"Age",verified:isFa?"تأیید":"Verified",offHost:isFa?"خارج میزبان":"Off-host",actions:isFa?"اقدامات":"Actions"};
+    const ws=s.wizardStep||0;
+    const wsL=isFa?["اتصال","تأیید SSH","نقش","مجوز کلید"]:["Connect","Verify SSH","Role","Authorize"];
+    const wizSteps=wsL.map((label,i)=>({num:String(i+1),label,barColor:i<=ws?"var(--c-brand)":"var(--c-sunken)",labelColor:i===ws?"var(--c-brand)":"var(--c-muted)",weight:i===ws?"600":"400"}));
+    const wizHeads=isFa?["به سرور متصل شوید","در حال تأیید دسترسی SSH","نقش سرور را انتخاب کنید","کلید مجاز شد"]:["Connect to the server","Verifying SSH access","Choose the server role","Key authorized"];
+    const wizDescs=isFa?["میزبان و اعتبارنامه‌های SSH را وارد کنید. AdPix فقط از طریق SSH متصل می‌شود.","AdPix در حال تست اتصال و جمع‌آوری اطلاعات میزبان است.","این تعیین می‌کند سرور چه چیزی را در خوشه اجرا کند.","سرور آماده پیوستن به خوشه است."]:["Enter the host and SSH credentials. AdPix connects over SSH only — there is no agent.","AdPix is testing connectivity and collecting host facts.","This determines what the server runs in the cluster.","The server is ready to join the cluster."];
+    const roleDefs=[{id:"node",title:isFa?"گره":"Node",desc:isFa?"اجرای کانتینرها، پایگاه‌داده و سرویس‌دهی ترافیک.":"Runs containers, databases and serves traffic via the VIP."},{id:"witness",title:isFa?"شاهد":"Witness",desc:isFa?"فقط رأی سوم برای حد نصاب — داده‌ای نگه نمی‌دارد.":"Quorum 3rd-vote only — holds no data, tiny footprint."}];
+    const wizRole=s.wizardRole||"node";
+    const wizRoles=roleDefs.map(r=>({title:r.title,desc:r.desc,onPick:()=>this.setState({wizardRole:r.id}),border:wizRole===r.id?"var(--c-brand)":"var(--c-border)",bg:wizRole===r.id?"var(--c-brand-tint)":"var(--c-card)",dotBorder:wizRole===r.id?"var(--c-brand)":"var(--c-border)",dotFill:wizRole===r.id?"var(--c-brand)":"transparent"}));
+    const diagN=s.wizDiag||0, diagRunning=!!s.wizDiagRunning, diagTotal=this.DIAG.length, diagFinished=!diagRunning;
+    const diagCM={pass:{c:"var(--c-pos)",icon:"✓"},warn:{c:"var(--c-warn)",icon:"!"}};
+    const wizDiagChecks=this.DIAG.map((c,i)=>{let st;if(diagFinished||i<diagN)st=c[2];else if(i===diagN)st="run";else st="pending";const isRun=st==="run",isPend=st==="pending";const cm=diagCM[st]||{c:"var(--c-hint)",icon:""};return{label:c[0],detail:isPend?"":(isRun?(isFa?"در حال بررسی…":"checking…"):c[1]),color:cm.c,icon:cm.icon,ringColor:isPend?"var(--c-border)":(isRun?"var(--c-brand)":cm.c),spinnerShow:isRun?"block":"none",iconShow:(isRun||isPend)?"none":"block",opacity:isPend?"0.45":"1"};});
+    const diagProgress=diagFinished?100:Math.round(diagN/diagTotal*100);
+    const diagLabel=diagFinished?(isFa?"اتصال تأیید شد":"Connection verified"):(isFa?"در حال اجرای تشخیص اتصال…":"Running connection diagnostics…");
+    // --- Server detail ---
+    const selId=s.selectedServer||"node-a";
+    const selServer=this.servers.find(x=>x.id===selId)||this.servers[1];
+    const sdM=this._meta(selServer.status);
+    const conts=(this.CONTAINERS[selId]||[]).map(c=>{const cm=this._meta(c[3]);return{name:c[0],cpu:c[1],ram:c[2],state:c[3]==="healthy"?(isFa?"در حال اجرا":"running"):(isFa?"کاهش‌یافته · بک‌لاگ":"degraded · backlog"),color:cm.color,pulse:c[3]==="healthy"?"animation:pulse-dot 2.2s infinite":"",onRestart:()=>this.runJob({title:"Restart "+c[0],target:selServer.name,kind:"generic"}),onStop:()=>this.runJob({title:"Stop "+c[0],target:selServer.name,kind:"generic"})};});
+    const runningCount=conts.filter(c=>c.color===this._meta("healthy").color).length;
+    const gauges=[
+      {label:"CPU",value:selServer.cpu+"%",pct:selServer.cpu,color:this._metricColor(selServer.cpu)},
+      {label:"Memory",value:selServer.mem+"%",pct:selServer.mem,color:this._metricColor(selServer.mem)},
+      {label:"Disk",value:selServer.disk+"%",pct:selServer.disk,color:this._metricColor(selServer.disk)},
+      {label:isFa?"آپ‌تایم":"Uptime",value:"38d",pct:100,color:"var(--c-brand)"}
+    ];
+    const lq=(s.logSearch||"").toLowerCase();
+    const lvlC={error:"var(--c-neg)",warn:"var(--c-warn)",info:"var(--c-pos)",debug:"var(--c-hint)"};
+    const logLines=this.LOGS.filter(l=>!lq||l[2].toLowerCase().indexOf(lq)>-1).map(l=>({ts:l[0],lvl:l[1],msg:l[2],lvlColor:lvlC[l[1]]||"var(--c-muted)"}));
+    // --- Backups ---
+    const bkTab=s.backupTab||"list";
+    const typeMeta={postgres:{c:"var(--c-brand)",b:"var(--c-brand-tint)",l:"pg"},clickhouse:{c:"var(--c-warn)",b:"var(--c-warn-bg)",l:"ch"},full:{c:"#9334e6",b:"rgba(147,52,230,.12)",l:"full"}};
+    const dbTab=s.dbTab||"postgres";
+    const stDot={ok:"var(--c-pos)",warn:"var(--c-warn)",bad:"var(--c-neg)"};
+    const dbStatRows=(this.DBSTATS[dbTab]||[]).map(x=>({label:x[0],value:x[1],dot:stDot[x[2]]||stDot.ok,color:x[2]==="warn"?"var(--c-warn)":x[2]==="bad"?"var(--c-neg)":"var(--c-text)"}));
+    const tuneRows=(this.TUNE[dbTab]||[]).map(x=>({setting:x[0],before:x[1],after:x[2]}));
+    const retentionImpact=dbTab==="clickhouse"?(isFa?"این TTL به‌طور دائمی حدود ۱۲٫۴ میلیون ردیف / ۸٫۱ گیگابایت قدیمی‌تر از ۱۲ ماه را حذف می‌کند.":"This TTL permanently deletes ~12.4M rows / 8.1 GB older than 12 months."):(isFa?"این سیاست به‌طور دائمی حدود ۳٫۲ میلیون ردیف / ۲٫۱ گیگابایت قدیمی‌تر از ۱۲ ماه را حذف می‌کند.":"This policy permanently deletes ~3.2M rows / 2.1 GB older than 12 months.");
+    // --- Monitoring / Security / Settings ---
+    const probeRows=this.PROBES.map(p=>({route:p[0],service:p[1],http:p[2],ttfb:p[3],color:this._meta(p[4]).color}));
+    const certRows=this.CERTS.map(c=>({host:c[0],expires:c[1],color:c[2]==="warn"?"var(--c-warn)":"var(--c-pos)"}));
+    const findMeta={pass:{c:"var(--c-pos)",b:"var(--c-pos-bg)",icon:"✓",l:isFa?"قبول":"PASS"},warn:{c:"var(--c-warn)",b:"var(--c-warn-bg)",icon:"!",l:isFa?"هشدار":"WARN"},fail:{c:"var(--c-neg)",b:"var(--c-neg-bg)",icon:"✕",l:isFa?"ناموفق":"FAIL"}};
+    const findingRows=this.FINDINGS.map(f=>{const fm=findMeta[f[1]]||findMeta.warn;return{title:f[0],detail:f[2],label:fm.l,color:fm.c,bg:fm.b,icon:fm.icon};});
+    const fTot=this.FINDINGS.length, fPass=this.FINDINGS.filter(f=>f[1]==="pass").length, fWarn=this.FINDINGS.filter(f=>f[1]==="warn").length, fFail=this.FINDINGS.filter(f=>f[1]==="fail").length;
+    const roleMeta={owner:{c:"var(--c-brand)",b:"var(--c-brand-tint)"},operator:{c:"#9334e6",b:"rgba(147,52,230,.12)"},viewer:{c:"var(--c-muted)",b:"var(--c-sunken)"}};
+    const userRows=this.USERS.map(u=>{const rm=roleMeta[u[2]]||roleMeta.viewer;return{name:u[0],email:u[1],role:u[2],roleColor:rm.c,roleBg:rm.b,initials:u[0].split(" ").map(p=>p[0]).join("").slice(0,2).toUpperCase()};});
+    const wh=s.whState||{};
+    const webhookRows=this.WEBHOOKS.map(w=>{const en=(w[0] in wh)?wh[w[0]]:w[3];return{name:w[0],url:w[1],events:w[2],trackBg:en?"var(--c-brand)":"var(--c-border)",knobX:en?"19px":"2px",onToggle:(()=>this.onToggleWebhook(w[0],en))};});
+    const secretRows=[{key:"POSTGRES_PASSWORD"},{key:"REDIS_PASSWORD"},{key:"CLICKHOUSE_PASSWORD"},{key:"BEARER_TOKEN"}];
+    const smtpEnc=s.smtpEnc||"starttls";
+    const smtpEncOpts=[["tls","TLS"],["starttls","STARTTLS"],["none",isFa?"بدون":"None"]].map(o=>({label:o[1],onPick:()=>this.setState({smtpEnc:o[0]}),bg:smtpEnc===o[0]?"var(--c-card)":"transparent",color:smtpEnc===o[0]?"var(--c-text)":"var(--c-muted)",shadow:smtpEnc===o[0]?"var(--c-shadow-card)":"none"}));
+    // --- Deploys / HA / DNS ---
+    const ocC={success:"var(--c-pos)",failed:"var(--c-neg)"};
+    const deployHist=this.DEPLOYHIST.map(h=>({version:h[0],action:h[1]==="deployed"?(isFa?"مستقر شد":"deployed"):(isFa?"بازگردانده شد":"rolled back"),when:h[2],who:h[3],color:ocC[h[4]]||"var(--c-muted)"}));
+    const deployNodes=[{name:"witness",label:isFa?"رد شد":"skipped",color:"var(--c-idle)",progress:0,pulse:""},{name:"node-a",label:isFa?"مستقر شد":"deployed",color:"var(--c-pos)",progress:100,pulse:""},{name:"node-b",label:isFa?"در حال استقرار…":"deploying…",color:"var(--c-brand)",progress:62,pulse:"animation:pulse-dot 1.2s infinite"}];
+    const quorumRows=this.QUORUM.map(q=>{const qm=this._meta(q[3]);return{component:q[0],members:q[1],arbiter:q[2],statusLabel:isFa?qm.fa:qm.label,color:qm.color,bg:qm.bg};});
+    const dnsRows=this.DNS.map(d=>({name:d[0],type:d[1],value:d[2],ttl:d[3],proxied:d[4]?"✓":"—",proxColor:d[4]?"var(--c-pos)":"var(--c-hint)",onCopy:()=>this.copy(d[2],d[0])}));
+    const tokenVal="apx_live_7f3a9c2e8b1d4f6a0c5e";
+    const revealed=s.tokensRevealed||{};
+    const clientDefs=[{id:"claude-code",name:"Claude Code",glyph:"CC",desc:isFa?"به CLI اجازه دهید فلیت را از طریق MCP مدیریت کند.":"Let the CLI manage the fleet over MCP.",ep:"api.adpix.io"},{id:"desktop",name:"Claude Desktop",glyph:"CD",desc:isFa?"کانکتور دسکتاپ برای پرس‌وجوی تحلیل‌ها.":"Desktop connector for querying analytics.",ep:"api.adpix.io"},{id:"generic",name:isFa?"عمومی / MCP":"Generic / MCP",glyph:"{}",desc:isFa?"هر کلاینت سازگار با bearer.":"Any bearer-compatible client.",ep:"api.adpix.io"}];
+    const connectCards=clientDefs.map(c=>{const rv=!!revealed[c.id];return{name:c.name,glyph:c.glyph,desc:c.desc,endpointLabel:(isFa?"نقطه پایانی":"Endpoint")+" · "+c.ep,token:rv?tokenVal:"•••• •••• •••• 7f3a",tokenBtn:rv?(isFa?"کپی":"Copy"):(isFa?"نمایش":"Reveal"),onToken:rv?(()=>this.copy(tokenVal,"Token")):(()=>this.revealToken(c.id))};});
+    const backupRows=this.BACKUPS.map(b=>{const tm=typeMeta[b[1]]||typeMeta.full;const srv=b[0],ty=b[1];return{server:srv,type:tm.l,typeColor:tm.c,typeBg:tm.b,size:b[2],age:b[3],verified:b[4]?"✓":"—",verColor:b[4]?"var(--c-pos)":"var(--c-hint)",offHost:b[5]?"✓":"—",offColor:b[5]?"var(--c-pos)":"var(--c-hint)",onDownload:()=>this._queueToast("Preparing "+srv+" "+tm.l+" download","brand"),onRestore:()=>this.openConfirm({title:(isFa?"بازیابی ":"Restore ")+srv+" · "+tm.l,body:isFa?("این عملیات داده زنده "+ty+" روی "+srv+" را با اسنپ‌شات انتخابی بازنویسی می‌کند. سرویس‌ها دوباره راه‌اندازی می‌شوند و نوشتن‌های در حال انجام از دست می‌روند."):("This overwrites the live "+ty+" data on "+srv+" with the selected snapshot. Services restart and any in-flight writes are permanently lost."),impact:[{label:isFa?"هدف":"Target",value:srv,color:"var(--c-text)"},{label:isFa?"اسنپ‌شات":"Snapshot",value:tm.l+" · "+b[2]+" · "+b[3],color:"var(--c-text)"},{label:isFa?"توقف سرویس":"Downtime",value:"~90s",color:"var(--c-warn)"}],confirmHint:isFa?"برای تأیید نام سرور را تایپ کنید:":"Type the server name to confirm:",confirmWord:srv,cta:isFa?"بازیابی پشتیبان":"Restore backup",action:{title:"Restore "+tm.l+" backup",target:srv,kind:"restore"}})};});
+
+    return {
+      dir:isFa?"rtl":"ltr", theme:s.theme, locale:s.locale, t:L,
+      localeLabel:isFa?"فا":"EN",
+      themeIconLight: s.theme==="light"?"block":"none",
+      themeIconDark: s.theme==="dark"?"block":"none",
+      sidebarW: collapsed?"64px":"248px",
+      groupLabelDisplay: collapsed?"none":"block",
+      navTextDisplay: collapsed?"none":"block",
+      collapseIconRot: (collapsed!==isFa)?"rotate(180deg)":"none",
+      clusterName:cl.name, clusterRegion:cl.region,
+      runningDot: runningJobs>0?"block":"none",
+      navGroups, healthCards, nodeRows, topo, recentJobs, alerts,
+      alertCount:String(alerts.length),
+      dashSubtitle:isFa?("خوشه "+cl.name+" · "+cl.region+" · ۳ سرور"):("cluster "+cl.name+" · "+cl.region+" · "+nodes.length+" servers · v2.8.1"),
+      _route: s.route,
+      // routes
+      r_dashboard: s.route==="dashboard",
+      r_servers: s.route==="servers", r_serverDetail: s.route==="server-detail",
+      r_databases: s.route==="databases", r_backups: s.route==="backups",
+      r_deploys: s.route==="deploys", r_ha: s.route==="ha", r_dns: s.route==="dns",
+      r_monitoring: s.route==="monitoring", r_jobs: s.route==="jobs",
+      r_security: s.route==="security", r_settings: s.route==="settings",
+      // handlers
+      go:this.go, goServers:()=>this.go("servers"), goJobs:()=>this.go("jobs"),
+      toggleSidebar:this.toggleSidebar, toggleTheme:this.toggleTheme, toggleLocale:this.toggleLocale,
+      cycleCluster:this.cycleCluster,
+      openDrawer:this.openDrawer, closeDrawer:this.closeDrawer,
+      openPalette:this.openPalette, closePalette:this.closePalette, onPaletteInput:this.onPaletteInput,
+      paletteQuery:s.paletteQuery, paletteResults, paletteEmpty:paletteResults.length===0,
+      qaBackupAll:()=>this.runJob({title:"Backup all servers",target:"cluster prod",kind:"backup"}),
+      qaDeploy:()=>this.runJob({title:"Rolling deploy v2.8.1",target:"cluster prod",kind:"deploy"}),
+      // drawer
+      drawerJobs, drawerEmpty:drawerJobs.length===0,
+      drawerTransform: s.drawerOpen?"translateX(0)":(isFa?"translateX(-110%)":"translateX(110%)"),
+      drawerScrimOpacity: s.drawerOpen?"1":"0",
+      drawerPointer: s.drawerOpen?"auto":"none",
+      // modal
+      modal: m||{title:"",body:"",impact:[],confirmWord:"",confirmHint:"",cta:""},
+      modalDisplay: m?"flex":"none",
+      confirmText:s.confirmText, onConfirmInput:this.onConfirmInput,
+      confirmDisabled: matches?null:true,
+      confirmBtnBg: matches?"var(--c-neg)":"var(--c-neg)",
+      confirmOpacity: matches?"1":"0.45",
+      confirmCursor: matches?"pointer":"not-allowed",
+      confirmAction:this.confirmAction, closeModal:this.closeModal, stop:this.stop,
+      // palette display
+      paletteDisplay: s.paletteOpen?"flex":"none",
+      // servers + wizard
+      serverRows, th, serversSubtitle:isFa?("۳ سرور در خوشه "+cl.name):(this.servers.length+" servers in cluster "+cl.name),
+      openWizard:this.openWizard, closeWizard:this.closeWizard, onWizHost:this.onWizHost, wizBack:this.wizBack, wizNext:this.wizNext,
+      wizTransform: s.wizardOpen?"translateX(0)":(isFa?"translateX(-110%)":"translateX(110%)"),
+      wizScrimOpacity: s.wizardOpen?"1":"0", wizPointer: s.wizardOpen?"auto":"none",
+      wizSteps, wizStep0:ws===0, wizStep1:ws===1, wizStep2:ws===2, wizStep3:ws===3,
+      wizHeading:wizHeads[ws], wizDesc:wizDescs[ws], wizHost:s.wizardHost||"",
+      wizRoles, wizDiagChecks, diagProgress, diagLabel, wizBackVis: ws===0?"hidden":"visible",
+      wizNextLabel: ws>=3?L.finish:L.next,
+      // server detail
+      backArrowRot: isFa?"rotate(180deg)":"none",
+      sd:{name:selServer.name,host:selServer.host,os:selServer.os,version:selServer.version,lastSeen:selServer.lastSeen,statusLabel:isFa?sdM.fa:sdM.label,color:sdM.color,bg:sdM.bg,containers:conts,gauges,containerSummary:runningCount+"/"+conts.length+(isFa?" در حال اجرا":" running"),onBackup:()=>this.runJob({title:"Verified backup",target:selServer.name+" · full",kind:"backup"}),onRestart:()=>this.runJob({title:"Restart all services",target:selServer.name,kind:"generic"})},
+      logSearch:s.logSearch||"", onLogSearch:this.onLogSearch, toggleFollow:this.toggleFollow,
+      logLines, logsEmpty:logLines.length===0, logCursor: s.logFollow?"inline":"none",
+      // jobs & audit
+      jobsSubtitle: isFa?("۳ کار در ۲۴ ساعت گذشته"):(s.jobs.length+" jobs · "+s.jobs.filter(j=>j.status==="running").length+" running · "+s.jobs.filter(j=>j.status==="failed").length+" failed"),
+      auditRows: this.AUDIT.map(a=>{const oc={success:{l:isFa?"موفق":"success",c:"var(--c-pos)",b:"var(--c-pos-bg)"},denied:{l:isFa?"رد شد":"denied",c:"var(--c-warn)",b:"var(--c-warn-bg)"},failed:{l:isFa?"ناموفق":"failed",c:"var(--c-neg)",b:"var(--c-neg-bg)"}}[a[5]]||{l:a[5],c:"var(--c-muted)",b:"var(--c-sunken)"};return{who:a[0],role:a[1],action:a[2],args:a[3],time:a[4],outcome:oc.l,color:oc.c,bg:oc.b,initials:a[0].slice(0,2).toUpperCase()};}),
+      // backups
+      backupsSubtitle: isFa?"۶ اسنپ‌شات · ۵ تأییدشده · ۵ خارج میزبان":(this.BACKUPS.length+" snapshots · "+this.BACKUPS.filter(b=>b[4]).length+" verified · "+this.BACKUPS.filter(b=>b[5]).length+" off-host"),
+      onCreateBackup:this.onCreateBackup, onSaveSchedule:this.onSaveSchedule, tabBackupList:this.tabBackupList, tabBackupSchedule:this.tabBackupSchedule,
+      bkListActive: bkTab==="list", bkSchedActive: bkTab==="schedule",
+      bkListBg: bkTab==="list"?"var(--c-card)":"transparent", bkListColor: bkTab==="list"?"var(--c-text)":"var(--c-muted)", bkListShadow: bkTab==="list"?"var(--c-shadow-card)":"none",
+      bkSchedBg: bkTab==="schedule"?"var(--c-card)":"transparent", bkSchedColor: bkTab==="schedule"?"var(--c-text)":"var(--c-muted)", bkSchedShadow: bkTab==="schedule"?"var(--c-shadow-card)":"none",
+      backupRows,
+      followBg: s.logFollow?"var(--c-brand-tint)":"var(--c-card)", followBorder: s.logFollow?"var(--c-brand)":"var(--c-border)",
+      followColor: s.logFollow?"var(--c-brand)":"var(--c-muted)", followPulse: s.logFollow?"animation:pulse-dot 1.2s infinite":"",
+      // databases
+      dbSubtitle: isFa?"PostgreSQL 16 · ClickHouse 24.3 · پرایمری node-a":"PostgreSQL 16 · ClickHouse 24.3 · primary node-a",
+      tabPg:this.tabPg, tabCh:this.tabCh, onOptimize:this.onOptimize, onApplyTuning:this.onApplyTuning, onRetention:this.onRetention,
+      pgBg: dbTab==="postgres"?"var(--c-card)":"transparent", pgColor: dbTab==="postgres"?"var(--c-text)":"var(--c-muted)", pgShadow: dbTab==="postgres"?"var(--c-shadow-card)":"none",
+      chBg: dbTab==="clickhouse"?"var(--c-card)":"transparent", chColor: dbTab==="clickhouse"?"var(--c-text)":"var(--c-muted)", chShadow: dbTab==="clickhouse"?"var(--c-shadow-card)":"none",
+      dbStatRows, tuneRows, retentionImpact,
+      // deploys / ha / dns
+      deploySubtitle: isFa?"main · a3f9c2e · ۳ کامیت عقب · آخرین استقرار ۱۲:۵۸":"main · a3f9c2e · 3 commits behind · last deploy 12:58",
+      onUpdate:this.onUpdate, onRollback:this.onRollback, onBlueGreen:this.onBlueGreen, deployNodes, deployHist,
+      haSubtitle: isFa?"حد نصاب ۳ رأیی · VIP 203.0.113.10 · داور witness":"3-vote quorum · VIP 203.0.113.10 · witness arbiter",
+      onStandupHa:this.onStandupHa, onFailover:this.onFailover, quorumRows,
+      dnsSubtitle: isFa?"۵ رکورد · از طریق Caddy پراکسی · همه resolve":"5 records · proxied via Caddy · all resolve",
+      onVerifyDns:this.onVerifyDns, dnsRows, connectCards,
+      // monitoring / security / settings
+      monSubtitle: isFa?"۴ پروب · همه ۲xx · ۳ گواهی TLS":"4 probes · all 2xx · 3 TLS certs · 1 expiring soon",
+      probeRows, certRows,
+      secSubtitle: isFa?"۳ قبول · ۲ هشدار · ۱ ناموفق":"3 pass · 2 warn · 1 fail · last scan 11:02",
+      onHarden:this.onHarden, onPatch:this.onPatch, findingRows,
+      secPassPct: Math.round(fPass/fTot*100), secWarnPct: Math.round(fWarn/fTot*100), secFailPct: Math.round(fFail/fTot*100),
+      secScoreText: fPass+"/"+fTot+(isFa?" قبول":" pass"),
+      setSubtitle: isFa?"خوشه prod · ۴ کاربر · ۳ کانال هشدار":"cluster prod · 4 users · 3 alert channels",
+      onAddUser:this.onAddUser, onRotateKey:this.onRotateKey, userRows, webhookRows, secretRows,
+      smtpEncOpts, onSendTest:this.onSendTest, onSaveSmtp:this.onSaveSmtp,
+      toasts
+    };
+  }
+}
+</script>
+</body>
+</html>

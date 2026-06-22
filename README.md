@@ -268,6 +268,17 @@ node dist/install/cli.js --rollback                    # previous commit + rebui
 
 Host-key verification: the MCP now TOFU-pins each target's SSH host key (`~/.adpix-devops/known_hosts.json`) and aborts on a changed key — set `ADPIX_SSH_STRICT_HOSTKEY=1` to refuse any unpinned host.
 
+## Web control panel (AdPix Cloud)
+
+A self-service control panel (cPanel / DigitalOcean-style) over the MCP tools — manage the fleet, containers, backups, databases, deploys, HA, DNS and clients from a UI, no CLI. **Phase 1** (loopback) is built; see [docs/control-panel.md](docs/control-panel.md) for the full design + the Phase-2 internet-facing hardening (OIDC + WebAuthn MFA, server-side RBAC, off-host audit, mTLS).
+
+```bash
+node dist/index.js --panel [--port 8931]
+# prints:  http://127.0.0.1:8931/#token=<token>   +   ssh -L 8931:127.0.0.1:8931 <server>
+```
+
+Read-only tools run inline; mutating/slow tools become async **jobs** with live SSE log streaming, a per-target mutex, idempotency keys, cancel, and resume-after-restart (a job ledger cloned from the install-state journal). Live progress is captured for **all** tools with zero per-tool changes via a `Deps` decorator that streams redacted `exec`/`local` output. Destructive ops require a typed-confirm modal → `confirm:true`. Loopback-only, reusing the wizard guard (Host allowlist, header-token CSRF, Origin/Sec-Fetch, JSON-only) — **not** for public exposure until Phase 2.
+
 ## Hosting the MCP server on its own Ubuntu server
 
 Instead of running locally over stdio, host it as an HTTPS service.
