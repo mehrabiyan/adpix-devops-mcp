@@ -240,10 +240,32 @@ function statCards(text, eng) {
 }
 
 // ============================================================ remaining screens (faithful, tool-driven)
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// run a tool for DISPLAY: sync if read-only; if the server says it's not read-only (409), run
+// it as a (non-destructive) job and wait for the result. Returns the result text.
+async function runDisplay(tool, args = {}) {
+  try { return (await runTool(tool, args)).result; }
+  catch (e) {
+    if (e.status !== 409) throw e;
+    const { job } = await startJob(tool, args);
+    for (let i = 0; i < 80; i++) { await sleep(150); const { job: j } = await api(`/api/jobs/${job.id}`); if (j.status !== "running" && j.status !== "queued") return j.result || j.error || ""; }
+    return "timed out waiting for the job";
+  }
+}
+// friendly rendering: clean empty states instead of raw "No servers configured" errors
+function renderResult(text, body) {
+  const s = String(text || "");
+  if (/No servers (registered|configured)|ERROR \([^)]*\):\s*No servers/i.test(s)) { body.innerHTML = emptyState("No servers yet", "Add a server to populate this view.", "add"); wireEmpty(body); return; }
+  if (/No clusters? (defined|configured)/i.test(s)) { body.innerHTML = emptyState("No cluster yet", "Define a cluster — a witness plus the serving nodes.", "ha"); wireEmpty(body); return; }
+  body.innerHTML = `<pre class="out"${/^ERROR \(/.test(s) ? ' style="color:var(--c-neg)"' : ""}>${esc(s)}</pre>`;
+}
+function emptyState(title, sub, goto) { return `<div class="empty"><div style="font-weight:600;color:var(--c-text);margin-bottom:4px">${esc(title)}</div><div style="margin-bottom:14px">${esc(sub)}</div><button class="btn btn-primary btn-sm" data-empty="${goto}">${goto === "add" ? "+ Add server" : "Go to " + (STR[S.lang].nav[goto] || goto)}</button></div>`; }
+function wireEmpty(body) { const b = body.querySelector("[data-empty]"); if (b) b.onclick = () => { if (b.dataset.empty === "add") addServerWizard(); else { S.screen = b.dataset.empty; render(); } }; }
+
 function toolPanel(title, tool, args = {}) {
   const card = el(`<div style="${cardOpen}"><div style="${cardHead};display:flex;align-items:center;justify-content:space-between">${esc(title)}<button class="btn btn-sm refresh">${t("refresh")}</button></div><div class="card-pad"><div class="body"><div class="skel" style="width:70%"></div><div class="skel" style="width:50%;margin-top:8px"></div></div></div></div>`);
   const body = card.querySelector(".body");
-  const load = async () => { body.innerHTML = `<div class="skel" style="width:60%"></div>`; try { const r = await runTool(tool, args); body.innerHTML = `<pre class="out">${esc(r.result)}</pre>`; } catch (e) { body.innerHTML = `<pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre>`; } };
+  const load = async () => { body.innerHTML = `<div class="skel" style="width:60%"></div>`; try { renderResult(await runDisplay(tool, args), body); } catch (e) { body.innerHTML = `<pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre>`; } };
   card.querySelector(".refresh").onclick = load; load(); return card;
 }
 async function action(tool, args = {}) { try { const r = await startJob(tool, args); toast(`Started ${tool}`); openDrawer(r.job.id); } catch (e) { toast(e.message, true); } }
@@ -311,14 +333,36 @@ SCREENS.settings = (c) => {
 };
 
 // ============================================================ generic action card
+const SERVICES = ["ingest", "api", "web", "worker", "identity-job", "postgres", "clickhouse", "caddy", "redis"];
 function actionCardEl(name, label, destructive) {
-  const card = el(`<div style="${cardOpen};padding:16px;display:flex;flex-direction:column;gap:10px"><div style="display:flex;align-items:center;gap:8px"><strong class="mono" style="font-size:13px">${esc(name)}</strong>${destructive ? pill("destructive", "neg") : `<span class="tag">job</span>`}</div><div class="muted" style="font-size:13px;flex:1">${esc(label)}</div><div class="af"></div><button class="btn ${destructive ? "btn-danger" : "btn-primary"} btn-sm run">${ic("play", 14)} Run</button></div>`);
-  const props = (S.catalog.find((x) => x.name === name)?.params?.properties) || {}; const af = card.querySelector(".af"); af.appendChild(argForm(props));
-  card.querySelector(".run").onclick = () => { const args = readArgs(af); if (destructive) return verifyAction({ name, title: label, destructive: true }, args); action(name, args); };
+  const cat = S.catalog.find((x) => x.name === name);
+  const title = cat?.title || label;
+  const card = el(`<div style="${cardOpen};padding:16px;display:flex;flex-direction:column;gap:10px"><div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><strong style="font-size:14px">${esc(title)}</strong>${destructive ? pill("destructive", "neg") : `<span class="tag">job</span>`}</div><div class="mono muted" style="font-size:11.5px">${esc(name)}</div><div class="muted" style="font-size:12.5px;flex:1">${esc(label)}</div><div class="af"></div><button class="btn ${destructive ? "btn-danger" : "btn-primary"} btn-sm run">${ic("play", 14)} Run</button></div>`);
+  const props = (cat?.params?.properties) || {}; const af = card.querySelector(".af"); af.appendChild(argForm(props));
+  card.querySelector(".run").onclick = () => { const args = readArgs(af); if (destructive) return verifyAction({ name, title, destructive: true }, args); action(name, args); };
   return card;
 }
-function argForm(props) { const w = el(`<div></div>`); Object.entries(props).forEach(([k, sc]) => { if (k === "confirm") return; let f; if (sc.enum) f = `<select class="input" data-k="${k}"><option value="">—</option>${sc.enum.map((o) => `<option>${esc(o)}</option>`).join("")}</select>`; else if (sc.type === "boolean") f = `<select class="input" data-k="${k}" data-bool="1"><option value="">—</option><option>true</option><option>false</option></select>`; else f = `<input class="input" data-k="${k}" data-num="${sc.type === "number" || sc.type === "integer" ? 1 : ""}" placeholder="${esc(sc.type || "")}">`; w.appendChild(el(`<label class="fld"><span class="lab">${esc(k)}</span>${f}</label>`)); }); return w; }
-function readArgs(af) { const a = {}; af.querySelectorAll("[data-k]").forEach((i) => { const v = i.value.trim(); if (!v) return; a[i.dataset.k] = i.dataset.bool ? v === "true" : i.dataset.num ? Number(v) : v; }); return a; }
+function selField(k, opts, blank = "—", attrs = "") { return `<select class="input" data-k="${k}" ${attrs}><option value="">${esc(blank)}</option>${opts.map((o) => `<option>${esc(o)}</option>`).join("")}</select>`; }
+function argForm(props) {
+  const w = el(`<div></div>`);
+  const servers = (S.fleet?.nodes || []).map((n) => n.name);
+  const clusters = S.fleet?.cluster?.name ? [S.fleet.cluster.name] : [];
+  Object.entries(props).forEach(([k, sc]) => {
+    if (k === "confirm") return;
+    let f;
+    if (sc.enum) f = selField(k, sc.enum);
+    else if (sc.type === "boolean") f = selField(k, ["true", "false"], "—", `data-bool="1"`);
+    else if (k === "server" && servers.length) f = selField(k, servers, "(default server)");
+    else if (k === "cluster" && clusters.length) f = selField(k, clusters, "(default cluster)");
+    else if (k === "service") f = selField(k, SERVICES, "select a service");
+    else if (sc.type === "number" || sc.type === "integer") f = `<input class="input" type="number" data-k="${k}" data-num="1" placeholder="${esc(sc.description ? "" : "number")}">`;
+    else f = `<input class="input" data-k="${k}" ${sc.type === "array" ? `data-arr="1"` : ""} placeholder="${esc(sc.type === "array" ? "comma, separated" : "")}">`;
+    const hint = sc.description ? ` · <span class="hint" style="font-weight:400">${esc(sc.description.slice(0, 52))}</span>` : "";
+    w.appendChild(el(`<label class="fld"><span class="lab">${esc(k)}${hint}</span>${f}</label>`));
+  });
+  return w;
+}
+function readArgs(af) { const a = {}; af.querySelectorAll("[data-k]").forEach((i) => { const v = i.value.trim(); if (!v) return; a[i.dataset.k] = i.dataset.arr ? v.split(",").map((s) => s.trim()).filter(Boolean) : i.dataset.bool ? v === "true" : i.dataset.num ? Number(v) : v; }); return a; }
 
 // ============================================================ slide-in panels + wizard
 function slideIn(width = 440) {
@@ -335,16 +379,19 @@ function wizard(title, steps, onFinish) {
     panel.innerHTML = `<div class="drawer-head"><strong>${esc(title)}</strong><button class="icon-btn dc">${ic("x", 16)}</button></div>
       <div style="padding:16px 18px 0;display:flex;gap:6px">${steps.map((s, k) => `<div style="flex:1"><div style="height:3px;border-radius:999px;background:${k <= i ? "var(--c-brand)" : "var(--c-divider)"}"></div><div style="font-size:11.5px;margin-top:6px;color:${k === i ? "var(--c-brand)" : "var(--c-hint)"};font-weight:${k === i ? 600 : 400}">${k + 1}. ${esc(s.label)}</div></div>`).join("")}</div>
       <div class="drawer-body wbody" style="padding:18px"></div>
+      <div class="werr" style="padding:0 18px 6px;color:var(--c-neg);font-size:12.5px;display:none"></div>
       <div style="display:flex;justify-content:space-between;gap:10px;padding:14px 18px;border-top:1px solid var(--c-divider);background:var(--c-sunken)">
         <button class="btn back" ${i === 0 ? "disabled" : ""}>${t("back")}</button>
         <button class="btn btn-primary nextb">${i === steps.length - 1 ? "Finish" : t("next")}</button></div>`;
     panel.querySelector(".dc").onclick = close;
     panel.querySelector(".back").onclick = () => { if (i > 0) { i--; draw(); } };
     steps[i].body(ctx, panel.querySelector(".wbody"));
+    const werr = panel.querySelector(".werr");
+    const fail = (msg) => { werr.textContent = msg; werr.style.display = "block"; const nb = panel.querySelector(".nextb"); nb.disabled = false; nb.textContent = i === steps.length - 1 ? "Finish" : t("next"); };
     panel.querySelector(".nextb").onclick = async () => {
-      const nb = panel.querySelector(".nextb"); nb.disabled = true; nb.innerHTML = `<span class="spin"></span>`;
-      try { const r = steps[i].onNext ? await steps[i].onNext(ctx) : true; if (r === true) { if (i === steps.length - 1) { await onFinish(ctx); close(); } else { i++; draw(); } } else { toast(typeof r === "string" ? r : "check the form", true); draw(); } }
-      catch (e) { toast(e.message, true); draw(); }
+      werr.style.display = "none"; const nb = panel.querySelector(".nextb"); nb.disabled = true; nb.innerHTML = `<span class="spin"></span>`;
+      try { const r = steps[i].onNext ? await steps[i].onNext(ctx) : true; if (r === true) { if (i === steps.length - 1) { await onFinish(ctx); close(); } else { i++; draw(); } } else { fail(typeof r === "string" ? r : "Please complete this step."); } }
+      catch (e) { fail(e.message); }
     };
   };
   draw();

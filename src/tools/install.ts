@@ -65,5 +65,6 @@ export const installTools: ToolDef[] = [
       const body = renderConnect({ name: "adpix-devops", url, token, domain: a.domain, port }, a.clients ?? ["claude-code"], { reveal: a.reveal });
       return a.reveal ? body : body + `\n\n(token masked — the real token lives in /etc/adpix-devops-mcp/env; pass reveal:true to inline it into a mode-600 file.)`;
     },
+    annotations: { readOnlyHint: true },
   },
 ];

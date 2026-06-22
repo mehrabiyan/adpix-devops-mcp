@@ -123,7 +123,7 @@ body[dir="rtl"] .drawer{transform:translateX(-100%)}
 @keyframes pop{from{transform:scale(.96);opacity:0}to{transform:scale(1);opacity:1}}
 
 /* faithful AdPix Cloud chrome */
-.content{max-width:1640px;margin:0 auto}
+.content{max-width:none;margin:0}
 .sidebar.collapsed .nav-item{justify-content:center}
 .sidebar.collapsed .nav-badge{display:none}
 .nav-item .label{min-width:0;overflow:hidden;text-overflow:ellipsis}

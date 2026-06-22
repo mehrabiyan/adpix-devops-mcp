@@ -16,7 +16,7 @@ import { appendAudit, readAudit, verifyChain } from "./audit.js";
 import { argsHash } from "./hash.js";
 import { resolveAccess, parseCookies, SESSION_COOKIE, type Actor, type AccessCtx } from "./access.js";
 import { buildFleet, verifyServer, parseTuneRows } from "./fleet.js";
-import { isDemo, DEMO_FLEET, DEMO_JOBS, demoDb } from "./demo.js";
+import { isDemo, DEMO_FLEET, DEMO_JOBS, demoDb, demoTool } from "./demo.js";
 
 /**
  * The control-panel HTTP server. Phase 1 (loopback job engine + SPA) + Phase 2 hardening:
@@ -156,6 +156,7 @@ export function createPanelServer(opts: PanelOpts): Server {
       if (path === "/api/wizard/verify-server" && method === "POST") {
         if (!["owner", "operator"].includes(actor.role)) { sendJson(res, 403, { error: "owner/operator only" }); return; }
         const b = await readBody(req);
+        if (isDemo()) { sendJson(res, 200, { reachable: true, fingerprint: "SHA256:DEMOd3m0F1nG3rPr1ntAbC123dEm0XyZ", detail: `ok\nroot\nLinux 6.8.0 (demo)` }); return; }
         sendJson(res, 200, await verifyServer(deps, { host: String(b.host || ""), port: Number(b.port) || 22, username: String(b.username || "root") }));
         return;
       }
@@ -171,6 +172,13 @@ export function createPanelServer(opts: PanelOpts): Server {
       if (syncM && method === "POST") {
         const tool = toolByName.get(syncM[1]); const cat = catByName.get(syncM[1]);
         if (!tool || !cat) { sendJson(res, 404, { error: `unknown tool` }); return; }
+        if (isDemo()) {
+          const d = demoTool(tool.name);
+          const b0 = await readBody(req); const p0 = z.object(tool.schema).safeParse((b0.args as Record<string, unknown>) ?? {});
+          try { sendJson(res, 200, { result: d ?? (await tool.handler(deps, p0.success ? (p0.data as Record<string, unknown>) : {})) }); }
+          catch (e) { sendJson(res, 200, { result: `ERROR (${tool.name}): ${e instanceof Error ? e.message : String(e)}`, isError: true }); }
+          return;
+        }
         if (!cat.readOnly) { sendJson(res, 409, { error: `${tool.name} is not read-only — POST it to /api/jobs` }); return; }
         const b = await readBody(req); const args = (b.args as Record<string, unknown>) ?? {};
         const az = authorize(actor.role, actor.scopes, cat, args);
@@ -203,6 +211,7 @@ export function createPanelServer(opts: PanelOpts): Server {
         const b = await readBody(req); const tool = b.tool ? toolByName.get(String(b.tool)) : undefined; const cat = b.tool ? catByName.get(String(b.tool)) : undefined;
         const args = (b.args as Record<string, unknown>) ?? {};
         if (!tool || !cat) { sendJson(res, 404, { error: `unknown tool "${b.tool}"` }); return; }
+        if (isDemo()) { sendJson(res, 202, { job: { id: "demo" + ([...DEMO_JOBS].length) + "-" + tool.name, tool: tool.name, args: {}, status: "succeeded", key: "demo", createdAt: new Date(0).toISOString(), logTail: ["demo mode — action not executed against a real fleet"] } }); return; }
         const az = authorize(actor.role, actor.scopes, cat, args);
         if (!az.ok) { audit(actor, tool.name, targetOf(args), args, `denied: ${az.reason}`); sendJson(res, 403, { error: az.reason }); return; }
         if (killed && cat.destructive) { sendJson(res, 423, { error: "kill-switch engaged — destructive ops are disabled" }); return; }

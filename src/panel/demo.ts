@@ -51,3 +51,22 @@ export function demoDb(engine: "pg" | "ch"): { engine: string; healthText: strin
 function parse(text: string): { setting: string; before: string; after: string }[] {
   return text.split("\n").map((l) => { const m = l.match(/(\S+)\s+(\S+)\s*→\s*(\S+)/); return m ? { setting: m[1], before: m[2], after: m[3] } : null; }).filter(Boolean) as { setting: string; before: string; after: string }[];
 }
+
+/** Demo output for the read/report tools so every screen populates coherently in demo mode.
+ *  Returns null for tools that already work without a fleet (dns_plan etc.) — those run for real. */
+const DEMO_TOOL: Record<string, string> = {
+  health_check: "Front-door probes (cluster prod)\n✓ account.adpix.io      200  8ms\n✓ api.adpix.io          200  12ms\n✓ analytics.adpix.io    200  22ms\n✓ tagmanager.adpix.io   200  15ms\nAll routes healthy.",
+  tls_status: "TLS certificates\napp.adpix.io        valid · expires in 14 days  (auto-renew via Caddy)\napi.adpix.io        valid · expires in 67 days\naccount.adpix.io    valid · expires in 67 days",
+  system_metrics: "Host metrics\nnode-a   cpu 46%   mem 62%   disk 54%\nnode-b   cpu 71%   mem 84%   disk 67%   (degraded)\nwitness  cpu 14%   mem 38%   disk 22%",
+  security_audit: "Security audit (cluster prod)\nPASS  ufw enabled, default-deny\nPASS  ssh key-only, root login off\nPASS  fail2ban active\nWARN  unattended-upgrades not enabled on node-b\nPASS  TLS 1.3 only at the edge\n5 checks · 1 warning",
+  launch_gate: "Launch gate — 1 finding must be resolved before go-live\n✗ Analytics P1: ClickHouse retention TTL not yet applied on node-b\n✓ OIDC aud split verified\n✓ Set-Cookie carve-out in place\nResolve the P1, then re-run launch_gate mode:attest.",
+  cluster_status: "Cluster prod · quorum 3/3 HEALTHY\nwitness   arbiter · 3rd vote · ok\nnode-a    pg primary · redis master · ch r1 · cpu 46% mem 62%\nnode-b    pg standby (lag 0.2s) · redis replica · ch r2 · cpu 71% mem 84% (degraded)\nVIP 10.0.0.10 held by node-a.",
+  cicd_status: "CI/CD pipeline\nTimer: enabled · 0 3 * * * (daily 03:00 UTC)\nLast run: success · 12h ago\n3 commits behind main\nAuto-rollback on failed health check: on",
+  ha_quorum: "Quorum verdict: HEALTHY (3/3)\nPostgres    primary=node-a  sync-standby=node-b  arbiter=witness\nRedis       master=node-a   replica=node-b   sentinels=3 (quorum 2)\nClickHouse  r1=node-a  r2=node-b  keeper=3-node raft (witness tie-break)\nNo split-brain. Failover-ready.",
+  pg_health: "PostgreSQL 16 · primary node-a\n142 active connections (max 300)\n99.3% cache hit ratio\nreplication lag 0.2s to node-b\ndatabase size 48 GB · 0 long-running queries",
+  ch_health: "ClickHouse 24.3 · node-a\n312 active parts\n4 merges in backlog\n18400/s inserts\n11.2x compression ratio\n0 replication errors",
+  connect_configs: "Client connect configs (cluster prod · VIP 10.0.0.10)\n\nClaude Code:\n  claude mcp add adpix-devops --url https://account.adpix.io/mcp --header \"Authorization: Bearer ****\"\n\nClaude Desktop (claude_desktop_config.json):\n  { \"mcpServers\": { \"adpix-devops\": { \"url\": \"https://account.adpix.io/mcp\", \"headers\": { \"Authorization\": \"Bearer ****\" } } } }\n\n(token masked — reveal:true to inline)",
+};
+export function demoTool(name: string): string | null {
+  return DEMO_TOOL[name] ?? null;
+}
