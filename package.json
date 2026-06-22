@@ -14,7 +14,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "build": "tsc && cp -r src/panel/public dist/panel/public",
+    "build": "tsc && rm -rf dist/panel/public && cp -r src/panel/public dist/panel/public",
     "prepare": "npm run build",
     "dev": "tsx src/index.ts",
     "test": "vitest run",

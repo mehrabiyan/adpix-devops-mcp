@@ -1,13 +1,30 @@
 # AdPix Control Panel — design spec
 
-Status: **Phases 1–3 IMPLEMENTED.** Backend job engine + panel server + the "AdPix Cloud" SPA
+Status: **COMPLETE for the loopback/firewalled deployment.** Backend job engine + panel server
 (Phase 1), the security spine (Phase 2: login + TOTP, RBAC, re-auth nonces, hash-chained
-audit, kill-switch), and the Phase-3 ops tools are built (`src/panel/*`, `src/tools/ops.ts`,
-`npm start -- --panel`). 76 tools, 396 tests. Remaining: the internet exposure transport
-(OIDC/WebAuthn + mTLS — see §4) and the bespoke per-screen UI layouts (the generic tool-grid
-already makes every tool usable). A self-service web control panel (cPanel / DigitalOcean-
-style) over the MCP tools — manage the fleet, containers, backups, databases, deploys, HA,
-DNS and clients from a UI, no CLI.
+audit, kill-switch), the Phase-3 ops tools, and the **full AdPix Cloud design** (all 11 bespoke
+screens + command palette + topology + live drawer) are built (`src/panel/*`,
+`src/tools/ops.ts`, `npm start -- --panel`). 76 tools, 398 tests (unit + integration + e2e).
+OIDC/WebAuthn + mTLS are intentionally **out of scope** — exposure is restricted by firewall
+(server/port allowlist) + the loopback bind + local-admin TOTP. A self-service web control
+panel (cPanel / DigitalOcean-style) over the MCP tools — manage the fleet, containers,
+backups, databases, deploys, HA, DNS and clients from a UI, no CLI.
+
+## Frontend — full design system (shipped)
+The SPA (`src/panel/public/`) faithfully implements the imported AdPix Cloud design: the topbar
+(logo, cluster switcher, ⌘K command palette, locale/theme/activity/account), the pill sidebar
+with nav groups + running-job badge + collapse, dark/light + EN/FA + RTL, and **all 11 screens**
+wired to live tools — Dashboard (KPI cards + SVG cluster topology + node health + recent jobs),
+Servers (grid-table → Server detail with container cards [start/stop/restart via
+container_control] + live log viewer), Jobs & audit (live + hash-chain badge), Backups
+(run/restore + schedule tabs), Databases (PG/CH tabs, tune dry-run→apply, retention), Deploys
+(update/blue-green/rollback + CI/CD), HA (topology + quorum), DNS & connect, Monitoring (probes
++ TLS + metrics_query), Security (gate + audit), Settings (admin users/sessions/audit/kill +
+masked secrets). Stable tool outputs (server_list, cluster_list, audit JSON) are parsed for
+tables/topology; live tool text is rendered in the design's card chrome elsewhere. The activity
+drawer streams job logs over SSE; destructive ops route through preview→nonce→typed-confirm.
+NOTE: the build copies `public/` into `dist/` with `rm -rf dist/panel/public` first (a plain
+`cp -r` nests into the existing dir and serves a stale bundle).
 
 ## Phase 2 — security spine (shipped)
 - `auth.ts` — scrypt passwords + RFC-6238 TOTP (verified against the RFC vector). `admins.ts` (panel-admins.json, mode 600), `sessions.ts` (opaque server-side, idle 15m + absolute 8h, revocable, CSRF token per session).
