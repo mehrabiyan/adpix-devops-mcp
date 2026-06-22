@@ -135,13 +135,36 @@ describe("adpix_install with deployKey", () => {
     expect(out).toContain("http://203.0.113.7");
   });
 
-  it("hints at deployKey when a public clone hits an auth wall", async () => {
-    const { deps } = fakeSession([
+  it("auto-switches to a deploy key when a public clone hits an auth wall (unauthorized → prints key)", async () => {
+    const { deps, calls } = fakeSession([
       [/command -v git/, { code: 0 }],
-      [/git (clone|fetch)/, { code: 128, stderr: "fatal: could not read Username for 'https://github.com': terminal prompts disabled" }],
+      [/git clone -b 'main' 'https:/, { code: 128, stderr: "fatal: could not read Username for 'https://github.com': No such device or address" }],
+      [/adpix_deploy_ed25519\.pub/, { stdout: "ssh-ed25519 AUTOKEY adpix-deploy@h" }],
+      [/git ls-remote/, { stdout: "NO" }],
     ]);
     const out = await tool("adpix_install").handler(deps, { ...baseArgs, deployKey: false });
-    expect(out).toContain("Checkout FAILED");
-    expect(out).toContain("deployKey:true");
+    expect(out).toMatch(/deploy key/i);
+    expect(out).toContain("ssh-ed25519 AUTOKEY");
+    expect(out).toContain("Nothing installed yet");
+    expect(calls.some((c) => c.includes("deploy.sh"))).toBe(false);
+  });
+
+  it("auto deploy-key: clones over SSH + deploys when the key is already authorized", async () => {
+    const { deps, calls } = fakeSession([
+      [/command -v git/, { code: 0 }],
+      [/git clone -b 'main' 'https:/, { code: 128, stderr: "could not read Username for 'https://github.com'" }],
+      [/adpix_deploy_ed25519\.pub/, { stdout: "ssh-ed25519 OKKEY adpix-deploy@h" }],
+      [/git ls-remote/, { stdout: "OK" }],
+      [/git clone -b 'main' 'git@github/, { code: 0 }],
+      [/deploy\.sh/, { code: 0, stdout: "AdPix Analytics is running." }],
+      [/for i in \$\(seq/, { code: 0, stdout: "healthy after ~5s (HTTP 200)" }],
+      [/SITE_ADDRESS/, { stdout: "" }],
+      [/PUBLIC_BASE_URL/, { stdout: "http://203.0.113.7" }],
+      [/ADMIN_EMAIL/, { stdout: "admin@example.com" }],
+    ]);
+    const out = await tool("adpix_install").handler(deps, { ...baseArgs, deployKey: false });
+    expect(out).toContain("authorized for mehrabiyan/adpix");
+    expect(calls.some((c) => /git clone -b 'main' 'git@github\.com:mehrabiyan\/adpix\.git'/.test(c))).toBe(true);
+    expect(out).toContain("http://203.0.113.7");
   });
 });
