@@ -53,6 +53,9 @@ const GROUP: Record<string, string> = {
   // settings / self
   ai_setup: "settings", ai_fix: "settings", mcp_self_update: "settings", capacity_plan: "settings",
   consult_topic: "settings", scale_assessment: "settings", watchdog_install: "settings", watchdog_status: "settings",
+  // phase-3 ops
+  container_control: "containers", metrics_query: "monitoring", schedule_job: "settings",
+  server_resize: "servers", data_move: "backups",
 };
 
 function entry(t: ToolDef): CatalogEntry {

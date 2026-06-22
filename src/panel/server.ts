@@ -4,16 +4,24 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { realDeps, type Deps } from "../deps.js";
 import { allTools } from "../tools/index.js";
-import { guard, isLoopback } from "../wizard/guard.js";
-import { buildCatalog } from "./catalog.js";
+import { isLoopback } from "../wizard/guard.js";
+import { buildCatalog, type CatalogEntry } from "./catalog.js";
 import { JobEngine } from "./engine.js";
+import { SessionStore } from "./sessions.js";
+import { NonceStore } from "./nonce.js";
+import { loadAdmins, getAdmin, createAdmin, removeAdmin, ROLES, type Role } from "./admins.js";
+import { verifyPassword, totpVerify, totpUri } from "./auth.js";
+import { authorize } from "./rbac.js";
+import { appendAudit, readAudit, verifyChain } from "./audit.js";
+import { argsHash } from "./hash.js";
+import { resolveAccess, parseCookies, SESSION_COOKIE, type Actor, type AccessCtx } from "./access.js";
 
 /**
- * The control-panel HTTP server (Phase 1, loopback-first). Serves the SPA + a thin JSON API
- * over allTools: read-only tools run inline, mutating/slow tools become async JOBS with live
- * SSE log streaming. Reuses the wizard guard (Host allowlist anti-DNS-rebind, token header
- * anti-CSRF, Origin/Sec-Fetch, JSON-only mutations). Reached via an SSH tunnel; the
- * internet-facing hardening (OIDC+MFA, RBAC, off-host audit) is Phase 2.
+ * The control-panel HTTP server. Phase 1 (loopback job engine + SPA) + Phase 2 hardening:
+ * per-admin login (password + TOTP) with server-side sessions, default-deny RBAC + tenant
+ * scoping, per-action re-auth nonces for destructive ops, a hash-chained audit log, and a
+ * break-glass kill-switch. A bootstrap token grants owner on loopback ONLY until the first
+ * admin is created, after which login is required. See docs/control-panel.md.
  */
 
 export interface PanelOpts {
@@ -21,141 +29,171 @@ export interface PanelOpts {
   host: string;
   token: string;
   deps?: Deps;
+  /** Set Secure on the session cookie (required when behind TLS; off for loopback http). */
+  secureCookies?: boolean;
+  /** Extra Host header values to accept (the public FQDN when exposed). */
+  allowedHosts?: string[];
 }
 
 const PUBLIC_DIR = fileURLToPath(new URL("./public/", import.meta.url));
 const MAX_BODY = 4 * 1024 * 1024;
-
-const CONTENT_TYPES: Record<string, string> = {
-  ".html": "text/html; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8",
-  ".css": "text/css; charset=utf-8",
-  ".svg": "image/svg+xml",
-};
-
-/** Panel security headers — like the wizard's, but allows Google Fonts + inline style attrs the design uses. */
+const CONTENT_TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml" };
 const HEADERS: Record<string, string> = {
   "content-security-policy":
     "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
-    "font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; " +
-    "frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
-  "x-frame-options": "DENY",
-  "referrer-policy": "no-referrer",
-  "x-content-type-options": "nosniff",
-  "cache-control": "no-store",
+    "font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+  "x-frame-options": "DENY", "referrer-policy": "no-referrer", "x-content-type-options": "nosniff", "cache-control": "no-store",
 };
 
-function readBody(req: IncomingMessage): Promise<unknown> {
+function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
-    let size = 0;
-    const chunks: Buffer[] = [];
-    req.on("data", (c: Buffer) => {
-      size += c.length;
-      if (size > MAX_BODY) { reject(new Error("body too large")); req.destroy(); return; }
-      chunks.push(c);
-    });
-    req.on("end", () => {
-      try { resolve(chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {}); }
-      catch { reject(new Error("invalid JSON body")); }
-    });
+    let size = 0; const chunks: Buffer[] = [];
+    req.on("data", (c: Buffer) => { size += c.length; if (size > MAX_BODY) { reject(new Error("body too large")); req.destroy(); return; } chunks.push(c); });
+    req.on("end", () => { try { resolve(chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {}); } catch { reject(new Error("invalid JSON body")); } });
     req.on("error", reject);
   });
 }
-
-function sendJson(res: ServerResponse, status: number, body: unknown): void {
-  res.writeHead(status, { ...HEADERS, "content-type": "application/json" });
+function sendJson(res: ServerResponse, status: number, body: unknown, extra: Record<string, string> = {}): void {
+  res.writeHead(status, { ...HEADERS, ...extra, "content-type": "application/json" });
   res.end(JSON.stringify(body));
 }
-
 function serveStatic(res: ServerResponse, urlPath: string): void {
   const rel = urlPath === "/" ? "index.html" : urlPath.replace(/^\/+/, "");
-  // contain to the public dir (no traversal)
   const full = fileURLToPath(new URL(rel, "file://" + PUBLIC_DIR));
+  const idx = PUBLIC_DIR + "index.html";
   if (!full.startsWith(PUBLIC_DIR) || !fs.existsSync(full)) {
-    // SPA fallback to index.html for client routes
-    const idx = PUBLIC_DIR + "index.html";
     if (fs.existsSync(idx)) { res.writeHead(200, { ...HEADERS, "content-type": CONTENT_TYPES[".html"] }); res.end(fs.readFileSync(idx)); return; }
-    res.writeHead(404, HEADERS).end("not found");
-    return;
+    res.writeHead(404, HEADERS).end("not found"); return;
   }
   const ext = full.slice(full.lastIndexOf("."));
   res.writeHead(200, { ...HEADERS, "content-type": CONTENT_TYPES[ext] ?? "application/octet-stream" });
   res.end(fs.readFileSync(full));
 }
+const ip = (req: IncomingMessage) => req.socket.remoteAddress ?? "?";
+const targetOf = (args: Record<string, unknown>) => String(args.cluster ?? args.server ?? "_global");
 
 export function createPanelServer(opts: PanelOpts): Server {
   const deps = opts.deps ?? realDeps;
   const engine = new JobEngine(deps);
+  const sessions = new SessionStore();
+  const nonces = new NonceStore();
   const toolByName = new Map(allTools.map((t) => [t.name, t]));
+  const catByName = new Map<string, CatalogEntry>(buildCatalog().map((c) => [c.name, c]));
+  let killed = false;
+
+  const allowedHosts = new Set(["127.0.0.1", "localhost", "::1", "[::1]", ...(opts.allowedHosts ?? [])]);
+  const audit = (actor: Actor, tool: string, target: string, args: Record<string, unknown>, outcome: string) =>
+    appendAudit({ actor: actor.username, role: actor.role, ip: "", tool, target, argsHash: argsHash(args), outcome });
 
   return createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
     const path = url.pathname;
-
+    const method = req.method ?? "GET";
     if (path === "/healthz") { res.writeHead(200, { "content-type": "text/plain" }).end("ok"); return; }
 
-    // validate the Host header port against the port the client actually connected to
-    const boundPort = req.socket.localPort ?? opts.port;
-    const g = guard({ method: req.method ?? "GET", path, headers: req.headers as Record<string, string | undefined> }, opts.token, boundPort);
-    if (!g.ok) { sendJson(res, g.status, { error: g.reason }); return; }
-
-    // static SPA
-    if (!path.startsWith("/api/")) { serveStatic(res, path); return; }
+    const ctx: AccessCtx = { token: opts.token, boundPort: req.socket.localPort ?? opts.port, allowedHosts, sessions, adminsExist: () => loadAdmins().length > 0 };
+    const access = resolveAccess(req, path, ctx);
+    if (access.status === 421) { sendJson(res, 421, { error: access.reason }); return; }
 
     try {
-      // GET /api/catalog
-      if (path === "/api/catalog" && req.method === "GET") {
-        sendJson(res, 200, { tools: buildCatalog() });
+      // ---- unauthenticated status + auth endpoints (login / first-run setup) ----
+      if (path === "/api/status" && method === "GET") { sendJson(res, 200, { adminsExist: loadAdmins().length > 0, killed }); return; }
+      if (path === "/api/login" && method === "POST") return await handleLogin(req, res, opts, sessions);
+      if (path === "/api/logout" && method === "POST") {
+        const sid = parseCookies(req.headers.cookie)[SESSION_COOKIE];
+        if (sid) sessions.revoke(sid);
+        sendJson(res, 200, { ok: true }, { "set-cookie": `${SESSION_COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0` });
         return;
       }
-      // GET /api/jobs
-      if (path === "/api/jobs" && req.method === "GET") {
-        sendJson(res, 200, { jobs: engine.list() });
+
+      // ---- static page ----
+      if (access.page) { serveStatic(res, path); return; }
+      if (!access.actor) { sendJson(res, access.status, { error: access.reason }); return; }
+      const actor = access.actor;
+
+      // first-run: create the initial owner from the bootstrap token (then token is disabled)
+      if (path === "/api/setup" && method === "POST") {
+        if (loadAdmins().length > 0) { sendJson(res, 409, { error: "already set up — log in" }); return; }
+        if (!actor.viaToken) { sendJson(res, 403, { error: "setup needs the bootstrap token" }); return; }
+        const b = await readBody(req);
+        if (!b.username || !b.password) { sendJson(res, 400, { error: "username + password required" }); return; }
+        const { admin, totpSecret } = createAdmin(String(b.username), String(b.password), "owner");
+        audit(actor, "panel.setup", admin.username, {}, "created owner");
+        sendJson(res, 200, { username: admin.username, totpSecret, totpUri: totpUri(totpSecret, admin.username) });
         return;
       }
-      // POST /api/jobs  { tool, args, confirm, idempotencyKey }
-      if (path === "/api/jobs" && req.method === "POST") {
-        const body = (await readBody(req)) as { tool?: string; args?: Record<string, unknown>; confirm?: boolean; idempotencyKey?: string };
-        const tool = body.tool ? toolByName.get(body.tool) : undefined;
-        if (!tool) { sendJson(res, 404, { error: `unknown tool "${body.tool}"` }); return; }
-        const r = engine.enqueue(tool, body.args ?? {}, { confirm: body.confirm, idempotencyKey: body.idempotencyKey });
-        if ("error" in r) { sendJson(res, 400, r); return; }
-        sendJson(res, 202, { job: r });
+
+      if (path === "/api/me" && method === "GET") {
+        const csrf = actor.viaToken ? undefined : sessions.get(actor.sessionId)?.csrf;
+        sendJson(res, 200, { actor: { username: actor.username, role: actor.role, scopes: actor.scopes }, mode: actor.viaToken ? "token" : "session", csrf, killed, adminsExist: loadAdmins().length > 0 });
         return;
       }
-      // POST /api/tools/:name  — synchronous run, READ-ONLY tools only
+      if (path === "/api/catalog" && method === "GET") { sendJson(res, 200, { tools: buildCatalog() }); return; }
+
+      // ---- admin (owner-only) ----
+      if (path.startsWith("/api/admin/")) {
+        if (actor.role !== "owner") { sendJson(res, 403, { error: "owner only" }); return; }
+        return await handleAdmin(req, res, path, method, { sessions, audit: (t, tg, o) => audit(actor, t, tg, {}, o), getKilled: () => killed, setKilled: (v) => { killed = v; if (v) sessions.revokeAll(); } });
+      }
+
+      // ---- read-only tool, synchronous ----
       const syncM = path.match(/^\/api\/tools\/([a-z0-9_]+)$/);
-      if (syncM && req.method === "POST") {
-        const tool = toolByName.get(syncM[1]);
-        if (!tool) { sendJson(res, 404, { error: `unknown tool "${syncM[1]}"` }); return; }
-        if (!tool.annotations?.readOnlyHint) { sendJson(res, 409, { error: `${tool.name} is not read-only — POST it to /api/jobs` }); return; }
-        const body = (await readBody(req)) as { args?: Record<string, unknown> };
-        const parsed = z.object(tool.schema).safeParse(body.args ?? {});
+      if (syncM && method === "POST") {
+        const tool = toolByName.get(syncM[1]); const cat = catByName.get(syncM[1]);
+        if (!tool || !cat) { sendJson(res, 404, { error: `unknown tool` }); return; }
+        if (!cat.readOnly) { sendJson(res, 409, { error: `${tool.name} is not read-only — POST it to /api/jobs` }); return; }
+        const b = await readBody(req); const args = (b.args as Record<string, unknown>) ?? {};
+        const az = authorize(actor.role, actor.scopes, cat, args);
+        if (!az.ok) { audit(actor, tool.name, targetOf(args), args, `denied: ${az.reason}`); sendJson(res, 403, { error: az.reason }); return; }
+        const parsed = z.object(tool.schema).safeParse(args);
         if (!parsed.success) { sendJson(res, 400, { error: `invalid args: ${parsed.error.issues.map((i) => i.message).join("; ")}` }); return; }
         try {
           const result = await tool.handler(deps, parsed.data as Record<string, unknown>);
+          audit(actor, tool.name, targetOf(args), args, "ran (read-only)");
           sendJson(res, 200, { result });
-        } catch (e) {
-          sendJson(res, 200, { result: `ERROR (${tool.name}): ${e instanceof Error ? e.message : String(e)}`, isError: true });
-        }
+        } catch (e) { sendJson(res, 200, { result: `ERROR (${tool.name}): ${e instanceof Error ? e.message : String(e)}`, isError: true }); }
         return;
       }
-      // job by id  /api/jobs/:id  (+ /cancel, /stream)
+
+      // ---- preview a destructive action → mint a single-use nonce ----
+      if (path === "/api/preview" && method === "POST") {
+        const b = await readBody(req); const tool = b.tool ? catByName.get(String(b.tool)) : undefined;
+        const args = (b.args as Record<string, unknown>) ?? {};
+        if (!tool) { sendJson(res, 404, { error: "unknown tool" }); return; }
+        const az = authorize(actor.role, actor.scopes, tool, args);
+        if (!az.ok) { sendJson(res, 403, { error: az.reason }); return; }
+        const target = targetOf(args);
+        const nonce = nonces.mint(actor.sessionId, tool.name, target, argsHash({ ...args, confirm: true }));
+        sendJson(res, 200, { nonce, target, tool: tool.name, destructive: tool.destructive, summary: `${tool.name} → ${target}` });
+        return;
+      }
+
+      // ---- enqueue a job ----
+      if (path === "/api/jobs" && method === "POST") {
+        const b = await readBody(req); const tool = b.tool ? toolByName.get(String(b.tool)) : undefined; const cat = b.tool ? catByName.get(String(b.tool)) : undefined;
+        const args = (b.args as Record<string, unknown>) ?? {};
+        if (!tool || !cat) { sendJson(res, 404, { error: `unknown tool "${b.tool}"` }); return; }
+        const az = authorize(actor.role, actor.scopes, cat, args);
+        if (!az.ok) { audit(actor, tool.name, targetOf(args), args, `denied: ${az.reason}`); sendJson(res, 403, { error: az.reason }); return; }
+        if (killed && cat.destructive) { sendJson(res, 423, { error: "kill-switch engaged — destructive ops are disabled" }); return; }
+        if (cat.destructive) {
+          const cz = nonces.consume(String(b.nonce ?? ""), actor.sessionId, tool.name, targetOf(args), argsHash({ ...args, confirm: true }));
+          if (!cz.ok) { sendJson(res, 428, { error: cz.reason }); return; }
+        }
+        const r = engine.enqueue(tool, cat.destructive ? { ...args, confirm: true } : args, { confirm: true, idempotencyKey: b.idempotencyKey as string, actor: actor.username });
+        if ("error" in r) { sendJson(res, 400, r); return; }
+        audit(actor, tool.name, targetOf(args), args, `job ${r.id} enqueued`);
+        sendJson(res, 202, { job: r });
+        return;
+      }
+      if (path === "/api/jobs" && method === "GET") { sendJson(res, 200, { jobs: engine.list() }); return; }
+
       const idM = path.match(/^\/api\/jobs\/([a-f0-9-]+)(\/cancel|\/stream)?$/);
       if (idM) {
         const [, id, sub] = idM;
-        if (!sub && req.method === "GET") {
-          const job = engine.get(id);
-          if (!job) { sendJson(res, 404, { error: "no such job" }); return; }
-          sendJson(res, 200, { job });
-          return;
-        }
-        if (sub === "/cancel" && req.method === "POST") {
-          const ok = engine.cancel(id);
-          sendJson(res, ok ? 200 : 409, { canceled: ok });
-          return;
-        }
-        if (sub === "/stream" && req.method === "GET") {
+        if (!sub && method === "GET") { const job = engine.get(id); return job ? sendJson(res, 200, { job }) : sendJson(res, 404, { error: "no such job" }); }
+        if (sub === "/cancel" && method === "POST") { const ok = engine.cancel(id); if (ok) audit(actor, "job.cancel", id, {}, "canceled"); sendJson(res, ok ? 200 : 409, { canceled: ok }); return; }
+        if (sub === "/stream" && method === "GET") {
           if (!engine.get(id)) { sendJson(res, 404, { error: "no such job" }); return; }
           res.writeHead(200, { ...HEADERS, "content-type": "text/event-stream", connection: "keep-alive" });
           const unsub = engine.subscribe(id, (e) => res.write(`data: ${JSON.stringify(e)}\n\n`));
@@ -170,13 +208,47 @@ export function createPanelServer(opts: PanelOpts): Server {
   });
 }
 
+async function handleLogin(req: IncomingMessage, res: ServerResponse, opts: PanelOpts, sessions: SessionStore): Promise<void> {
+  if ((req.headers["content-type"] ?? "").split(";")[0].trim() !== "application/json") { sendJson(res, 415, { error: "json only" }); return; }
+  const b = await readBody(req);
+  const admin = b.username ? getAdmin(String(b.username)) : undefined;
+  // constant-ish work whether or not the user exists
+  const pwOk = admin ? verifyPassword(String(b.password ?? ""), admin.pwHash) : verifyPassword("x", "scrypt$00$00");
+  if (!admin || !pwOk || !totpVerify(admin.totpSecret, String(b.totp ?? ""))) {
+    sendJson(res, 401, { error: "invalid credentials or TOTP code" });
+    return;
+  }
+  const s = sessions.create(admin, ip(req));
+  appendAudit({ actor: admin.username, role: admin.role, ip: ip(req), tool: "panel.login", target: "-", argsHash: "-", outcome: "ok" });
+  const secure = opts.secureCookies ? " Secure;" : "";
+  sendJson(res, 200, { csrf: s.csrf, actor: { username: s.username, role: s.role, scopes: s.scopes } },
+    { "set-cookie": `${SESSION_COOKIE}=${s.id}; HttpOnly;${secure} SameSite=Strict; Path=/; Max-Age=${8 * 3600}` });
+}
+
+interface AdminCtx { sessions: SessionStore; audit: (tool: string, target: string, outcome: string) => void; getKilled: () => boolean; setKilled: (v: boolean) => void }
+async function handleAdmin(req: IncomingMessage, res: ServerResponse, path: string, method: string, ctx: AdminCtx): Promise<void> {
+  if (path === "/api/admin/sessions" && method === "GET") { sendJson(res, 200, { sessions: ctx.sessions.list().map((s) => ({ username: s.username, role: s.role, ip: s.ip, createdAt: s.createdAt, lastSeen: s.lastSeen })) }); return; }
+  if (path === "/api/admin/sessions/revoke" && method === "POST") { const b = await readBody(req); const ok = ctx.sessions.revoke(String(b.id)); ctx.audit("panel.session.revoke", String(b.id), ok ? "revoked" : "missing"); sendJson(res, 200, { ok }); return; }
+  if (path === "/api/admin/users" && method === "GET") { sendJson(res, 200, { users: loadAdmins().map((a) => ({ username: a.username, role: a.role, scopes: a.scopes, createdAt: a.createdAt })) }); return; }
+  if (path === "/api/admin/users" && method === "POST") {
+    const b = await readBody(req);
+    if (!b.username || !b.password) { sendJson(res, 400, { error: "username + password required" }); return; }
+    const role = (ROLES.includes(b.role as Role) ? b.role : "viewer") as Role;
+    const scopes = Array.isArray(b.scopes) && b.scopes.length ? (b.scopes as string[]) : ["*"];
+    try { const { admin, totpSecret } = createAdmin(String(b.username), String(b.password), role, scopes); ctx.audit("panel.user.create", admin.username, role); sendJson(res, 200, { username: admin.username, totpSecret, totpUri: totpUri(totpSecret, admin.username) }); }
+    catch (e) { sendJson(res, 400, { error: e instanceof Error ? e.message : "failed" }); }
+    return;
+  }
+  if (path === "/api/admin/users/remove" && method === "POST") { const b = await readBody(req); const ok = removeAdmin(String(b.username)); ctx.audit("panel.user.remove", String(b.username), ok ? "removed" : "missing"); sendJson(res, 200, { ok }); return; }
+  if (path === "/api/admin/audit" && method === "GET") { sendJson(res, 200, { entries: readAudit(300), chain: verifyChain() }); return; }
+  if (path === "/api/admin/kill" && method === "POST") { const b = await readBody(req); const on = b.on === true; ctx.setKilled(on); ctx.audit("panel.killswitch", "-", on ? "ENGAGED" : "released"); sendJson(res, 200, { killed: on }); return; }
+  sendJson(res, 404, { error: "not found" });
+}
+
 export function servePanel(opts: PanelOpts): Promise<Server> {
-  if (!isLoopback(opts.host) && !opts.token) {
-    throw new Error("refusing non-loopback bind without a token — the panel holds fleet-root access");
+  if (!isLoopback(opts.host) && !opts.token && loadAdmins().length === 0) {
+    throw new Error("refusing non-loopback bind with neither a token nor any admin configured");
   }
   const server = createPanelServer(opts);
-  return new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(opts.port, opts.host, () => resolve(server));
-  });
+  return new Promise((resolve, reject) => { server.once("error", reject); server.listen(opts.port, opts.host, () => resolve(server)); });
 }

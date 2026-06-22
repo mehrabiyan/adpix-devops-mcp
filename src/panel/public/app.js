@@ -3,25 +3,37 @@
 // with SSE log streaming, and a typed-confirm modal for destructive ops.
 
 // ---------------------------------------------------------------- token + api
+// Two auth modes: bootstrap TOKEN (loopback dev, in the URL fragment) until an admin exists,
+// then per-admin SESSION (cookie + CSRF header). S.mode/S.csrf are set at boot from /api/me.
 const TOKEN = (location.hash.match(/token=([a-f0-9]+)/) || [])[1] || sessionStorage.getItem("adpix_token") || "";
 if (TOKEN) sessionStorage.setItem("adpix_token", TOKEN);
 history.replaceState(null, "", location.pathname);
 
+function authHeaders(mut) {
+  if (S.mode === "session") return mut ? { "x-adpix-csrf": S.csrf } : {};
+  return TOKEN ? { "x-adpix-token": TOKEN } : {};
+}
 async function api(path, opts = {}) {
+  const mut = !!opts.body;
   const res = await fetch(path, {
-    ...opts,
-    headers: { "x-adpix-token": TOKEN, ...(opts.body ? { "content-type": "application/json" } : {}), ...(opts.headers || {}) },
+    ...opts, credentials: "same-origin",
+    headers: { ...(opts.body ? { "content-type": "application/json" } : {}), ...authHeaders(mut), ...(opts.headers || {}) },
   });
   if (!res.ok && res.status !== 202) {
     let msg = res.statusText;
     try { msg = (await res.json()).error || msg; } catch {}
-    throw new Error(msg);
+    const err = new Error(msg); err.status = res.status; throw err;
   }
   return res.status === 204 ? null : res.json();
 }
 const runTool = (name, args = {}) => api(`/api/tools/${name}`, { method: "POST", body: JSON.stringify({ args }) });
-const startJob = (tool, args = {}, confirm = false) =>
-  api("/api/jobs", { method: "POST", body: JSON.stringify({ tool, args, confirm, idempotencyKey: `${tool}:${Date.now()}` }) });
+const startJob = (tool, args = {}) =>
+  api("/api/jobs", { method: "POST", body: JSON.stringify({ tool, args, idempotencyKey: `${tool}:${Date.now()}` }) });
+// destructive: preview → single-use nonce → job
+async function startDestructive(tool, args = {}) {
+  const pv = await api("/api/preview", { method: "POST", body: JSON.stringify({ tool, args }) });
+  return api("/api/jobs", { method: "POST", body: JSON.stringify({ tool, args, nonce: pv.nonce, idempotencyKey: `${tool}:${Date.now()}` }) });
+}
 const listJobs = () => api("/api/jobs");
 const cancelJob = (id) => api(`/api/jobs/${id}/cancel`, { method: "POST", body: "{}" });
 
@@ -91,6 +103,7 @@ const S = {
   lang: localStorage.getItem("adpix_lang") || "en",
   theme: localStorage.getItem("adpix_theme") || "light",
   screen: "dashboard", collapsed: false, catalog: [], drawer: false, jobs: [],
+  mode: "token", csrf: "", me: { username: "local", role: "owner" },
 };
 const t = (k) => STR[S.lang][k] ?? k;
 const el = (html) => { const d = document.createElement("div"); d.innerHTML = html.trim(); return d.firstElementChild; };
@@ -129,6 +142,7 @@ function render() {
         <button class="icon-btn" id="lang" title="Language">${S.lang === "en" ? "EN" : "فا"}</button>
         <button class="icon-btn" id="theme">${ic(S.theme === "dark" ? "sun" : "moon", 16)}</button>
         <button class="icon-btn" id="activity" title="${t("activity")}">${ic("activity", 16)}</button>
+        <button class="icon-btn" id="account" title="${esc(S.me.username)} · ${esc(S.me.role)}" style="background:var(--c-brand-tint);color:var(--c-brand);border-color:transparent;font-weight:700">${esc((S.me.username[0] || "?").toUpperCase())}</button>
       </header>
       <main class="content" id="content"></main>
     </div>
@@ -139,6 +153,10 @@ function render() {
   app.querySelector("#theme").onclick = () => { S.theme = S.theme === "dark" ? "light" : "dark"; localStorage.setItem("adpix_theme", S.theme); render(); };
   app.querySelector("#lang").onclick = () => { S.lang = S.lang === "en" ? "fa" : "en"; localStorage.setItem("adpix_lang", S.lang); render(); };
   app.querySelector("#activity").onclick = () => openDrawer();
+  app.querySelector("#account").onclick = async () => {
+    if (S.mode !== "session") { toast(`${S.me.username} · ${S.me.role} (token mode)`); return; }
+    if (confirm(`Log out ${S.me.username}?`)) { try { await api("/api/logout", { method: "POST", body: "{}" }); } catch {} location.reload(); }
+  };
   renderScreen(document.getElementById("content"));
 }
 
@@ -152,8 +170,108 @@ function renderScreen(c) {
   if (S.screen === "dashboard") return screenDashboard(c);
   if (S.screen === "jobs") return screenJobs(c);
   if (S.screen === "servers") return screenServers(c);
+  if (S.screen === "settings") return screenSettings(c);
   c.innerHTML = pageHead(title);
   toolGrid(c, SCREEN_GROUPS[S.screen] || []);
+}
+
+function screenSettings(c) {
+  c.innerHTML = pageHead(STR[S.lang].nav.settings);
+  if (S.me.role === "owner") {
+    const grid = el(`<div class="grid cols-2" style="margin-bottom:16px"></div>`);
+    c.appendChild(grid);
+    grid.appendChild(adminUsers());
+    grid.appendChild(adminSessions());
+    grid.appendChild(adminAudit());
+    grid.appendChild(adminKill());
+  } else {
+    c.appendChild(el(`<div class="card card-pad muted" style="margin-bottom:16px">Signed in as <b>${esc(S.me.username)}</b> · role <b>${esc(S.me.role)}</b>. Admin controls are owner-only.</div>`));
+  }
+  const h = el(`<h2 style="font-size:15px;margin:6px 0 12px;font-weight:600">Tools</h2>`); c.appendChild(h);
+  toolGrid(c, ["settings"]);
+}
+
+function card(title, bodyHtml = "") {
+  return el(`<div class="card"><div class="card-head"><h3>${esc(title)}</h3><button class="btn btn-sm refresh">${t("refresh")}</button></div><div class="card-pad"><div class="body">${bodyHtml}</div></div></div>`);
+}
+
+function adminUsers() {
+  const c = card("Users & roles", `<div class="skel" style="width:60%"></div>`);
+  const body = c.querySelector(".body");
+  const load = async () => {
+    try {
+      const { users } = await api("/api/admin/users");
+      body.innerHTML = `<table class="t"><thead><tr><th>User</th><th>Role</th><th>Scopes</th><th></th></tr></thead><tbody>${
+        users.map((u) => `<tr><td class="mono">${esc(u.username)}</td><td><span class="tag">${esc(u.role)}</span></td><td class="muted">${esc((u.scopes || []).join(", "))}</td><td>${u.username === S.me.username ? "" : `<button class="btn btn-sm rm" data-u="${esc(u.username)}">Remove</button>`}</td></tr>`).join("")
+      }</tbody></table><div style="margin-top:12px"><button class="btn btn-primary btn-sm add">+ Add user</button></div>`;
+      body.querySelector(".add").onclick = () => addUserModal(load);
+      body.querySelectorAll(".rm").forEach((b) => (b.onclick = async () => { if (confirm(`Remove ${b.dataset.u}?`)) { await api("/api/admin/users/remove", { method: "POST", body: JSON.stringify({ username: b.dataset.u }) }); load(); } }));
+    } catch (e) { body.innerHTML = `<pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre>`; }
+  };
+  c.querySelector(".refresh").onclick = load; load();
+  return c;
+}
+function addUserModal(after) {
+  const body = el(`<div>
+    <label class="fld"><span class="lab">Username</span><input class="input" data-k="username"></label>
+    <label class="fld"><span class="lab">Password</span><input class="input" type="password" data-k="password"></label>
+    <label class="fld"><span class="lab">Role</span><select class="input" data-k="role"><option>viewer</option><option>operator</option><option>owner</option></select></label>
+    <label class="fld"><span class="lab">Scopes (comma — blank = all)</span><input class="input" data-k="scopes" placeholder="*"></label>
+  </div>`);
+  const m = modalShell("Add user", body, "Create", async () => {
+    const g = (k) => body.querySelector(`[data-k="${k}"]`).value.trim();
+    if (!g("username") || !g("password")) { toast("username + password required", true); return false; }
+    const scopes = g("scopes") ? g("scopes").split(",").map((s) => s.trim()).filter(Boolean) : ["*"];
+    try {
+      const r = await api("/api/admin/users", { method: "POST", body: JSON.stringify({ username: g("username"), password: g("password"), role: g("role"), scopes }) });
+      showTotp(r); after && after(); return true;
+    } catch (e) { toast(e.message, true); return false; }
+  });
+  document.body.appendChild(m);
+}
+function showTotp(r) {
+  const body = el(`<div>
+    <p>User <b>${esc(r.username)}</b> created. Add this TOTP secret to an authenticator app — it is shown once:</p>
+    <pre class="out">${esc(r.totpSecret)}</pre>
+    <p class="muted" style="word-break:break-all">${esc(r.totpUri)}</p>
+  </div>`);
+  document.body.appendChild(modalShell("TOTP secret (shown once)", body, t("close"), async () => true));
+}
+function adminSessions() {
+  const c = card("Active sessions", `<div class="skel" style="width:50%"></div>`);
+  const body = c.querySelector(".body");
+  const load = async () => {
+    try {
+      const { sessions } = await api("/api/admin/sessions");
+      body.innerHTML = sessions.length ? `<table class="t"><thead><tr><th>User</th><th>IP</th><th>Last seen</th></tr></thead><tbody>${
+        sessions.map((s) => `<tr><td class="mono">${esc(s.username)}</td><td class="muted">${esc(s.ip)}</td><td class="muted">${new Date(s.lastSeen).toLocaleTimeString()}</td></tr>`).join("")}</tbody></table>` : `<div class="empty">No active sessions.</div>`;
+    } catch (e) { body.innerHTML = `<pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre>`; }
+  };
+  c.querySelector(".refresh").onclick = load; load();
+  return c;
+}
+function adminAudit() {
+  const c = card("Audit log", `<div class="skel" style="width:70%"></div>`);
+  const body = c.querySelector(".body");
+  const load = async () => {
+    try {
+      const { entries, chain } = await api("/api/admin/audit");
+      const badge = chain.ok ? `<span class="badge b-pos"><span class="dot"></span>chain intact</span>` : `<span class="badge b-neg"><span class="dot"></span>TAMPERED @ ${chain.brokenAtSeq}</span>`;
+      body.innerHTML = `<div style="margin-bottom:8px">${badge}</div><table class="t"><thead><tr><th>#</th><th>Actor</th><th>Action</th><th>Target</th><th>Outcome</th></tr></thead><tbody>${
+        entries.slice(0, 40).map((e) => `<tr><td class="muted">${e.seq}</td><td class="mono">${esc(e.actor)}</td><td class="mono">${esc(e.tool)}</td><td>${esc(e.target)}</td><td class="muted">${esc(e.outcome)}</td></tr>`).join("")}</tbody></table>`;
+    } catch (e) { body.innerHTML = `<pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre>`; }
+  };
+  c.querySelector(".refresh").onclick = load; load();
+  return c;
+}
+function adminKill() {
+  const c = el(`<div class="card card-pad"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><div><h3 style="margin:0 0 4px;font-size:14px;font-weight:600">Kill-switch</h3><div class="muted" style="font-size:13px">Disable all destructive ops + revoke every session.</div></div><button class="btn btn-danger" id="kill">${ic("shield", 14)} Engage</button></div></div>`);
+  c.querySelector("#kill").onclick = async () => {
+    if (!confirm("Engage the kill-switch? This revokes ALL sessions (you will be logged out) and blocks destructive ops.")) return;
+    try { await api("/api/admin/kill", { method: "POST", body: JSON.stringify({ on: true }) }); toast("Kill-switch engaged — logging out"); setTimeout(() => location.reload(), 800); }
+    catch (e) { toast(e.message, true); }
+  };
+  return c;
 }
 
 // generic: render the catalog tools for the given groups as action cards
@@ -375,17 +493,75 @@ function confirmModal(tool, args) {
   const m = modalShell(t("destructive"), body, t("confirm"), async () => {
     const typed = body.querySelector(".confirm-in").value.trim();
     if (target && typed !== target) { toast(`Type "${target}" to confirm`, true); return false; }
-    try { const r = await startJob(tool.name, args, true); toast(`Job started: ${tool.name}`); openDrawer(r.job.id); return true; }
+    try { const r = await startDestructive(tool.name, args); toast(`Job started: ${tool.name}`); openDrawer(r.job.id); return true; }
     catch (e) { toast(e.message, true); return false; }
   }, true);
   document.body.appendChild(m);
 }
 
+// ---------------------------------------------------------------- auth gate
+function authShell(inner) {
+  document.documentElement.dataset.theme = S.theme;
+  document.getElementById("app").innerHTML = `<div style="min-height:100vh;display:grid;place-items:center;background:var(--c-bg);padding:24px">
+    <div class="card" style="width:380px;max-width:92vw;padding:26px">
+      <div class="brand" style="padding:0 0 18px"><span class="logo">A</span><span class="label">AdPix Cloud</span></div>
+      ${inner}
+    </div></div>`;
+}
+function renderLogin(msg = "") {
+  authShell(`
+    ${msg ? `<div class="badge b-neg" style="margin-bottom:12px"><span class="dot"></span>${esc(msg)}</div>` : ""}
+    <label class="fld"><span class="lab">Username</span><input class="input" id="u"></label>
+    <label class="fld"><span class="lab">Password</span><input class="input" type="password" id="p"></label>
+    <label class="fld"><span class="lab">Authenticator code</span><input class="input mono" id="totp" inputmode="numeric" placeholder="000000"></label>
+    <button class="btn btn-primary" id="go" style="width:100%;justify-content:center;margin-top:6px">Sign in</button>`);
+  const submit = async () => {
+    const u = document.getElementById("u").value.trim(), p = document.getElementById("p").value, totp = document.getElementById("totp").value.trim();
+    try {
+      const r = await api("/api/login", { method: "POST", body: JSON.stringify({ username: u, password: p, totp }) });
+      S.csrf = r.csrf; sessionStorage.removeItem("adpix_token"); boot();
+    } catch (e) { renderLogin(e.message); }
+  };
+  document.getElementById("go").onclick = submit;
+  document.getElementById("totp").addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
+}
+function renderSetup(msg = "") {
+  authShell(`
+    <p class="muted" style="margin-top:0">First run — create the owner account. You will get a TOTP secret to add to an authenticator app.</p>
+    ${msg ? `<div class="badge b-neg" style="margin-bottom:12px"><span class="dot"></span>${esc(msg)}</div>` : ""}
+    <label class="fld"><span class="lab">Username</span><input class="input" id="u"></label>
+    <label class="fld"><span class="lab">Password</span><input class="input" type="password" id="p"></label>
+    <button class="btn btn-primary" id="go" style="width:100%;justify-content:center;margin-top:6px">Create owner</button>`);
+  document.getElementById("go").onclick = async () => {
+    const u = document.getElementById("u").value.trim(), p = document.getElementById("p").value;
+    if (!u || !p) return renderSetup("username + password required");
+    try {
+      const r = await api("/api/setup", { method: "POST", body: JSON.stringify({ username: u, password: p }) });
+      authShell(`<p>Owner <b>${esc(r.username)}</b> created. Add this TOTP secret to your authenticator (shown once):</p>
+        <pre class="out">${esc(r.totpSecret)}</pre>
+        <p class="muted" style="word-break:break-all;font-size:12px">${esc(r.totpUri)}</p>
+        <button class="btn btn-primary" id="cont" style="width:100%;justify-content:center;margin-top:10px">Continue to sign in</button>`);
+      document.getElementById("cont").onclick = () => renderLogin();
+    } catch (e) { renderSetup(e.message); }
+  };
+}
+
 // ---------------------------------------------------------------- boot
-(async function boot() {
-  if (!TOKEN) { document.getElementById("app").innerHTML = `<div class="empty" style="padding-top:80px">No session token. Open the URL printed by <code>--panel</code> (it carries <code>#token=…</code>).</div>`; return; }
-  try { const { tools } = await api("/api/catalog"); S.catalog = tools; }
-  catch (e) { document.getElementById("app").innerHTML = `<div class="empty" style="padding-top:80px">Auth failed: ${esc(e.message)}</div>`; return; }
-  render();
-  setInterval(async () => { if (S.drawer) { /* drawer refreshes via stream */ } }, 4000);
-})();
+async function boot() {
+  let me = null;
+  try { me = await api("/api/me"); } catch { /* not authed */ }
+  if (me) {
+    S.me = me.actor; S.mode = me.mode; if (me.csrf) S.csrf = me.csrf;
+    if (me.killed) { authShell(`<div class="badge b-neg"><span class="dot"></span>Kill-switch engaged</div><p class="muted">Destructive ops are disabled and sessions revoked. An owner must release it.</p><button class="btn" id="rl" style="width:100%;justify-content:center;margin-top:8px">Reload</button>`); document.getElementById("rl").onclick = () => location.reload(); return; }
+    try { const { tools } = await api("/api/catalog"); S.catalog = tools; } catch (e) { authShell(`<div class="empty">Failed to load: ${esc(e.message)}</div>`); return; }
+    render();
+    return;
+  }
+  // not authenticated — decide setup vs login
+  let status = {};
+  try { status = await fetch("/api/status").then((r) => r.json()); } catch {}
+  if (status.adminsExist) return renderLogin();
+  if (TOKEN) return renderSetup();
+  authShell(`<div class="empty">No session token. Open the URL printed by <code>--panel</code> (it carries <code>#token=…</code>), or have an owner create your account.</div>`);
+}
+boot();

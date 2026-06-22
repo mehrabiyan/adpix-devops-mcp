@@ -202,6 +202,11 @@ const FIXTURES: Record<string, Record<string, unknown>> = {
   dns_plan: {},
   ha_standup: {},
   connect_configs: {},
+  container_control: { service: "api", action: "status", confirm: false },
+  metrics_query: { query: "up" },
+  schedule_job: { action: "list" },
+  server_resize: {},
+  data_move: {},
 };
 
 describe("MCP exhaustive every-tool smoke (protocol dispatch)", () => {

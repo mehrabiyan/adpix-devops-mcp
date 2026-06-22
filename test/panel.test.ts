@@ -9,6 +9,7 @@ import { redactArgs, loadJobs, saveJobs, type JobRecord } from "../src/panel/sto
 import { buildCatalog } from "../src/panel/catalog.js";
 import { servePanel } from "../src/panel/server.js";
 import { allTools } from "../src/tools/index.js";
+import { totpCode } from "../src/panel/auth.js";
 import type { ToolDef } from "../src/tools/types.js";
 import type { Deps } from "../src/deps.js";
 import type { ExecResult, Session } from "../src/ssh.js";
@@ -179,11 +180,97 @@ describe("panel server (live)", () => {
     });
   });
 
-  it("blocks a destructive job without confirm", async () => {
+  it("blocks a destructive job without a re-auth nonce (428)", async () => {
     await withServer(async (base, token) => {
       const r = await fetch(`${base}/api/jobs`, { method: "POST", headers: { ...H(token), "content-type": "application/json" }, body: JSON.stringify({ tool: "pg_restore_db", args: { dumpPath: "x.dump" } }) });
-      expect(r.status).toBe(400);
-      expect((await r.json()).error).toContain("confirm:true");
+      expect(r.status).toBe(428);
+    });
+  });
+
+  it("preview mints a nonce that lets the destructive job through", async () => {
+    await withServer(async (base, token) => {
+      const pv = await (await fetch(`${base}/api/preview`, { method: "POST", headers: { ...H(token), "content-type": "application/json" }, body: JSON.stringify({ tool: "pg_restore_db", args: { dumpPath: "x.dump" } }) })).json();
+      expect(pv.nonce).toBeTruthy();
+      const r = await fetch(`${base}/api/jobs`, { method: "POST", headers: { ...H(token), "content-type": "application/json" }, body: JSON.stringify({ tool: "pg_restore_db", args: { dumpPath: "x.dump" }, nonce: pv.nonce }) });
+      expect(r.status).toBe(202);
+    });
+  });
+});
+
+// ---------------------------------------------------------------- Phase 2: auth + RBAC
+const J = (extra: Record<string, string> = {}) => ({ "content-type": "application/json", ...extra });
+async function setupAndLogin(base: string, token: string, username: string, password: string, role?: string) {
+  // first owner uses the bootstrap token; subsequent users created via the admin API
+  const ownerSetup = await fetch(`${base}/api/setup`, { method: "POST", headers: J(H(token)), body: JSON.stringify({ username, password }) });
+  const sec = (await ownerSetup.json()).totpSecret;
+  return login(base, username, password, sec);
+}
+async function login(base: string, username: string, password: string, secret: string) {
+  const r = await fetch(`${base}/api/login`, { method: "POST", headers: J(), body: JSON.stringify({ username, password, totp: totpCode(secret) }) });
+  const cookie = (r.headers.get("set-cookie") || "").split(";")[0];
+  const { csrf } = await r.json();
+  return { status: r.status, cookie, csrf, auth: (mut = false) => ({ cookie, ...(mut ? { "x-adpix-csrf": csrf, "content-type": "application/json" } : {}) }) };
+}
+
+describe("panel auth + RBAC (live)", () => {
+  it("token works only until the first admin exists, then login is required", async () => {
+    await withServer(async (base, token) => {
+      expect((await fetch(`${base}/api/me`, { headers: H(token) })).status).toBe(200); // token mode
+      await fetch(`${base}/api/setup`, { method: "POST", headers: J(H(token)), body: JSON.stringify({ username: "ali", password: "pw" }) });
+      expect((await fetch(`${base}/api/me`, { headers: H(token) })).status).toBe(401); // token now disabled
+    });
+  });
+
+  it("owner can log in with password + TOTP and is owner", async () => {
+    await withServer(async (base, token) => {
+      const s = await setupAndLogin(base, token, "ali", "pw");
+      expect(s.status).toBe(200);
+      const me = await (await fetch(`${base}/api/me`, { headers: { cookie: s.cookie } })).json();
+      expect(me.actor.role).toBe("owner");
+      expect(me.mode).toBe("session");
+    });
+  });
+
+  it("rejects login with a bad TOTP", async () => {
+    await withServer(async (base, token) => {
+      await fetch(`${base}/api/setup`, { method: "POST", headers: J(H(token)), body: JSON.stringify({ username: "ali", password: "pw" }) });
+      const r = await fetch(`${base}/api/login`, { method: "POST", headers: J(), body: JSON.stringify({ username: "ali", password: "pw", totp: "000000" }) });
+      expect(r.status).toBe(401);
+    });
+  });
+
+  it("a viewer is denied a mutating job (server-side RBAC)", async () => {
+    await withServer(async (base, token) => {
+      const owner = await setupAndLogin(base, token, "ali", "pw");
+      // owner creates a viewer
+      const made = await (await fetch(`${base}/api/admin/users`, { method: "POST", headers: owner.auth(true), body: JSON.stringify({ username: "vic", password: "pw", role: "viewer" }) })).json();
+      const viewer = await login(base, "vic", "pw", made.totpSecret);
+      const r = await fetch(`${base}/api/jobs`, { method: "POST", headers: viewer.auth(true), body: JSON.stringify({ tool: "adpix_update", args: {} }) });
+      expect(r.status).toBe(403);
+      // and a read-only tool is allowed
+      const ro = await fetch(`${base}/api/tools/health_check`, { method: "POST", headers: viewer.auth(true), body: JSON.stringify({ args: {} }) });
+      expect(ro.status).toBe(200);
+    });
+  });
+
+  it("audit log records actions in a verifiable chain (owner-only)", async () => {
+    await withServer(async (base, token) => {
+      const owner = await setupAndLogin(base, token, "ali", "pw");
+      await fetch(`${base}/api/tools/health_check`, { method: "POST", headers: owner.auth(true), body: JSON.stringify({ args: {} }) });
+      const a = await (await fetch(`${base}/api/admin/audit`, { headers: { cookie: owner.cookie } })).json();
+      expect(a.chain.ok).toBe(true);
+      expect(a.entries.some((e: { tool: string }) => e.tool === "panel.login")).toBe(true);
+      expect(a.entries.some((e: { tool: string }) => e.tool === "health_check")).toBe(true);
+    });
+  });
+
+  it("kill-switch engages and revokes all sessions", async () => {
+    await withServer(async (base, token) => {
+      const owner = await setupAndLogin(base, token, "ali", "pw");
+      const k = await fetch(`${base}/api/admin/kill`, { method: "POST", headers: owner.auth(true), body: JSON.stringify({ on: true }) });
+      expect((await k.json()).killed).toBe(true);
+      // revokeAll fired → the owner's cookie is now dead
+      expect((await fetch(`${base}/api/admin/audit`, { headers: { cookie: owner.cookie } })).status).toBe(401);
     });
   });
 });

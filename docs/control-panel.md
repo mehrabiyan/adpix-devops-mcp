@@ -1,10 +1,27 @@
 # AdPix Control Panel — design spec
 
-Status: **Phase 1 IMPLEMENTED** (loopback). Backend job engine + panel server + the "AdPix
-Cloud" SPA are built (`src/panel/*`, `npm start -- --panel`). Phase 2/3 below are pending.
-A self-service web control panel (cPanel / DigitalOcean-style) over the existing 72 MCP
-tools — manage the fleet, containers, backups, databases, deploys, HA, DNS and clients from
-a UI, no CLI.
+Status: **Phases 1–3 IMPLEMENTED.** Backend job engine + panel server + the "AdPix Cloud" SPA
+(Phase 1), the security spine (Phase 2: login + TOTP, RBAC, re-auth nonces, hash-chained
+audit, kill-switch), and the Phase-3 ops tools are built (`src/panel/*`, `src/tools/ops.ts`,
+`npm start -- --panel`). 76 tools, 396 tests. Remaining: the internet exposure transport
+(OIDC/WebAuthn + mTLS — see §4) and the bespoke per-screen UI layouts (the generic tool-grid
+already makes every tool usable). A self-service web control panel (cPanel / DigitalOcean-
+style) over the MCP tools — manage the fleet, containers, backups, databases, deploys, HA,
+DNS and clients from a UI, no CLI.
+
+## Phase 2 — security spine (shipped)
+- `auth.ts` — scrypt passwords + RFC-6238 TOTP (verified against the RFC vector). `admins.ts` (panel-admins.json, mode 600), `sessions.ts` (opaque server-side, idle 15m + absolute 8h, revocable, CSRF token per session).
+- `access.ts` — dual auth: bootstrap TOKEN on loopback **until the first admin exists**, then per-admin SESSION cookie (HttpOnly, SameSite=Strict, `Secure` behind TLS) + double-submit CSRF + Origin checks; Host allowlist.
+- `rbac.ts` — default-deny; viewer=read-only, operator=+ordinary mutating, owner=all; an OWNER_ONLY set (run_command, topology, security, restores, ops tools); tenant scopes gate the target.
+- `nonce.ts` — per-action re-auth: destructive jobs require a single-use, TTL-bound nonce minted from `/api/preview` (anti-replay + anti-confused-deputy), replacing the bare `confirm:true`.
+- `audit.ts` — append-only, hash-chained audit of every action (verifyChain detects tampering); off-host ship hook. `/api/admin/*` (owner-only): users, sessions, audit, kill-switch (break-glass: disables destructive ops + revokes all sessions).
+- SPA: login + first-run setup (shows the TOTP secret once), account/logout, and an admin Settings screen (users/roles, sessions, audit viewer + chain badge, kill-switch).
+
+## Phase 3 — ops tools (shipped, `src/tools/ops.ts`)
+- `container_control` — per-service start/stop/restart/status (the gap beyond adpix_restart; stop/restart are confirm-gated, warn-on-interruption).
+- `metrics_query` — PromQL read-through to the witness Prometheus (powers metric cards).
+- `schedule_job` — recurring maintenance via systemd timers (whitelisted tasks: backup, patch-check; survives panel restarts).
+- `server_resize` / `data_move` — **advisory** plans (vertical resize + volume migration are provider-specific / data-loss-risky, so they inspect + lay out the safe backup-first sequence rather than acting).
 
 ## Phase 1 — what shipped
 - `src/panel/store.ts` — job ledger (`$ADPIX_DEVOPS_HOME/jobs.json`, atomic, mode 600, secret-redacted args).

@@ -270,7 +270,9 @@ Host-key verification: the MCP now TOFU-pins each target's SSH host key (`~/.adp
 
 ## Web control panel (AdPix Cloud)
 
-A self-service control panel (cPanel / DigitalOcean-style) over the MCP tools — manage the fleet, containers, backups, databases, deploys, HA, DNS and clients from a UI, no CLI. **Phase 1** (loopback) is built; see [docs/control-panel.md](docs/control-panel.md) for the full design + the Phase-2 internet-facing hardening (OIDC + WebAuthn MFA, server-side RBAC, off-host audit, mTLS).
+A self-service control panel (cPanel / DigitalOcean-style) over the MCP tools — manage the fleet, containers, backups, databases, deploys, HA, DNS and clients from a UI, no CLI. **Phases 1–3 are built** (job engine + SPA; login + TOTP + RBAC + re-auth nonces + hash-chained audit + kill-switch; the container_control / metrics_query / schedule_job / resize+data-move tools). See [docs/control-panel.md](docs/control-panel.md). Remaining: the internet exposure transport (OIDC/WebAuthn + mTLS) and bespoke per-screen UI polish.
+
+First run is **token mode** (loopback, no login) until you create the first admin; after that it's per-admin **login (password + TOTP)** with server-side sessions. Destructive ops need a typed-confirm that mints a single-use re-auth nonce. Owners get a Settings admin panel (users/roles, sessions, audit + chain verification, kill-switch).
 
 ```bash
 node dist/index.js --panel [--port 8931]
