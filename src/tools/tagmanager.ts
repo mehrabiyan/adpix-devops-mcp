@@ -3,15 +3,13 @@ import { withSession } from "../deps.js";
 import type { Session } from "../ssh.js";
 import { uploadFile } from "../adpix.js";
 import { shq, redactSecrets, lastLines, parseComposePs, table } from "../util.js";
-import { ensureDeployKey, deployKeyInstructions, toSshUrl, gitSshEnv, coreSshCommand } from "../github.js";
+import { ensureSharedDeployKey, sharedKeyInstructions, toSshUrl, gitSshEnv, coreSshCommand } from "../github.js";
 import type { ToolDef } from "./types.js";
 
 const serverParam = z.string().optional().describe("Registered server name. Omit to use the default server.");
 const dirParam = z.string().default("/opt/adpix-tagmanager").describe("Tag Manager checkout dir on the server");
 
 const TM_REPO_URL = "https://github.com/mehrabiyan/AdpixTagManager.git";
-/** Distinct deploy-key path: GitHub deploy keys are per-repo, so TM cannot share AdPix's key. */
-const TM_DEPLOY_KEY_PATH = "/root/.ssh/adpix_tm_deploy_ed25519";
 const TM_PROJECT = "adpix-tm";
 
 /** The Tag Manager delivery core (deploy/docker-compose.yml). api+edge+varnish are the serving services. */
@@ -107,32 +105,30 @@ export const tagmanagerTools: ToolDef[] = [
 
         await s.exec("command -v git >/dev/null || (apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git ca-certificates)", { timeoutMs: 300_000 });
 
+        // Private repo: the ONE shared deploy key managed on the MCP (added to GitHub once, distributed
+        // to each server). keyName "adpix_tm" → /root/.ssh/adpix_tm_deploy_ed25519 (distinct from AdPix's).
         const cloneCmd = (url: string, kEnv: string, postCfg: string) =>
           `if [ -d ${shq(dir + "/.git")} ]; then cd ${shq(dir)} && ${kEnv}git fetch origin ${shq(a.branch)} && git checkout ${shq(a.branch)} && ${kEnv}git pull --ff-only origin ${shq(a.branch)}; ` +
           `else mkdir -p $(dirname ${shq(dir)}) && ${kEnv}git clone -b ${shq(a.branch)} ${shq(url)} ${shq(dir)}${postCfg}; fi`;
         const useKey = /^(git@|ssh:\/\/)/.test(a.repoUrl);
         let cloneUrl = a.repoUrl, keyEnv = "", postCfg = "";
-        if (useKey) {
-          const st = await ensureDeployKey(s, toSshUrl(a.repoUrl) ?? a.repoUrl, TM_DEPLOY_KEY_PATH);
-          if (!st.authorized) return `## Repo access — action needed\n${deployKeyInstructions(st)}\n\n(Nothing installed yet — add the key, then re-run tm_install.)`;
-          cloneUrl = st.sshUrl; keyEnv = gitSshEnv(TM_DEPLOY_KEY_PATH); postCfg = ` && git -C ${shq(dir)} config core.sshCommand ${shq(coreSshCommand(TM_DEPLOY_KEY_PATH))}`;
-        }
+        const applyKey = async (): Promise<boolean> => {
+          const k = await ensureSharedDeployKey(deps, s, toSshUrl(a.repoUrl) ?? a.repoUrl, "adpix_tm");
+          if (!k.authorized) { sections.push(`## Repo is private — add ONE deploy key (reused for every server)\n${sharedKeyInstructions(k)}`); return false; }
+          cloneUrl = k.sshUrl; keyEnv = gitSshEnv(k.prodKeyPath); postCfg = ` && git -C ${shq(dir)} config core.sshCommand ${shq(coreSshCommand(k.prodKeyPath))}`;
+          sections.push(`## Repo access\nShared read-only deploy key (managed on the MCP) authorized for ${k.owner}/${k.repo}; distributed to ${srv.name} and cloning over SSH.`);
+          return true;
+        };
+        if (useKey && !(await applyKey())) return sections.join("\n\n") + "\n\n(Nothing installed yet — add the key above to the repo's Deploy keys ONCE, then re-run tm_install. Every future server reuses it.)";
         let clone = await s.exec(cloneCmd(cloneUrl, keyEnv, postCfg), { timeoutMs: 300_000 });
-        if (clone.code !== 0) {
+        if (clone.code !== 0 && !useKey) {
           const authish = /could not read Username|Authentication failed|terminal prompts disabled|repository not found|Permission denied|fatal: Could not read/i.test(clone.stderr + clone.stdout);
-          if (authish && !useKey) {
-            // Private repo over HTTPS (no TTY) — auto-switch to the read-only deploy-key flow.
-            const st = await ensureDeployKey(s, toSshUrl(a.repoUrl) ?? a.repoUrl, TM_DEPLOY_KEY_PATH);
-            if (!st.authorized) {
-              sections.push(`## Repo is private — add a deploy key\n${deployKeyInstructions(st)}`);
-              return sections.join("\n\n") + "\n\n(Nothing installed yet — add the key above to the repo's Deploy keys, then re-run tm_install. The key is detected automatically.)";
-            }
-            cloneUrl = st.sshUrl;
-            sections.push(`## Repo access\nRead-only deploy key ${TM_DEPLOY_KEY_PATH} authorized for ${st.owner}/${st.repo}; cloning over SSH.`);
-            clone = await s.exec(cloneCmd(st.sshUrl, gitSshEnv(TM_DEPLOY_KEY_PATH), ` && git -C ${shq(dir)} config core.sshCommand ${shq(coreSshCommand(TM_DEPLOY_KEY_PATH))}`), { timeoutMs: 300_000 });
+          if (authish) {
+            if (!(await applyKey())) return sections.join("\n\n") + "\n\n(Nothing installed yet — add the key above to the repo's Deploy keys ONCE, then re-run tm_install. Every future server reuses it.)";
+            clone = await s.exec(cloneCmd(cloneUrl, keyEnv, postCfg), { timeoutMs: 300_000 });
           }
-          if (clone.code !== 0) return (sections.length ? sections.join("\n\n") + "\n\n" : "") + `## Checkout FAILED (exit ${clone.code})\n${lastLines(clone.stderr || clone.stdout, 30)}`;
         }
+        if (clone.code !== 0) return (sections.length ? sections.join("\n\n") + "\n\n" : "") + `## Checkout FAILED (exit ${clone.code})\n${lastLines(clone.stderr || clone.stdout, 30)}`;
         sections.push(`## Checkout\n${cloneUrl} @ ${a.branch} → ${dir}`);
 
         // Secrets: (re)write deploy/.env only when secret params are supplied; require all on first write.

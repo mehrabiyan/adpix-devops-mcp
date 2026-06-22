@@ -11,18 +11,20 @@ const tool = (name: string) => {
 };
 
 type Resp = [RegExp, Partial<ExecResult> | ((c: string) => Partial<ExecResult>)];
-function fakeDeps(responses: Resp[]) {
-  const calls: string[] = [];
+function pick(responses: Resp[], cmd: string): ExecResult {
+  for (const [re, res] of responses) if (re.test(cmd)) return { code: 0, stdout: "", stderr: "", ...(typeof res === "function" ? res(cmd) : res) };
+  return { code: 0, stdout: "", stderr: "" };
+}
+// `responses` answer the prod SESSION; `localResponses` answer the MCP (deps.local) — the shared
+// deploy key is generated + authorized there, then distributed to the server.
+function fakeDeps(responses: Resp[], localResponses: Resp[] = []) {
+  const calls: string[] = []; const localCalls: string[] = [];
   const server: ServerConfig = { name: "tm1", host: "10.0.0.3", port: 22, username: "root", adpixDir: "/opt/adpix" };
   const session: Session = {
     server, authMethod: "publickey", close: () => {},
-    exec: async (cmd: string) => {
-      calls.push(cmd);
-      for (const [re, res] of responses) if (re.test(cmd)) return { code: 0, stdout: "", stderr: "", ...(typeof res === "function" ? res(cmd) : res) };
-      return { code: 0, stdout: "", stderr: "" };
-    },
+    exec: async (cmd: string) => { calls.push(cmd); return pick(responses, cmd); },
   };
-  return { deps: { resolve: () => server, connect: async () => session, local: async () => ({ code: 0, stdout: "", stderr: "" }) } as Deps, calls };
+  return { deps: { resolve: () => server, connect: async () => session, local: async (cmd: string) => { localCalls.push(cmd); return pick(localResponses, cmd); } } as Deps, calls, localCalls };
 }
 
 const INSTALLED: Resp = [/test -d .*\.git.* && echo yes/, { stdout: "yes" }];
@@ -65,38 +67,39 @@ describe("tm_install", () => {
     expect(calls.filter((c) => c.includes("base64 -d")).length).toBe(1); // .env written once, never echoed
   });
 
-  it("private repo over HTTPS: auto-switches to a deploy key and prints the key + instructions", async () => {
-    const { deps } = fakeDeps([
-      [/docker compose version/, { stdout: "ok" }],
-      [/command -v git/, { code: 0 }],
-      [/git clone -b 'main' 'https:/, { code: 128, stderr: "fatal: could not read Username for 'https://github.com': No such device or address" }],
-      [/ssh-keygen/, { code: 0 }],
-      [/cat .*\.pub/, { stdout: "ssh-ed25519 AAAAKEY adpix-deploy@host" }],
-      [/git ls-remote/, { stdout: "NO" }], // key not yet authorized
-    ]);
+  it("private repo over HTTPS: auto-switches to the shared MCP key and prints it (unauthorized)", async () => {
+    const { deps } = fakeDeps(
+      [
+        [/docker compose version/, { stdout: "ok" }],
+        [/command -v git/, { code: 0 }],
+        [/git clone -b 'main' 'https:/, { code: 128, stderr: "fatal: could not read Username for 'https://github.com': No such device or address" }],
+      ],
+      [[/adpix_tm_deploy_ed25519\.pub/, { stdout: "ssh-ed25519 AAAAKEY mcp" }], [/git ls-remote/, { stdout: "NO" }]]
+    );
     const out = await tool("tm_install").handler(deps, { dir: "/opt/adpix-tagmanager", repoUrl: "https://github.com/mehrabiyan/AdpixTagManager.git", branch: "main", s3Bucket: "adpix-tags", timeoutSeconds: 1800 });
-    expect(out).toMatch(/deploy key/i);
+    expect(out).toMatch(/reused for every server/i);
     expect(out).toContain("ssh-ed25519 AAAAKEY");
     expect(out).toMatch(/Nothing installed yet/);
   });
 
-  it("private repo: clones over SSH once the deploy key is authorized", async () => {
-    const { deps, calls } = fakeDeps([
-      [/docker compose version/, { stdout: "ok" }],
-      [/command -v git/, { code: 0 }],
-      [/git clone -b 'main' 'https:/, { code: 128, stderr: "could not read Username for 'https://github.com'" }],
-      [/ssh-keygen/, { code: 0 }],
-      [/cat .*\.pub/, { stdout: "ssh-ed25519 KEY" }],
-      [/git ls-remote/, { stdout: "OK" }], // authorized
-      [/git clone -b 'main' 'git@github/, { code: 0 }], // SSH clone succeeds
-      [/deploy\/\.env.* && echo yes/, { stdout: "no" }],
-      [/base64 -d/, { code: 0 }],
-      [/--env-file deploy\/\.env build/, { code: 0 }],
-      [/--env-file deploy\/\.env up -d/, { code: 0 }],
-      [/8686\/healthz/, { code: 0, stdout: "healthy after ~5s (api+edge 200)" }],
-    ]);
+  it("private repo: distributes the shared key + clones over SSH once authorized", async () => {
+    const { deps, calls } = fakeDeps(
+      [
+        [/docker compose version/, { stdout: "ok" }],
+        [/command -v git/, { code: 0 }],
+        [/git clone -b 'main' 'https:/, { code: 128, stderr: "could not read Username for 'https://github.com'" }],
+        [/git clone -b 'main' 'git@github/, { code: 0 }], // SSH clone succeeds
+        [/deploy\/\.env.* && echo yes/, { stdout: "no" }],
+        [/base64 -d/, { code: 0 }],
+        [/--env-file deploy\/\.env build/, { code: 0 }],
+        [/--env-file deploy\/\.env up -d/, { code: 0 }],
+        [/8686\/healthz/, { code: 0, stdout: "healthy after ~5s (api+edge 200)" }],
+      ],
+      [[/adpix_tm_deploy_ed25519\.pub/, { stdout: "ssh-ed25519 KEY mcp" }], [/git ls-remote/, { stdout: "OK" }], [/base64 </, { stdout: "QkFTRTY0" }]]
+    );
     const out = await tool("tm_install").handler(deps, { dir: "/opt/adpix-tagmanager", repoUrl: "https://github.com/mehrabiyan/AdpixTagManager.git", branch: "main", databaseUrl: "postgres://x", authIssuer: "https://account.adpix.io", s3AccessKey: "k", s3SecretKey: "s", purgeToken: "p", s3Bucket: "adpix-tags", timeoutSeconds: 1800 });
     expect(out).toContain("Done");
+    expect(calls.some((c) => /base64 -d > '\/root\/\.ssh\/adpix_tm_deploy_ed25519'/.test(c))).toBe(true); // key pushed to the server
     expect(calls.some((c) => /git clone -b 'main' 'git@github\.com:mehrabiyan\/AdpixTagManager\.git'/.test(c))).toBe(true);
   });
 

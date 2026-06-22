@@ -1,4 +1,7 @@
+import * as path from "node:path";
 import type { Session } from "./ssh.js";
+import type { Deps } from "./deps.js";
+import { registryDir } from "./registry.js";
 import { shq } from "./util.js";
 
 /**
@@ -72,6 +75,59 @@ export async function ensureDeployKey(
     { timeoutMs: 45_000 }
   );
   return { pubKey: pub, sshUrl, owner: gh.owner, repo: gh.repo, authorized: /\bOK\b/.test(test.stdout) };
+}
+
+/**
+ * Shared deploy key managed on the MCP (control plane) and reused for every server.
+ *
+ * The key lives on the MCP under registryDir()/.ssh and is added to GitHub ONCE. On each install
+ * the MCP checks it's authorized (ls-remote, run locally on the MCP), then distributes it to the
+ * target server at the canonical per-server path (the same path cicd_enable expects). So adding a
+ * new server needs NO new GitHub deploy key — unlike per-server keygen.
+ *
+ * keyName "adpix" → /root/.ssh/adpix_deploy_ed25519; "adpix_tm" → /root/.ssh/adpix_tm_deploy_ed25519.
+ */
+export interface SharedKeyStatus { pubKey: string; sshUrl: string; owner: string; repo: string; authorized: boolean; prodKeyPath: string }
+export async function ensureSharedDeployKey(deps: Deps, s: Session, repoUrl: string, keyName: string): Promise<SharedKeyStatus> {
+  const gh = parseGithubRemote(repoUrl);
+  if (!gh) throw new Error(`Not a GitHub repo URL: ${repoUrl}`);
+  const sshUrl = `git@github.com:${gh.owner}/${gh.repo}.git`;
+  const dir = path.join(registryDir(), ".ssh");
+  const keyPath = path.join(dir, `${keyName}_deploy_ed25519`);
+  const prodKeyPath = `/root/.ssh/${keyName}_deploy_ed25519`;
+
+  // 1. Ensure the canonical key exists ON THE MCP (generate once, never on the prod servers).
+  await deps.local(
+    `install -d -m700 ${shq(dir)} && [ -f ${shq(keyPath)} ] || ssh-keygen -t ed25519 -N '' -C ${shq("adpix-deploy-mcp")} -f ${shq(keyPath)} >/dev/null 2>&1`,
+    { timeoutMs: 30_000 }
+  );
+  const pub = (await deps.local(`cat ${shq(keyPath + ".pub")} 2>/dev/null`)).stdout.trim();
+
+  // 2. Authorized on GitHub? Checked from the MCP (it has GitHub egress for its own self-update).
+  const test = await deps.local(
+    `GIT_SSH_COMMAND=${shq(sshOpts(keyPath, true))} git ls-remote ${shq(sshUrl)} HEAD >/dev/null 2>&1 && echo OK || echo NO`,
+    { timeoutMs: 45_000 }
+  );
+  const authorized = /\bOK\b/.test(test.stdout);
+  if (!authorized) return { pubKey: pub, sshUrl, owner: gh.owner, repo: gh.repo, authorized: false, prodKeyPath };
+
+  // 3. Distribute the (read-only) key to the target server at the canonical path. base64 over the
+  // wire to avoid any quoting/newline trouble; written 0600 under a tight umask.
+  const b64 = (await deps.local(`base64 < ${shq(keyPath)} | tr -d '\\n'`)).stdout.trim();
+  await s.exec(`umask 077; install -d -m700 "$(dirname ${shq(prodKeyPath)})" && printf %s ${shq(b64)} | base64 -d > ${shq(prodKeyPath)} && chmod 600 ${shq(prodKeyPath)}`);
+  return { pubKey: pub, sshUrl, owner: gh.owner, repo: gh.repo, authorized: true, prodKeyPath };
+}
+
+/** Instructions for authorizing the ONE shared MCP deploy key (added to GitHub a single time). */
+export function sharedKeyInstructions(st: SharedKeyStatus): string {
+  return [
+    `This private repo needs ONE read-only deploy key — it is managed on the MCP and reused for every server you add.`,
+    ``,
+    `    ${st.pubKey || "(key generation failed on the MCP — check ssh-keygen there)"}`,
+    ``,
+    `→ https://github.com/${st.owner}/${st.repo}/settings/keys  (Add deploy key; leave "Allow write access" UNCHECKED)`,
+    `Add it once. Every server the MCP provisions reuses this key automatically — no per-server key.`,
+  ].join("\n");
 }
 
 /** Human instructions for authorizing a not-yet-authorized deploy key. */

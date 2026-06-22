@@ -9,11 +9,10 @@ import {
   waitHealthyCmd,
 } from "../adpix.js";
 import {
-  ADPIX_DEPLOY_KEY_PATH,
   coreSshCommand,
-  deployKeyInstructions,
-  ensureDeployKey,
+  ensureSharedDeployKey,
   gitSshEnv,
+  sharedKeyInstructions,
   toSshUrl,
 } from "../github.js";
 import { shq, redactSecrets, lastLines, parseComposePs, table } from "../util.js";
@@ -145,54 +144,42 @@ export const lifecycleTools: ToolDef[] = [
           { timeoutMs: 300_000 }
         );
 
-        // Private repo: set up a read-only deploy key and clone over SSH. The
-        // canonical key path is shared with cicd_enable, so enabling CD later
-        // needs no re-auth. First run prints the key and stops (idempotent).
-        const useKey = a.deployKey || /^(git@|ssh:\/\/)/.test(a.repoUrl);
-        let cloneUrl = a.repoUrl;
-        let keyEnv = "";
-        let postCloneCfg = "";
-        if (useKey) {
-          const st = await ensureDeployKey(s, toSshUrl(a.repoUrl) ?? a.repoUrl);
-          if (!st.authorized) {
-            sections.push(`## Repo access — action needed\n${deployKeyInstructions(st)}`);
-            return sections.join("\n\n") + "\n\n(Nothing installed yet — re-run adpix_install after adding the key.)";
-          }
-          cloneUrl = st.sshUrl;
-          keyEnv = gitSshEnv(ADPIX_DEPLOY_KEY_PATH);
-          postCloneCfg = ` && git -C ${shq(dir)} config core.sshCommand ${shq(coreSshCommand(ADPIX_DEPLOY_KEY_PATH))}`;
-          sections.push(`## Repo access\nRead-only deploy key ${ADPIX_DEPLOY_KEY_PATH} authorized for ${st.owner}/${st.repo}; cloning over SSH.`);
-        }
-
-        // Clone or fast-forward the checkout (keyEnv is empty for a public HTTPS clone).
+        // Private repo: use the ONE shared deploy key managed on the MCP (added to GitHub once,
+        // distributed to each server) — no per-server key. The on-server path is shared with
+        // cicd_enable, so enabling CD later needs no re-auth.
         const cloneCmd = (url: string, kEnv: string, postCfg: string) =>
           `if [ -d ${shq(dir + "/.git")} ]; then cd ${shq(dir)} && ${kEnv}git fetch origin ${shq(a.branch)} && git checkout ${shq(a.branch)} && ${kEnv}git pull --ff-only origin ${shq(a.branch)}; ` +
           `else mkdir -p $(dirname ${shq(dir)}) && ${kEnv}git clone -b ${shq(a.branch)} ${shq(url)} ${shq(dir)}${postCfg}; fi`;
+        const useKey = a.deployKey || /^(git@|ssh:\/\/)/.test(a.repoUrl);
+        let cloneUrl = a.repoUrl, keyEnv = "", postCloneCfg = "";
+        // Switch to the shared key: returns false (and pushes a "## Repo is private" section) when
+        // the key isn't authorized on GitHub yet, so the caller stops and asks to add it once.
+        const applyKey = async (): Promise<boolean> => {
+          const k = await ensureSharedDeployKey(deps, s, toSshUrl(a.repoUrl) ?? a.repoUrl, "adpix");
+          if (!k.authorized) { sections.push(`## Repo is private — add ONE deploy key (reused for every server)\n${sharedKeyInstructions(k)}`); return false; }
+          cloneUrl = k.sshUrl;
+          keyEnv = gitSshEnv(k.prodKeyPath);
+          postCloneCfg = ` && git -C ${shq(dir)} config core.sshCommand ${shq(coreSshCommand(k.prodKeyPath))}`;
+          sections.push(`## Repo access\nShared read-only deploy key (managed on the MCP) authorized for ${k.owner}/${k.repo}; distributed to ${srv.name} and cloning over SSH.`);
+          return true;
+        };
+        if (useKey && !(await applyKey())) {
+          return sections.join("\n\n") + "\n\n(Nothing installed yet — add the key above to the repo's Deploy keys ONCE, then re-run adpix_install. Every future server reuses it.)";
+        }
+
         let clone = await s.exec(cloneCmd(cloneUrl, keyEnv, postCloneCfg), { timeoutMs: 300_000 });
-        let usedUrl = cloneUrl;
-        if (clone.code !== 0) {
-          const authish = /could not read Username|Authentication failed|terminal prompts disabled|repository not found|Permission denied|fatal: Could not read/i.test(
-            clone.stderr + clone.stdout
-          );
-          if (authish && !useKey) {
-            // Private repo over HTTPS (no TTY to prompt) — auto-switch to the read-only deploy-key flow.
-            const st = await ensureDeployKey(s, toSshUrl(a.repoUrl) ?? a.repoUrl);
-            if (!st.authorized) {
-              sections.push(`## Repo is private — add a deploy key\n${deployKeyInstructions(st)}`);
-              return sections.join("\n\n") + "\n\n(Nothing installed yet — add the key above to the repo's Deploy keys, then re-run adpix_install. The key is detected automatically.)";
-            }
-            usedUrl = st.sshUrl;
-            sections.push(`## Repo access\nRead-only deploy key ${ADPIX_DEPLOY_KEY_PATH} authorized for ${st.owner}/${st.repo}; cloning over SSH.`);
-            clone = await s.exec(
-              cloneCmd(st.sshUrl, gitSshEnv(ADPIX_DEPLOY_KEY_PATH), ` && git -C ${shq(dir)} config core.sshCommand ${shq(coreSshCommand(ADPIX_DEPLOY_KEY_PATH))}`),
-              { timeoutMs: 300_000 }
-            );
-          }
-          if (clone.code !== 0) {
-            return sections.join("\n\n") + `\n\n## Checkout FAILED (exit ${clone.code})\n${lastLines(clone.stderr || clone.stdout, 40)}`;
+        if (clone.code !== 0 && !useKey) {
+          const authish = /could not read Username|Authentication failed|terminal prompts disabled|repository not found|Permission denied|fatal: Could not read/i.test(clone.stderr + clone.stdout);
+          if (authish) {
+            // Private repo over HTTPS (no TTY) — auto-switch to the shared deploy key.
+            if (!(await applyKey())) return sections.join("\n\n") + "\n\n(Nothing installed yet — add the key above to the repo's Deploy keys ONCE, then re-run adpix_install. Every future server reuses it.)";
+            clone = await s.exec(cloneCmd(cloneUrl, keyEnv, postCloneCfg), { timeoutMs: 300_000 });
           }
         }
-        sections.push(`## Checkout\n${usedUrl} @ ${a.branch} → ${dir}`);
+        if (clone.code !== 0) {
+          return sections.join("\n\n") + `\n\n## Checkout FAILED (exit ${clone.code})\n${lastLines(clone.stderr || clone.stdout, 40)}`;
+        }
+        sections.push(`## Checkout\n${cloneUrl} @ ${a.branch} → ${dir}`);
 
         // deploy.sh: non-interactive (no TTY over exec). DOMAIN= empty selects HTTP-on-IP mode.
         const env = `DOMAIN=${shq(a.domain ?? "")}${a.adminEmail ? ` ADMIN_EMAIL=${shq(a.adminEmail)}` : ""}`;

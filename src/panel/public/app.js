@@ -607,7 +607,7 @@ function installForm(stack) {
        <label class="fld"><span class="lab">domain · optional — HTTPS via Caddy</span><input class="input" data-k="domain" placeholder="analytics.example.com (omit for HTTP-on-IP)"></label>
        <label class="fld"><span class="lab">adminEmail · optional</span><input class="input" data-k="adminEmail" placeholder="admin@example.com"></label>
        <label class="fld"><span class="lab">branch</span><input class="input" data-k="branch" placeholder="main"></label>
-       <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;margin:2px 0 4px;cursor:pointer"><input type="checkbox" data-k="deployKey" data-bool="1"> Private repo — generate a read-only deploy key on the server</label>`
+       <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;margin:2px 0 4px;cursor:pointer"><input type="checkbox" data-k="deployKey" data-bool="1"> Private repo — use the MCP's shared deploy key (added to GitHub once, reused for every server)</label>`
     : `<label class="fld"><span class="lab">server</span>${srvField}</label>
        <label class="fld"><span class="lab">dir</span><input class="input" data-k="dir" placeholder="/opt/adpix-tagmanager"></label>
        <label class="fld"><span class="lab">databaseUrl · required</span><input class="input" data-k="databaseUrl" placeholder="postgres://user:pass@host:5432/db"></label>
