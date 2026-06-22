@@ -24,6 +24,7 @@ import { buildMonitorView } from "./aggregate/monitor.js";
 import { buildQuorumView } from "./aggregate/cluster.js";
 import { buildDeployView } from "./aggregate/deploy.js";
 import { buildMcpStatus } from "./aggregate/mcp.js";
+import { buildStacksStatus } from "./aggregate/stacks.js";
 import { classifyError } from "./errors.js";
 import { loadRegistry, saveRegistry } from "../registry.js";
 import { panelMcpKeyPath, ensureMcpKey, saveUploadedKey } from "./keys.js";
@@ -194,6 +195,13 @@ export function createPanelServer(opts: PanelOpts): Server {
         const az = authorize(actor.role, actor.scopes, catByName.get("mcp_status")!, {});
         if (!az.ok) { sendJson(res, 403, { error: az.reason }); return; }
         sendJson(res, 200, await buildMcpStatus(deps));
+        return;
+      }
+      // ---- product stacks: per-stack version + commits-behind origin ----
+      if (path === "/api/stacks" && method === "GET") {
+        const az = authorize(actor.role, actor.scopes, catByName.get("stack_status")!, {});
+        if (!az.ok) { sendJson(res, 403, { error: az.reason }); return; }
+        sendJson(res, 200, await buildStacksStatus(deps, url.searchParams.get("server") ?? undefined));
         return;
       }
       // ---- databases view (structured stat cards + tune diff) ----

@@ -203,6 +203,7 @@ const FIXTURES: Record<string, Record<string, unknown>> = {
   ha_standup: {},
   connect_configs: {},
   mcp_status: {},
+  stack_status: {},
   stack_update: { stack: "analytics", confirm: false },
   container_control: { service: "api", action: "status", confirm: false },
   metrics_query: { query: "up" },

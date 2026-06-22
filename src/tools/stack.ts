@@ -11,7 +11,7 @@ const TM_REPO_URL = "https://github.com/mehrabiyan/AdpixTagManager.git";
 interface Args {
   server?: string; stack: "analytics" | "tagmanager" | "idp"; dir?: string; branch?: string;
   statelessOnly: boolean; rollbackOnFailure: boolean; force: boolean; confirm: boolean; timeoutSeconds: number;
-  composeFile?: string; project?: string; service?: string; migrateCmd?: string;
+  composeFile?: string; project?: string; service?: string; migrateCmd?: string; backupFirst: boolean;
 }
 
 /**
@@ -32,6 +32,7 @@ interface StackCfg {
   stateless: (a: Args) => string[];
   stateful: string[];
   migrate?: (a: Args) => string | undefined; // compose subcommand, e.g. "run --rm migrate"
+  backup?: string; // shell run from the checkout dir, before migrating, when backupFirst:true
   health: (t: number, a: Args, compose: string) => string;
 }
 const STACKS: Record<string, StackCfg> = {
@@ -41,6 +42,7 @@ const STACKS: Record<string, StackCfg> = {
     stateless: () => ["ingest", "api", "worker", "identity-job", "mmm-job", "integrity-job", "lift-job", "web", "caddy"],
     stateful: ["postgres", "clickhouse", "redis"],
     migrate: () => "run --rm migrate",
+    backup: "bash scripts/backup.sh",
     health: (t) => waitHealthyCmd(t),
   },
   tagmanager: {
@@ -62,6 +64,27 @@ const STACKS: Record<string, StackCfg> = {
     health: (_t, a, compose) => `${compose} ps ${shq(a.service || "auth")} 2>/dev/null | grep -qiE 'up|running|healthy' && echo ok || { echo 'auth service not running'; exit 1; }`,
   },
 };
+
+/** Public meta (repo + default checkout dir) per stack — shared with the panel's /api/stacks aggregator. */
+export const STACK_META: Record<string, { repoUrl: string; defaultDir?: string }> =
+  Object.fromEntries(Object.entries(STACKS).map(([k, v]) => [k, { repoUrl: v.repoUrl, defaultDir: v.defaultDir }]));
+
+export function stackDir(srv: { adpixDir?: string }, stack: string, dir?: string): string {
+  return dir || STACKS[stack].defaultDir || srv.adpixDir || "/opt/adpix";
+}
+
+export interface StackProbe { installed: boolean; commit: string; branch: string; behind: string; subject: string; dir: string }
+/** One read-only exec: is the checkout a git repo, its HEAD, branch, commits-behind origin, and last subject. */
+export async function probeStack(s: Session, dir: string): Promise<StackProbe> {
+  const r = await s.exec(
+    `cd ${shq(dir)} 2>/dev/null && test -d .git && { git fetch -q origin 2>/dev/null; b=$(git rev-parse --abbrev-ref HEAD); printf '%s\\t%s\\t%s\\t%s' "$(git rev-parse --short HEAD)" "$b" "$(git rev-list --count HEAD..origin/$b 2>/dev/null || echo '?')" "$(git log -1 --format=%s)"; } || printf 'NOGIT'`,
+    { timeoutMs: 40_000 }
+  );
+  const out = r.stdout.trim();
+  if (!out || out === "NOGIT") return { installed: false, commit: "", branch: "", behind: "?", subject: "", dir };
+  const [commit = "", branch = "", behind = "?", subject = ""] = out.split("\t");
+  return { installed: true, commit, branch, behind, subject, dir };
+}
 
 export const stackTools: ToolDef[] = [
   {
@@ -88,6 +111,7 @@ export const stackTools: ToolDef[] = [
       project: z.string().optional().describe("idp: docker compose -p project name"),
       service: z.string().optional().describe("idp: the auth compose service to recreate (default: auth)"),
       migrateCmd: z.string().optional().describe("idp: optional compose subcommand to run migrations (e.g. run --rm migrate)"),
+      backupFirst: z.boolean().default(false).describe("analytics: run a pg_dump + ClickHouse-native backup before migrating"),
     },
     annotations: { destructiveHint: true, openWorldHint: true },
     handler: async (deps, args) => {
@@ -95,7 +119,7 @@ export const stackTools: ToolDef[] = [
       const cfg = STACKS[a.stack];
       return withSession(deps, a.server, async (s, srv) => {
         if (!a.confirm) return `REFUSED: stack_update ${a.stack} rebuilds + recreates ${a.statelessOnly ? "the stateless" : "all"} containers and runs migrations. Re-run with confirm:true.`;
-        const dir = a.dir || cfg.defaultDir || srv.adpixDir;
+        const dir = stackDir(srv, a.stack, a.dir);
         const compose = cfg.compose(dir, a);
         const big = a.timeoutSeconds * 1000;
         const at = (cmd: string, ms = big) => s.exec(`cd ${shq(dir)} && ${cmd}`, { timeoutMs: ms });
@@ -114,6 +138,16 @@ export const stackTools: ToolDef[] = [
         const svc = a.statelessOnly ? stateless.join(" ") : "";
         const build = await s.exec(`${compose} build ${svc} 2>&1`, { timeoutMs: big });
         if (build.code !== 0) return `Updated ${before} → ${after} but BUILD FAILED — still running the old containers:\n${lastLines(build.stdout, 20)}`;
+
+        let backupNote = "";
+        if (a.backupFirst && cfg.backup) {
+          const bk = await at(cfg.backup, big);
+          if (bk.code !== 0) {
+            if (a.rollbackOnFailure) await git(`checkout ${shq(before)} 2>&1`);
+            return `Pre-update BACKUP FAILED — aborted before migrating (rolled the checkout back to ${before}, nothing changed):\n${lastLines(bk.stdout, 15)}`;
+          }
+          backupNote = "backup taken; ";
+        }
 
         let migrateNote = "";
         const migrate = cfg.migrate?.(a);
@@ -138,10 +172,38 @@ export const stackTools: ToolDef[] = [
         const preserved = cfg.stateful.length ? `${cfg.stateful.join(", ")} + their named volumes` : "none in this compose (the account center's control DB is external)";
         return [
           `# ${a.stack} updated ${before} → ${after} (${branch})`,
-          `${migrateNote}recreated ${a.statelessOnly ? `${stateless.length} stateless service(s) (${stateless.join(", ")})` : "all services"}.`,
+          `${backupNote}${migrateNote}recreated ${a.statelessOnly ? `${stateless.length} stateless service(s) (${stateless.join(", ")})` : "all services"}.`,
           `Stateful preserved (never recreated or deleted): ${preserved}.`,
           gate.ok ? "Front door healthy." : "⚠ health gate did not confirm — check the stack.",
         ].join("\n");
+      });
+    },
+  },
+  {
+    name: "stack_status",
+    title: "Product stack update status",
+    description:
+      "Read-only: for each product stack (analytics | tagmanager | idp) — whether it's installed, its current " +
+      "commit + subject, branch, and how many commits it is behind its GitHub origin. Omit `stack` to report all " +
+      "three. Powers the panel's per-stack update buttons (the read-only counterpart to stack_update).",
+    schema: {
+      server: z.string().optional().describe("Target server. Omit for the default."),
+      stack: z.enum(["analytics", "tagmanager", "idp"]).optional().describe("One stack; omit for all three"),
+      dir: z.string().optional().describe("Override the checkout dir (only meaningful with a single stack)"),
+    },
+    annotations: { readOnlyHint: true },
+    handler: async (deps, args) => {
+      const a = args as { server?: string; stack?: "analytics" | "tagmanager" | "idp"; dir?: string };
+      const stacks = a.stack ? [a.stack] : ["analytics", "tagmanager", "idp"];
+      return withSession(deps, a.server, async (s, srv) => {
+        const rows: string[] = [];
+        for (const st of stacks) {
+          const p = await probeStack(s, stackDir(srv, st, a.stack ? a.dir : undefined));
+          rows.push(p.installed
+            ? `${st}: ${p.commit} (${p.branch}) — ${p.behind === "0" ? "up to date" : `${p.behind} behind origin`}  ·  ${p.subject}`
+            : `${st}: not installed at ${p.dir}`);
+        }
+        return rows.join("\n");
       });
     },
   },

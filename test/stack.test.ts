@@ -94,4 +94,49 @@ describe("stack_update", () => {
     expect(calls.some((c) => /run --rm migrate/.test(c))).toBe(false); // TM has no data migrations
     expect(out).toMatch(/redis, minio/);
   });
+
+  it("backupFirst: runs the backup BEFORE the migrate", async () => {
+    const { deps, calls } = stackDeps();
+    const out = await tool("stack_update").handler(deps, { stack: "analytics", statelessOnly: true, rollbackOnFailure: true, force: false, confirm: true, timeoutSeconds: 600, backupFirst: true });
+    const bk = calls.findIndex((c) => /backup\.sh/.test(c));
+    const mg = calls.findIndex((c) => /run --rm migrate/.test(c));
+    expect(bk).toBeGreaterThanOrEqual(0); expect(mg).toBeGreaterThan(bk); // backup precedes migrate
+    expect(out).toMatch(/backup taken/);
+  });
+
+  it("backupFirst: a failed backup aborts before migrating", async () => {
+    const { deps, calls } = stackDeps({ fail: /backup\.sh/ });
+    const out = await tool("stack_update").handler(deps, { stack: "analytics", statelessOnly: true, rollbackOnFailure: true, force: false, confirm: true, timeoutSeconds: 600, backupFirst: true });
+    expect(out).toMatch(/BACKUP FAILED/);
+    expect(calls.some((c) => /run --rm migrate/.test(c))).toBe(false); // never migrated
+  });
+});
+
+describe("stack_status", () => {
+  function statusDeps(probe: (cmd: string) => string) {
+    const session: Session = {
+      server: SRV, authMethod: "publickey", close: () => {},
+      exec: async (cmd): Promise<ExecResult> => ({ code: 0, stdout: probe(cmd), stderr: "" }),
+    };
+    return { resolve: () => SRV, connect: async () => session, local: async () => ({ code: 0, stdout: "", stderr: "" }) } as Deps;
+  }
+
+  it("reports commit / branch / behind per stack", async () => {
+    const deps = statusDeps((c) => /adpix-tagmanager/.test(c) ? "NOGIT" : "abc1234\tmain\t2\tship it");
+    const out = await tool("stack_status").handler(deps, { stack: "analytics" });
+    expect(out).toMatch(/analytics: abc1234 \(main\) — 2 behind origin/);
+  });
+
+  it("marks an absent checkout as not installed", async () => {
+    const deps = statusDeps(() => "NOGIT");
+    const out = await tool("stack_status").handler(deps, { stack: "idp" });
+    expect(out).toMatch(/idp: not installed/);
+  });
+
+  it("reports all three stacks when stack is omitted", async () => {
+    const deps = statusDeps(() => "aaa1111\tmain\t0\tx");
+    const out = await tool("stack_status").handler(deps, {});
+    expect(out).toMatch(/analytics:/); expect(out).toMatch(/tagmanager:/); expect(out).toMatch(/idp:/);
+    expect(out).toMatch(/up to date/);
+  });
 });
