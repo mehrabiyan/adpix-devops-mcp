@@ -62,7 +62,7 @@
       <svg viewBox="0 0 150 130" width="26" height="22" aria-label="AdPix"><rect x="6" y="44" width="22" height="48" rx="11" fill="#F07C4A"/><rect x="36" y="10" width="22" height="116" rx="11" fill="#131313" style="fill:var(--c-text)"/><rect x="66" y="30" width="22" height="76" rx="11" fill="#F07C4A"/><rect x="96" y="10" width="22" height="116" rx="11" fill="#F2AF4E"/><rect x="126" y="48" width="22" height="40" rx="11" fill="#131313" style="fill:var(--c-text)"/></svg>
       <span style="font-family:var(--font-display);font-weight:600;font-size:17px;letter-spacing:-.2px">AdPix <span style="color:var(--c-muted);font-weight:500">Cloud</span></span>
     </div>
-    <button onClick="{{ cycleCluster }}" style="display:flex;align-items:center;gap:8px;height:34px;padding-inline:10px 8px;border:1px solid var(--c-border);background:var(--c-card);border-radius:999px;cursor:pointer;color:var(--c-text);font:inherit;font-size:13px">
+    <button onClick="{{ cycleCluster }}" style="display:flex;align-items:center;gap:8px;height:34px;padding-inline:10px 8px;border:1px solid var(--c-border);background:var(--c-card);border-radius:999px;cursor:pointer;color:var(--c-text);font:inherit;font-size:13px;flex:none;white-space:nowrap">
       <span style="width:7px;height:7px;border-radius:50%;background:var(--c-pos)"></span>
       <span style="font-weight:500">{{ clusterName }}</span>
       <span style="color:var(--c-hint);font-size:11px">{{ clusterRegion }}</span>
@@ -99,11 +99,11 @@
           <div style="margin-block-end:6px">
             <div style="display:{{ groupLabelDisplay }};font-size:11px;font-weight:600;letter-spacing:.7px;text-transform:uppercase;color:var(--c-hint);padding:10px 12px 5px">{{ g.label }}</div>
             <sc-for list="{{ g.items }}" as="it" hint-placeholder-count="2">
-              <button onClick="{{ it.onClick }}" title="{{ it.label }}" style="width:100%;display:flex;align-items:center;gap:11px;height:38px;padding-inline:12px;margin-block-end:2px;border:0;background:{{ it.bg }};color:{{ it.fg }};border-radius:999px;cursor:pointer;font:inherit;font-size:13.5px;font-weight:{{ it.weight }};text-align:start">
+              <button onClick="{{ it.onClick }}" title="{{ it.label }}" style="width:100%;display:flex;align-items:center;gap:11px;height:38px;padding-inline:12px;margin-block-end:2px;border:0;background:{{ it.bg }};color:{{ it.fg }};border-radius:999px;cursor:pointer;font:inherit;font-size:13.5px;font-weight:{{ it.weight }};text-align:start;justify-content:{{ navJustify }}">
                 <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="flex:none"><path d="{{ it.iconPath }}"/></svg>
-                <span style="flex:1;display:{{ navTextDisplay }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ it.label }}</span>
+                <span style="flex:1;min-width:0;display:{{ navTextDisplay }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ it.label }}</span>
                 <sc-if value="{{ it.badge }}" hint-placeholder-val="">
-                  <span style="display:{{ navTextDisplay }};font-size:11px;font-weight:600;min-width:18px;height:18px;padding-inline:5px;border-radius:999px;background:{{ it.badgeBg }};color:{{ it.badgeFg }};display:inline-flex;align-items:center;justify-content:center">{{ it.badge }}</span>
+                  <span style="display:{{ badgeDisplay }};font-size:11px;font-weight:600;min-width:18px;height:18px;padding-inline:5px;border-radius:999px;background:{{ it.badgeBg }};color:{{ it.badgeFg }};align-items:center;justify-content:center;flex:none">{{ it.badge }}</span>
                 </sc-if>
               </button>
             </sc-for>
@@ -120,7 +120,7 @@
 
     <!-- ===================== MAIN ===================== -->
     <main style="flex:1;min-width:0;overflow-y:auto;background:var(--c-bg)">
-      <div style="max-width:1280px;margin:0 auto;padding:22px 26px 60px">
+      <div style="max-width:1640px;margin:0 auto;padding:22px 30px 60px">
 
         <!-- ===== DASHBOARD ===== -->
         <sc-if value="{{ r_dashboard }}" hint-placeholder-val="{{ true }}">
@@ -130,13 +130,13 @@
               <div style="color:var(--c-muted);font-size:13px;margin-block-start:4px">{{ dashSubtitle }}</div>
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
-              <button onClick="{{ qaBackupAll }}" style="display:inline-flex;align-items:center;gap:7px;height:36px;padding-inline:14px;border:1px solid var(--c-border);background:var(--c-card);color:var(--c-text);border-radius:8px;cursor:pointer;font:inherit;font-size:13px;font-weight:500;box-shadow:var(--c-shadow-card)">
+              <button onClick="{{ qaBackupAll }}" style="display:inline-flex;align-items:center;gap:7px;height:36px;padding-inline:14px;border:1px solid var(--c-border);background:var(--c-card);color:var(--c-text);border-radius:8px;cursor:pointer;font:inherit;font-size:13px;font-weight:500;box-shadow:var(--c-shadow-card);white-space:nowrap">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M3 5h18v4H3zM5 9v10h14V9M9 13h6"/></svg>{{ t.backupAll }}
               </button>
-              <button onClick="{{ qaDeploy }}" style="display:inline-flex;align-items:center;gap:7px;height:36px;padding-inline:14px;border:1px solid var(--c-border);background:var(--c-card);color:var(--c-text);border-radius:8px;cursor:pointer;font:inherit;font-size:13px;font-weight:500;box-shadow:var(--c-shadow-card)">
+              <button onClick="{{ qaDeploy }}" style="display:inline-flex;align-items:center;gap:7px;height:36px;padding-inline:14px;border:1px solid var(--c-border);background:var(--c-card);color:var(--c-text);border-radius:8px;cursor:pointer;font:inherit;font-size:13px;font-weight:500;box-shadow:var(--c-shadow-card);white-space:nowrap">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 19V8M9 11l3-3 3 3M7 19a4 4 0 0 1 0-8 5 5 0 0 1 9.6-1.5A4 4 0 0 1 17 19"/></svg>{{ t.deploy }}
               </button>
-              <button onClick="{{ goServers }}" style="display:inline-flex;align-items:center;gap:7px;height:36px;padding-inline:14px;border:0;background:var(--c-brand);color:#fff;border-radius:8px;cursor:pointer;font:inherit;font-size:13px;font-weight:600;box-shadow:var(--c-shadow-card)">
+              <button onClick="{{ goServers }}" style="display:inline-flex;align-items:center;gap:7px;height:36px;padding-inline:14px;border:0;background:var(--c-brand);color:#fff;border-radius:8px;cursor:pointer;font:inherit;font-size:13px;font-weight:600;box-shadow:var(--c-shadow-card);white-space:nowrap">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>{{ t.addNode }}
               </button>
             </div>
@@ -155,7 +155,7 @@
             </sc-for>
           </div>
 
-          <div style="display:grid;grid-template-columns:1.35fr 1fr;gap:16px;margin-block-end:16px">
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;margin-block-end:16px">
             <!-- topology -->
             <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);overflow:hidden">
               <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 16px;border-block-end:1px solid var(--c-divider)">
@@ -228,7 +228,7 @@
             </div>
           </div>
 
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px">
             <!-- recent jobs -->
             <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);overflow:hidden">
               <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 16px;border-block-end:1px solid var(--c-divider)">
@@ -325,11 +325,11 @@
             </sc-for>
           </div>
 
-          <div style="display:grid;grid-template-columns:1.05fr 1fr;gap:16px;align-items:start">
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;align-items:start">
             <!-- containers -->
             <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);overflow:hidden">
               <div style="padding:13px 16px;border-block-end:1px solid var(--c-divider);font-weight:500;font-size:14px;display:flex;justify-content:space-between;align-items:center">{{ t.containers }}<span style="font-size:11.5px;color:var(--c-hint);font-weight:400">{{ sd.containerSummary }}</span></div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--c-divider)">
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--c-divider)">
                 <sc-for list="{{ sd.containers }}" as="c" hint-placeholder-count="8">
                   <div style="background:var(--c-card);padding:12px 14px">
                     <div style="display:flex;align-items:center;gap:8px;margin-block-end:8px">
@@ -470,7 +470,7 @@
             </sc-for>
           </div>
 
-          <div style="display:grid;grid-template-columns:1.1fr 1fr;gap:16px;align-items:start">
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:16px;align-items:start">
             <!-- tune -->
             <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);overflow:hidden">
               <div style="padding:14px 16px;border-block-end:1px solid var(--c-divider)"><div style="font-weight:500;font-size:14px">{{ t.tuneTitle }}</div><div style="font-size:12.5px;color:var(--c-muted);margin-block-start:3px">{{ t.tuneDesc }}</div></div>
@@ -508,7 +508,7 @@
         <!-- ===== DEPLOYS ===== -->
         <sc-if value="{{ r_deploys }}" hint-placeholder-val="{{ false }}">
           <div style="margin-block-end:18px"><h1 style="margin:0;font-size:22px;font-weight:500;letter-spacing:-.3px">{{ t.nav.deploys }}</h1><div style="color:var(--c-muted);font-size:13px;margin-block-start:4px">{{ deploySubtitle }}</div></div>
-          <div style="display:grid;grid-template-columns:1.1fr 1fr;gap:16px;align-items:start">
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;align-items:start">
             <div style="display:flex;flex-direction:column;gap:16px">
               <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);padding:18px 20px">
                 <div style="font-size:12px;color:var(--c-muted);text-transform:uppercase;letter-spacing:.5px">{{ t.deployCurrent }}</div>
@@ -591,7 +591,7 @@
         <!-- ===== MONITORING ===== -->
         <sc-if value="{{ r_monitoring }}" hint-placeholder-val="{{ false }}">
           <div style="margin-block-end:18px"><h1 style="margin:0;font-size:22px;font-weight:500;letter-spacing:-.3px">{{ t.nav.monitoring }}</h1><div style="color:var(--c-muted);font-size:13px;margin-block-start:4px">{{ monSubtitle }}</div></div>
-          <div style="display:grid;grid-template-columns:1.2fr 1fr;gap:16px;align-items:start;margin-block-end:16px">
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;align-items:start;margin-block-end:16px">
             <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);overflow:hidden">
               <div style="padding:13px 16px;border-block-end:1px solid var(--c-divider);font-weight:500;font-size:14px">{{ t.healthProbes }}</div>
               <div style="display:grid;grid-template-columns:1.4fr 1fr .6fr .7fr .7fr;gap:10px;padding:9px 16px;border-block-end:1px solid var(--c-border);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:var(--c-hint)"><span>{{ t.route }}</span><span>Service</span><span>HTTP</span><span>{{ t.ttfb }}</span><span style="text-align:end">{{ th.status }}</span></div>
@@ -646,7 +646,7 @@
         <!-- ===== SETTINGS ===== -->
         <sc-if value="{{ r_settings }}" hint-placeholder-val="{{ false }}">
           <div style="margin-block-end:18px"><h1 style="margin:0;font-size:22px;font-weight:500;letter-spacing:-.3px">{{ t.nav.settings }}</h1><div style="color:var(--c-muted);font-size:13px;margin-block-start:4px">{{ setSubtitle }}</div></div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start">
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px;align-items:start">
             <div style="display:flex;flex-direction:column;gap:16px">
               <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);overflow:hidden">
                 <div style="padding:14px 16px;border-block-end:1px solid var(--c-divider)"><div style="font-weight:500;font-size:14px">{{ t.secrets }}</div><div style="font-size:12px;color:var(--c-muted);margin-block-start:3px">{{ t.neverShown }}</div></div>
@@ -1270,6 +1270,8 @@ class Component extends DCLogic {
       sidebarW: collapsed?"64px":"248px",
       groupLabelDisplay: collapsed?"none":"block",
       navTextDisplay: collapsed?"none":"block",
+      navJustify: collapsed?"center":"flex-start",
+      badgeDisplay: collapsed?"none":"inline-flex",
       collapseIconRot: (collapsed!==isFa)?"rotate(180deg)":"none",
       clusterName:cl.name, clusterRegion:cl.region,
       runningDot: runningJobs>0?"block":"none",

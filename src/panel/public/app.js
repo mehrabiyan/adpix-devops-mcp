@@ -90,7 +90,7 @@ function render() {
         <nav class="nav" style="padding:12px 10px">${NAV.map((g) => `<div class="nav-group"><div class="nav-group-label">${esc(STR[S.lang].grp[g.grp])}</div>${g.items.map((id) => navItem(id, aj)).join("")}</div>`).join("")}</nav>
         <div style="border-top:1px solid var(--c-border);padding:10px"><button class="nav-item" id="collapse" style="width:100%;color:var(--c-muted)"><span class="ic">${ic("chevL", 16)}</span><span class="label">${t("collapse")}</span></button></div>
       </aside>
-      <main class="main"><div class="content" id="content" style="padding:22px 26px 60px"></div></main>
+      <main class="main"><div class="content" id="content" style="padding:22px 30px 60px"></div></main>
     </div></div>`;
   app.querySelectorAll("[data-nav]").forEach((n) => (n.onclick = () => { S.screen = n.dataset.nav; S.sd = null; render(); }));
   app.querySelector("#collapse").onclick = () => { S.collapsed = !S.collapsed; render(); };
@@ -104,14 +104,14 @@ function render() {
 }
 function navItem(id, aj) {
   const count = id === "servers" && S.fleet ? S.fleet.nodes.length : id === "jobs" && aj ? aj : id === "deploys" && S.fleet ? 0 : "";
-  const badge = count ? `<span style="display:flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;border-radius:999px;font-size:11px;font-weight:600;background:${id === "jobs" ? "var(--c-warn-bg)" : "var(--c-sunken)"};color:${id === "jobs" ? "var(--c-warn)" : "var(--c-muted)"}">${count}</span>` : "";
+  const badge = count ? `<span class="nav-badge" style="display:flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;border-radius:999px;font-size:11px;font-weight:600;flex:none;background:${id === "jobs" ? "var(--c-warn-bg)" : "var(--c-sunken)"};color:${id === "jobs" ? "var(--c-warn)" : "var(--c-muted)"}">${count}</span>` : "";
   return `<div class="nav-item ${S.screen === id ? "active" : ""}" data-nav="${id}"><span class="ic">${ic(id)}</span><span class="label" style="flex:1">${esc(STR[S.lang].nav[id])}</span>${badge}</div>`;
 }
 // header block
 function H(title, sub, actions = "") { return `<div style="display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:20px"><div style="flex:1;min-width:220px"><h1 style="margin:0;font-size:22px;font-weight:500;letter-spacing:-.3px">${esc(title)}</h1>${sub ? `<div style="color:var(--c-muted);font-size:13px;margin-top:4px">${esc(sub)}</div>` : ""}</div><div style="display:flex;gap:8px;flex-wrap:wrap">${actions}</div></div>`; }
 const cardOpen = `background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-card);overflow:hidden`;
 const cardHead = `padding:13px 16px;border-bottom:1px solid var(--c-divider);font-weight:500;font-size:14px`;
-function bigBtn(id, label, icon, primary) { return `<button data-act="${id}" style="display:inline-flex;align-items:center;gap:7px;height:38px;padding-inline:15px;border:${primary ? "0" : "1px solid var(--c-border)"};background:${primary ? "var(--c-brand)" : "var(--c-card)"};color:${primary ? "#fff" : "var(--c-text)"};border-radius:8px;cursor:pointer;font:inherit;font-size:13px;font-weight:${primary ? 600 : 500};box-shadow:var(--c-shadow-card)">${icon ? ic(icon, 15) : ""}${esc(label)}</button>`; }
+function bigBtn(id, label, icon, primary) { return `<button data-act="${id}" style="display:inline-flex;align-items:center;gap:7px;height:38px;padding-inline:15px;border:${primary ? "0" : "1px solid var(--c-border)"};background:${primary ? "var(--c-brand)" : "var(--c-card)"};color:${primary ? "#fff" : "var(--c-text)"};border-radius:8px;cursor:pointer;font:inherit;font-size:13px;font-weight:${primary ? 600 : 500};box-shadow:var(--c-shadow-card);white-space:nowrap">${icon ? ic(icon, 15) : ""}${esc(label)}</button>`; }
 
 // ============================================================ data fetch
 async function loadFleet() { try { S.fleet = await api("/api/fleet"); } catch { S.fleet = null; } }
@@ -127,15 +127,15 @@ SCREENS.dashboard = async (c) => {
   c.querySelector('[data-act="add"]').onclick = addServerWizard;
   // KPI cards
   const kpi = [["HEALTHY", f.counts.healthy, "servers", "pos"], ["DEGRADED", f.counts.degraded, "need attention", "warn"], ["DOWN", f.counts.down, "critical", "neg"], ["ACTIVE JOBS", f.counts.activeJobs, "running", "brand"]];
-  c.appendChild(el(`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:16px">${kpi.map(([l, v, s, k]) => `<div style="${cardOpen};padding:18px 18px 18px 20px;position:relative"><div style="position:absolute;inset-block:0;inset-inline-start:0;width:4px;background:var(--c-${k})"></div><div style="color:var(--c-muted);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.6px">${l}</div><div style="display:flex;align-items:baseline;gap:8px;margin-top:10px"><span style="font-size:32px;font-weight:400;letter-spacing:-.5px">${v}</span><span style="font-size:13px;color:var(--c-muted)">${s}</span></div></div>`).join("")}</div>`));
+  c.appendChild(el(`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:16px;margin-bottom:16px">${kpi.map(([l, v, s, k]) => `<div style="${cardOpen};padding:18px 18px 18px 20px;position:relative"><div style="position:absolute;inset-block:0;inset-inline-start:0;width:4px;background:var(--c-${k})"></div><div style="color:var(--c-muted);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.6px">${l}</div><div style="display:flex;align-items:baseline;gap:8px;margin-top:10px"><span style="font-size:32px;font-weight:400;letter-spacing:-.5px">${v}</span><span style="font-size:13px;color:var(--c-muted)">${s}</span></div></div>`).join("")}</div>`));
   // topology + node health
-  const row2 = el(`<div style="display:grid;grid-template-columns:1.35fr 1fr;gap:16px;margin-bottom:16px"></div>`); c.appendChild(row2);
+  const row2 = el(`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;margin-bottom:16px"></div>`); c.appendChild(row2);
   row2.appendChild(el(`<div style="${cardOpen}">${topologyCard(f)}</div>`));
   const nh = el(`<div style="${cardOpen}"><div style="${cardHead}">${t("nodeHealth")}</div><div></div></div>`);
   nh.lastElementChild.innerHTML = f.nodes.length ? f.nodes.map((n) => nodeHealthRow(n)).join("") : `<div class="empty">No servers. Add one to see live health.</div>`;
   row2.appendChild(nh);
   // recent jobs + alerts
-  const row3 = el(`<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px"></div>`); c.appendChild(row3);
+  const row3 = el(`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px"></div>`); c.appendChild(row3);
   const rj = el(`<div style="${cardOpen}"><div style="${cardHead};display:flex;align-items:center;justify-content:space-between">${t("recentJobs")}<button data-go style="border:0;background:transparent;color:var(--c-brand);font:inherit;font-size:12.5px;font-weight:500;cursor:pointer">${t("viewAll")} →</button></div><div></div></div>`);
   rj.querySelector("[data-go]").onclick = () => { S.screen = "jobs"; render(); };
   rj.lastElementChild.innerHTML = f.recentJobs.length ? f.recentJobs.map((j) => `<div style="display:flex;align-items:center;gap:11px;padding:11px 16px;border-bottom:1px solid var(--c-divider)"><span style="width:8px;height:8px;border-radius:50%;background:var(--c-${sc(j.status)});flex:none;${j.status === "running" ? "animation:pulse-dot 1.4s infinite" : ""}"></span><div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:500">${esc(j.tool)}</div><div style="font-size:11.5px;color:var(--c-muted);font-family:var(--font-mono)">${esc(j.target)}</div></div><span style="font-size:11.5px;color:var(--c-hint)">${esc(whenLabel(j.status))}</span></div>`).join("") : `<div class="empty">${t("noJobs")}</div>`;
@@ -184,9 +184,9 @@ SCREENS.serverDetail = (c) => {
   c.querySelector('[data-act="restart"]').onclick = () => verifyAction({ name: "adpix_restart", title: `Restart all services on ${name}`, destructive: true }, { server: name });
   // gauges
   c.appendChild(el(`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:16px">${[["CPU", n.cpu], ["MEMORY", n.mem], ["DISK", n.disk]].map(([l, v]) => `<div style="${cardOpen};padding:14px 16px"><div style="font-size:11.5px;color:var(--c-muted);text-transform:uppercase;letter-spacing:.5px">${l}</div><div style="font-size:26px;font-weight:400;margin:6px 0 8px;color:${metColor(v)}">${v}%</div><div style="height:5px;border-radius:999px;background:var(--c-sunken);overflow:hidden"><div style="height:100%;width:${v}%;background:${metColor(v)};border-radius:999px"></div></div></div>`).join("")}</div>`));
-  const grid = el(`<div style="display:grid;grid-template-columns:1.05fr 1fr;gap:16px;align-items:start"></div>`); c.appendChild(grid);
+  const grid = el(`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;align-items:start"></div>`); c.appendChild(grid);
   const known = ["ingest", "api", "web", "worker", "identity-job", "postgres", "clickhouse", "caddy", "redis"];
-  const cont = el(`<div style="${cardOpen}"><div style="${cardHead}">${t("containers")}</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--c-divider)" class="cc"></div></div>`);
+  const cont = el(`<div style="${cardOpen}"><div style="${cardHead}">${t("containers")}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--c-divider)" class="cc"></div></div>`);
   cont.querySelector(".cc").innerHTML = known.map((svc) => `<div style="background:var(--c-card);padding:12px 14px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="width:8px;height:8px;border-radius:50%;background:var(--c-idle)"></span><span style="font-family:var(--font-mono);font-size:13px;font-weight:500">${esc(svc)}</span></div><div style="display:flex;gap:5px"><button class="iconbtn-sm" data-svc="${svc}" data-a="restart" style="flex:1" title="Restart">${ic("restart", 13)}</button><button class="iconbtn-sm" data-svc="${svc}" data-a="stop" style="flex:1" title="Stop">${ic("stop", 12)}</button><button class="iconbtn-sm" data-svc="${svc}" data-a="status" style="flex:1" title="Status">${ic("wave", 13)}</button></div></div>`).join("");
   cont.querySelectorAll("[data-svc]").forEach((b) => (b.onclick = () => { const svc = b.dataset.svc, a = b.dataset.a; if (a === "status") action("container_control", { server: name, service: svc, action: "status" }); else verifyAction({ name: "container_control", title: `${a} ${svc} on ${name}`, destructive: true }, { server: name, service: svc, action: a }); }));
   const logc = el(`<div style="${cardOpen};display:flex;flex-direction:column"><div style="${cardHead};display:flex;align-items:center;justify-content:space-between">${t("logs")}<button class="btn btn-sm" data-load>${t("refresh")}</button></div><div class="log-view" style="height:420px">click refresh to tail logs…</div></div>`);
@@ -203,7 +203,7 @@ SCREENS.databases = (c) => {
     c.querySelectorAll("[data-e]").forEach((b) => (b.onclick = () => { eng = b.dataset.e; draw(); }));
     c.querySelector('[data-act="opt"]').onclick = () => action(`${eng}_optimize`, { apply: false });
     const stats = el(`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:14px;margin-bottom:16px"><div class="skel" style="height:80px"></div></div>`); c.appendChild(stats);
-    const grid = el(`<div style="display:grid;grid-template-columns:1.1fr 1fr;gap:16px;align-items:start"></div>`); c.appendChild(grid);
+    const grid = el(`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:16px;align-items:start"></div>`); c.appendChild(grid);
     const tune = el(`<div style="${cardOpen}"><div style="padding:14px 16px;border-bottom:1px solid var(--c-divider)"><div style="font-weight:500;font-size:14px">Tune settings</div><div style="font-size:12.5px;color:var(--c-muted);margin-top:3px">Review the before → after diff, then apply. Applying restarts the engine.</div></div><div class="tunebody"><div class="card-pad"><div class="skel" style="width:60%"></div></div></div><div style="display:flex;justify-content:flex-end;padding:13px 16px;background:var(--c-sunken)"><button class="btn btn-primary btn-sm" data-apply>Apply tuning</button></div></div>`);
     const ret = el(`<div style="${cardOpen}"><div style="padding:14px 16px;border-bottom:1px solid var(--c-divider)"><div style="font-weight:500;font-size:14px">Retention policy</div><div style="font-size:12.5px;color:var(--c-muted);margin-top:3px">Drops partitions older than the window. This is permanent.</div></div><div style="padding:18px 16px">${eng === "ch" ? `<label style="display:block;font-size:12px;font-weight:500;color:var(--c-muted);margin-bottom:6px">Keep data for</label><div style="display:flex;gap:8px;margin-bottom:18px"><input value="12" class="rmon" style="width:80px;height:40px;padding-inline:12px;border:1.5px solid var(--c-border);border-radius:8px;background:var(--c-card);color:var(--c-text);font:inherit;font-family:var(--font-mono);font-size:13px;outline:none"/><div style="flex:1;height:40px;display:flex;align-items:center;padding-inline:12px;border:1.5px solid var(--c-border);border-radius:8px;color:var(--c-muted);font-size:13px">months</div></div><div style="display:flex;gap:10px;background:var(--c-neg-bg);border:1px solid var(--c-neg);border-radius:10px;padding:13px 14px;margin-bottom:16px"><span style="color:var(--c-neg);flex:none">${ic("warn", 18)}</span><div style="font-size:12.5px;line-height:1.5">This TTL permanently deletes partitions older than the window.</div></div><button class="btn btn-danger" data-ret style="width:100%;justify-content:center">Apply retention</button>` : `<div class="muted">Retention applies to ClickHouse (raw events). Switch to the ClickHouse tab.</div>`}</div></div>`);
     grid.append(tune, ret);
@@ -250,7 +250,7 @@ async function action(tool, args = {}) { try { const r = await startJob(tool, ar
 
 SCREENS.deploys = (c) => {
   c.innerHTML = H(STR[S.lang].nav.deploys, "Releases, rollback, and blue-green across the cluster.");
-  const g = el(`<div style="display:grid;grid-template-columns:1.1fr 1fr;gap:16px;align-items:start"></div>`); c.appendChild(g);
+  const g = el(`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;align-items:start"></div>`); c.appendChild(g);
   const left = el(`<div style="display:flex;flex-direction:column;gap:16px"></div>`);
   const cur = el(`<div style="${cardOpen};padding:18px 20px"><div style="font-size:12px;color:var(--c-muted);text-transform:uppercase;letter-spacing:.5px">Current deploy</div><div style="display:flex;gap:8px;margin-top:14px">${bigBtn("u", "Update", null, true)}${bigBtn("bg", "Blue-green")}${bigBtn("rb", "Rollback")}</div></div>`);
   cur.querySelector('[data-act="u"]').onclick = () => action("adpix_update");
@@ -269,7 +269,7 @@ SCREENS.ha = (c) => {
 SCREENS.dns = (c) => { c.innerHTML = H(STR[S.lang].nav.dns, "Required DNS records and client connection configs."); c.appendChild(toolPanel("Required DNS records", "dns_plan")); const x = el(`<div style="margin-top:16px"></div>`); c.appendChild(x); x.appendChild(toolPanel("Client connect configs", "connect_configs")); };
 SCREENS.monitoring = (c) => {
   c.innerHTML = H(STR[S.lang].nav.monitoring, "Health probes, TLS expiry, host metrics.");
-  const g = el(`<div style="display:grid;grid-template-columns:1.2fr 1fr;gap:16px;align-items:start;margin-bottom:16px"></div>`); c.appendChild(g);
+  const g = el(`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;align-items:start;margin-bottom:16px"></div>`); c.appendChild(g);
   g.append(toolPanel("Health probes", "health_check"), toolPanel("TLS certificates", "tls_status"));
   c.appendChild(toolPanel("Host metrics", "system_metrics"));
   const m = el(`<div style="margin-top:16px;${cardOpen}"><div style="${cardHead};display:flex;align-items:center;justify-content:space-between">PromQL query<span style="font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;background:var(--c-warn-bg);color:var(--c-warn)">metrics_query</span></div><div class="card-pad"><label class="fld"><span class="lab">PromQL (against the witness Prometheus)</span><input class="input mono" id="pq" value="up"></label><button class="btn btn-primary btn-sm" id="pr">Run</button><div class="po" style="margin-top:10px"></div></div></div>`);
@@ -303,7 +303,7 @@ SCREENS.backups = (c) => {
 };
 SCREENS.settings = (c) => {
   c.innerHTML = H(STR[S.lang].nav.settings, "Admins, sessions, audit, secrets, integrations.");
-  const grid = el(`<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start"></div>`); c.appendChild(grid);
+  const grid = el(`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px;align-items:start"></div>`); c.appendChild(grid);
   const a = el(`<div style="display:flex;flex-direction:column;gap:16px"></div>`), b = el(`<div style="display:flex;flex-direction:column;gap:16px"></div>`); grid.append(a, b);
   if (S.me.role === "owner") { a.append(adminUsers(), adminSessions()); b.append(adminAudit(), adminKill()); }
   else a.appendChild(el(`<div style="${cardOpen};padding:16px" class="muted">Signed in as <b>${esc(S.me.username)}</b> · role <b>${esc(S.me.role)}</b>. Admin controls are owner-only.</div>`));
