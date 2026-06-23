@@ -140,6 +140,7 @@ describe("tm_install", () => {
       [/git clone /, { code: 0 }],
       [/BOOTSTRAP_ADMIN_PASSWORD=/, { stdout: "" }],
       [/openssl rand/, { stdout: "adminpw" }],
+      [/cat .*oidc_key\.pem/, { stdout: "-----BEGIN PRIVATE KEY-----\nMIIabc\n-----END PRIVATE KEY-----\n" }],
       [/base64 -d/, { code: 0 }],
       [/-p adpix-account .*build/, { code: 0 }],
       [/-p adpix-account .*up -d/, { code: 0 }],

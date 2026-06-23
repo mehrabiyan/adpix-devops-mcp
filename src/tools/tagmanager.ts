@@ -51,31 +51,38 @@ const TM_AUTH_DOCKERFILE =
   `RUN pnpm install --prod=false\n` +
   `EXPOSE 9696\n` +
   `CMD ["node", "--experimental-strip-types", "apps/auth/src/server.ts"]\n`;
-const TM_AUTH_COMPOSE_YAML =
-  `services:\n` +
-  `  auth:\n` +
-  `    build:\n` +
-  `      context: ..\n` +
-  `      dockerfile: deploy/Dockerfile.auth\n` +
-  `    restart: unless-stopped\n` +
-  `    environment:\n` +
-  `      AUTH_PORT: "9696"\n` +
-  `      AUTH_ISSUER: \${AUTH_ISSUER:?set AUTH_ISSUER in deploy/.env.account}\n` +
-  `      DB_DIR: /data\n` +
-  `      NODE_ENV: production\n` +
-  `      BOOTSTRAP_ADMIN_EMAIL: \${BOOTSTRAP_ADMIN_EMAIL:-}\n` +
-  `      BOOTSTRAP_ADMIN_PASSWORD: \${BOOTSTRAP_ADMIN_PASSWORD:-}\n` +
-  `    ports:\n` +
-  `      - "\${AUTH_PORT:-9696}:9696"\n` +
-  `    volumes:\n` +
-  `      - authdata:/data\n` +
-  `    healthcheck:\n` +
-  `      test: ["CMD-SHELL", "wget -q -O- http://localhost:9696/healthz >/dev/null 2>&1 || exit 1"]\n` +
-  `      interval: 5s\n` +
-  `      timeout: 3s\n` +
-  `      retries: 24\n` +
-  `volumes:\n` +
-  `  authdata: {}\n`;
+// The auth server REFUSES to boot in production without a stable RSA signing key (keystore.ts), so we
+// generate one and embed it as a YAML literal block (env-files can't hold multi-line PEM). mode 600.
+function authComposeYaml(pem: string): string {
+  const body = pem.trim().split(/\r?\n/).map((l) => "        " + l).join("\n");
+  return (
+    `services:\n` +
+    `  auth:\n` +
+    `    build:\n` +
+    `      context: ..\n` +
+    `      dockerfile: deploy/Dockerfile.auth\n` +
+    `    restart: unless-stopped\n` +
+    `    environment:\n` +
+    `      AUTH_PORT: "9696"\n` +
+    `      AUTH_ISSUER: \${AUTH_ISSUER:?set AUTH_ISSUER in deploy/.env.account}\n` +
+    `      DB_DIR: /data\n` +
+    `      NODE_ENV: production\n` +
+    `      BOOTSTRAP_ADMIN_EMAIL: \${BOOTSTRAP_ADMIN_EMAIL:-}\n` +
+    `      BOOTSTRAP_ADMIN_PASSWORD: \${BOOTSTRAP_ADMIN_PASSWORD:-}\n` +
+    `      OIDC_PRIVATE_KEY_PEM: |\n${body}\n` +
+    `    ports:\n` +
+    `      - "\${AUTH_PORT:-9696}:9696"\n` +
+    `    volumes:\n` +
+    `      - authdata:/data\n` +
+    `    healthcheck:\n` +
+    `      test: ["CMD-SHELL", "wget -q -O- http://localhost:9696/healthz >/dev/null 2>&1 || exit 1"]\n` +
+    `      interval: 5s\n` +
+    `      timeout: 3s\n` +
+    `      retries: 24\n` +
+    `volumes:\n` +
+    `  authdata: {}\n`
+  );
+}
 
 /**
  * Clone (or fast-forward) the AdpixTagManager repo, using the ONE shared MCP deploy key — the
@@ -309,10 +316,20 @@ export const tagmanagerTools: ToolDef[] = [
         let adminPw = await reuse("BOOTSTRAP_ADMIN_PASSWORD");
         if (!adminPw) adminPw = (await s.exec(`openssl rand -hex 18 2>/dev/null || head -c14 /dev/urandom | od -An -tx1 | tr -d ' \\n'`)).stdout.trim();
 
+        // Stable RSA signing key — the auth server refuses to boot in production without it (and
+        // ephemeral keys would invalidate every token on restart). Generate once, reuse thereafter.
+        const keyPath = `${dir}/deploy/account/oidc_key.pem`;
+        let pem = (await s.exec(`cat ${shq(keyPath)} 2>/dev/null`)).stdout;
+        if (!/BEGIN/.test(pem)) {
+          await s.exec(`mkdir -p ${shq(dir + "/deploy/account")} && openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out ${shq(keyPath)} 2>/dev/null && chmod 600 ${shq(keyPath)}`, { timeoutMs: 60_000 });
+          pem = (await s.exec(`cat ${shq(keyPath)}`)).stdout;
+        }
+        if (!/BEGIN/.test(pem)) return sections.join("\n\n") + `\n\nCould not generate the OIDC signing key (openssl missing?). Install openssl on ${srv.name} and re-run.`;
+
         await uploadFile(s, `${dir}/deploy/Dockerfile.auth`, TM_AUTH_DOCKERFILE, "644");
-        await uploadFile(s, `${dir}/deploy/docker-compose.auth.yml`, TM_AUTH_COMPOSE_YAML, "644");
+        await uploadFile(s, `${dir}/deploy/docker-compose.auth.yml`, authComposeYaml(pem), "600");
         await uploadFile(s, `${dir}/deploy/.env.account`, `AUTH_ISSUER=${issuer}\nAUTH_PORT=${a.port}\nBOOTSTRAP_ADMIN_EMAIL=${adminEmail}\nBOOTSTRAP_ADMIN_PASSWORD=${adminPw}\n`, "600");
-        sections.push(`## Config\nIssuer ${issuer} · admin ${adminEmail} · embedded PGlite (volume authdata). Wire this issuer as AUTH_ISSUER in Tag Manager + Analytics.`);
+        sections.push(`## Config\nIssuer ${issuer} · admin ${adminEmail} · embedded PGlite (volume authdata) · stable signing key. Wire this issuer as AUTH_ISSUER in Tag Manager + Analytics.`);
 
         const AC = `cd ${shq(dir)} && docker compose -p adpix-account -f deploy/docker-compose.auth.yml --env-file deploy/.env.account`;
         const build = await s.exec(`${AC} build 2>&1`, { timeoutMs: a.timeoutSeconds * 1000 });
@@ -326,6 +343,10 @@ export const tagmanagerTools: ToolDef[] = [
           { timeoutMs: 180_000 }
         );
         sections.push(`## Health gate\n${gate.stdout.trim()}`);
+        if (gate.code !== 0) {
+          const logs = await s.exec(`${AC} logs --no-color --tail 60 auth 2>&1`, { timeoutMs: 30_000 });
+          return sections.join("\n\n") + `\n\n## Account NOT healthy — auth container logs (last 60)\n${redactSecrets(lastLines(logs.stdout || logs.stderr, 60))}\n\nFix the cause and re-run account_install (idempotent).`;
+        }
         sections.push(
           `## Done\nAccount/IdP up at ${issuer} (/.well-known/openid-configuration). ` +
             `Admin: ${adminEmail} — password in ${dir}/deploy/.env.account (kept off this transcript). ` +
