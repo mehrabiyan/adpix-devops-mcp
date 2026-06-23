@@ -151,8 +151,10 @@ export const lifecycleTools: ToolDef[] = [
         // cicd_enable, so enabling CD later needs no re-auth.
         // Branch-agnostic: clone the repo's DEFAULT branch, then check out the requested branch only if
         // it exists (repos whose default isn't "main" would otherwise fail `-b main` with "not found").
+        // Existing checkouts can carry a stale remote/sshCommand from an earlier (pre-key) clone, so
+        // on the update path we re-point origin at this url and (re)apply the key config before fetch.
         const cloneCmd = (url: string, kEnv: string, postCfg: string) =>
-          `if [ -d ${shq(dir + "/.git")} ]; then cd ${shq(dir)} && ${kEnv}git fetch origin && (git checkout ${shq(a.branch)} 2>/dev/null || true) && ${kEnv}git pull --ff-only; ` +
+          `if [ -d ${shq(dir + "/.git")} ]; then cd ${shq(dir)} && git remote set-url origin ${shq(url)} 2>/dev/null; true${postCfg} && ${kEnv}git fetch origin && (git checkout ${shq(a.branch)} 2>/dev/null || true) && ${kEnv}git pull --ff-only; ` +
           `else mkdir -p $(dirname ${shq(dir)}) && ${kEnv}git clone ${shq(url)} ${shq(dir)}${postCfg} && cd ${shq(dir)} && (git checkout ${shq(a.branch)} 2>/dev/null || true); fi`;
         const useKey = a.deployKey || /^(git@|ssh:\/\/)/.test(a.repoUrl);
         let cloneUrl = a.repoUrl, keyEnv = "", postCloneCfg = "";
@@ -180,8 +182,23 @@ export const lifecycleTools: ToolDef[] = [
             clone = await s.exec(cloneCmd(cloneUrl, keyEnv, postCloneCfg), { timeoutMs: 300_000 });
           }
         }
+        // The key is authorized (ls-remote passed) but the EXISTING checkout still can't fetch — its
+        // git state is broken. A fresh clone with the same key works (proven by other apps), so wipe
+        // the stale checkout and re-clone, preserving any generated .env secrets.
+        if (clone.code !== 0 && keyEnv) {
+          const had = await s.exec(`test -d ${shq(dir + "/.git")} && echo yes || echo no`);
+          if (/yes/.test(had.stdout)) {
+            await s.exec(`[ -f ${shq(dir + "/.env")} ] && cp ${shq(dir + "/.env")} /tmp/adpix-reclone.env 2>/dev/null; rm -rf ${shq(dir)}`, { timeoutMs: 60_000 });
+            clone = await s.exec(cloneCmd(cloneUrl, keyEnv, postCloneCfg), { timeoutMs: 300_000 });
+            await s.exec(`[ -f /tmp/adpix-reclone.env ] && mv /tmp/adpix-reclone.env ${shq(dir + "/.env")} 2>/dev/null; true`, { timeoutMs: 30_000 });
+            if (clone.code === 0) sections.push("## Repo reset\nThe existing checkout couldn't authenticate (stale git state); re-cloned fresh with the deploy key. Your generated .env was preserved.");
+          }
+        }
         if (clone.code !== 0) {
-          return sections.join("\n\n") + `\n\n## Checkout FAILED (exit ${clone.code})\n${lastLines(clone.stderr || clone.stdout, 40)}`;
+          const hint = /Permission denied|Could not read/i.test(clone.stderr + clone.stdout)
+            ? `\n\nThe deploy key reached GitHub but was rejected. Confirm the key shown above is added to ${a.repoUrl.replace(/^https?:\/\/github\.com\//, "").replace(/\.git$/, "")} → Settings → Deploy keys (a deploy key is valid for ONE repo only).`
+            : "";
+          return sections.join("\n\n") + `\n\n## Checkout FAILED (exit ${clone.code})\n${lastLines(clone.stderr || clone.stdout, 40)}${hint}`;
         }
         sections.push(`## Checkout\n${cloneUrl} @ ${a.branch} → ${dir}`);
 

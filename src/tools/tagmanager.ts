@@ -93,8 +93,10 @@ async function checkoutTmRepo(deps: Deps, s: Session, dir: string, repoUrl: stri
   await s.exec("command -v git >/dev/null || (apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git ca-certificates)", { timeoutMs: 300_000 });
   // Branch-agnostic: clone the repo's DEFAULT branch, then check out the requested branch only if it
   // exists (the AdpixTagManager default isn't "main", so `-b main` would fail with "Remote branch not found").
+  // On the update path, re-point origin + (re)apply the key config first — an existing checkout can
+  // carry a stale remote/sshCommand from an earlier (pre-key) clone that would otherwise fail auth.
   const cloneCmd = (url: string, kEnv: string, postCfg: string) =>
-    `if [ -d ${shq(dir + "/.git")} ]; then cd ${shq(dir)} && ${kEnv}git fetch origin && (git checkout ${shq(branch)} 2>/dev/null || true) && ${kEnv}git pull --ff-only; ` +
+    `if [ -d ${shq(dir + "/.git")} ]; then cd ${shq(dir)} && git remote set-url origin ${shq(url)} 2>/dev/null; true${postCfg} && ${kEnv}git fetch origin && (git checkout ${shq(branch)} 2>/dev/null || true) && ${kEnv}git pull --ff-only; ` +
     `else mkdir -p $(dirname ${shq(dir)}) && ${kEnv}git clone ${shq(url)} ${shq(dir)}${postCfg} && cd ${shq(dir)} && (git checkout ${shq(branch)} 2>/dev/null || true); fi`;
   const useKey = /^(git@|ssh:\/\/)/.test(repoUrl);
   let cloneUrl = repoUrl, keyEnv = "", postCfg = "";
@@ -111,6 +113,17 @@ async function checkoutTmRepo(deps: Deps, s: Session, dir: string, repoUrl: stri
   if (clone.code !== 0 && !useKey) {
     const authish = /could not read Username|Authentication failed|terminal prompts disabled|repository not found|Permission denied|fatal: Could not read/i.test(clone.stderr + clone.stdout);
     if (authish) { if (!(await applyKey())) return sections.join("\n\n") + halt; clone = await s.exec(cloneCmd(cloneUrl, keyEnv, postCfg), { timeoutMs: 300_000 }); }
+  }
+  // Key authorized but the existing checkout still can't fetch (broken git state): re-clone fresh,
+  // preserving the generated deploy secrets (.env, .env.account, the OIDC signing key).
+  if (clone.code !== 0 && keyEnv) {
+    const had = await s.exec(`test -d ${shq(dir + "/.git")} && echo yes || echo no`);
+    if (/yes/.test(had.stdout)) {
+      await s.exec(`mkdir -p /tmp/tm-reclone && cp ${shq(dir + "/deploy/.env")} ${shq(dir + "/deploy/.env.account")} ${shq(dir + "/deploy/account/oidc_key.pem")} /tmp/tm-reclone/ 2>/dev/null; rm -rf ${shq(dir)}`, { timeoutMs: 60_000 });
+      clone = await s.exec(cloneCmd(cloneUrl, keyEnv, postCfg), { timeoutMs: 300_000 });
+      await s.exec(`if [ "$(ls -A /tmp/tm-reclone 2>/dev/null)" ]; then mkdir -p ${shq(dir + "/deploy/account")} && cp /tmp/tm-reclone/.env ${shq(dir + "/deploy/")} 2>/dev/null; cp /tmp/tm-reclone/.env.account ${shq(dir + "/deploy/")} 2>/dev/null; cp /tmp/tm-reclone/oidc_key.pem ${shq(dir + "/deploy/account/")} 2>/dev/null; fi; rm -rf /tmp/tm-reclone; true`, { timeoutMs: 30_000 });
+      if (clone.code === 0) sections.push("## Repo reset\nThe existing checkout couldn't authenticate (stale git state); re-cloned fresh with the deploy key. Generated secrets were preserved.");
+    }
   }
   if (clone.code !== 0) return (sections.length ? sections.join("\n\n") + "\n\n" : "") + `## Checkout FAILED (exit ${clone.code})\n${lastLines(clone.stderr || clone.stdout, 30)}`;
   sections.push(`## Checkout\n${cloneUrl} @ ${branch} → ${dir}`);
