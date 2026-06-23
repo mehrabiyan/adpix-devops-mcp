@@ -33,6 +33,27 @@ export function coreSshCommand(keyPath: string): string {
   return sshOpts(keyPath);
 }
 
+/**
+ * Precise root-cause probe when a deploy-key clone fails on a host: asks GitHub who the key is, which
+ * is unambiguous — GitHub replies "Hi owner/repo! You've successfully authenticated…" naming the EXACT
+ * repo the key is a deploy key for, or "Permission denied (publickey)" if it doesn't recognise the key
+ * at all. Run on the HOST that failed (it has no personal keys/agent), so it can't be fooled the way an
+ * operator's laptop can. Pass the `GIT_SSH_COMMAND='ssh -i …'` prefix used for the clone. */
+export async function diagnoseDeployKey(s: { exec: (cmd: string, opts?: { timeoutMs?: number }) => Promise<{ code: number; stdout: string; stderr: string }> }, gitSshEnvPrefix: string, expectRepo: string): Promise<string> {
+  const sshCmd = gitSshEnvPrefix.match(/GIT_SSH_COMMAND=['"]?([^'"]+)['"]?/)?.[1] ?? "";
+  if (!sshCmd) return "";
+  const keyPath = sshCmd.match(/-i (\S+)/)?.[1] ?? "";
+  const fp = keyPath ? (await s.exec(`ssh-keygen -lf ${keyPath} 2>/dev/null || echo '(key unreadable)'`, { timeoutMs: 15_000 })).stdout.trim() : "";
+  const idn = (await s.exec(`${sshCmd} -o BatchMode=yes -T git@github.com 2>&1 | head -2`, { timeoutMs: 20_000 })).stdout.trim();
+  const m = idn.match(/Hi ([^!]+)!/);
+  const verdict = m
+    ? (m[1] === expectRepo
+      ? `the key IS authorized for ${expectRepo} — the clone failure is NOT the key (check the server's egress to github.com:22 / a transparent SSH proxy).`
+      : `the key is a deploy key for ${m[1]}, NOT ${expectRepo}. Add THIS key to ${expectRepo}'s Deploy keys (a deploy key is valid for one repo only).`)
+    : `GitHub does not recognise this key at all → it is NOT in ${expectRepo}'s Deploy keys. Add the public key shown above to ${expectRepo} → Settings → Deploy keys. (If your laptop reported it "authorized", that was your personal GitHub key in the macOS keychain answering — not the deploy key.)`;
+  return `## Root cause (asked GitHub directly from this server)\nGitHub: ${idn || "(no response)"}\nServer key: ${fp || "(unreadable)"}\n→ ${verdict}`;
+}
+
 /** Parse owner/repo from an https or ssh GitHub remote URL. */
 export function parseGithubRemote(url: string): { owner: string; repo: string } | undefined {
   const m =

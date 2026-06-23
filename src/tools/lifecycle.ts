@@ -12,8 +12,10 @@ import {
 } from "../adpix.js";
 import {
   coreSshCommand,
+  diagnoseDeployKey,
   ensureSharedDeployKey,
   gitSshEnv,
+  parseGithubRemote,
   sharedKeyInstructions,
   toSshUrl,
 } from "../github.js";
@@ -195,10 +197,12 @@ export const lifecycleTools: ToolDef[] = [
           }
         }
         if (clone.code !== 0) {
-          const hint = /Permission denied|Could not read/i.test(clone.stderr + clone.stdout)
-            ? `\n\nThe deploy key reached GitHub but was rejected. Confirm the key shown above is added to ${a.repoUrl.replace(/^https?:\/\/github\.com\//, "").replace(/\.git$/, "")} → Settings → Deploy keys (a deploy key is valid for ONE repo only).`
-            : "";
-          return sections.join("\n\n") + `\n\n## Checkout FAILED (exit ${clone.code})\n${lastLines(clone.stderr || clone.stdout, 40)}${hint}`;
+          let diag = "";
+          if (keyEnv && /Permission denied|Could not read/i.test(clone.stderr + clone.stdout)) {
+            const gh = parseGithubRemote(a.repoUrl);
+            try { diag = "\n\n" + await diagnoseDeployKey(s, keyEnv, gh ? `${gh.owner}/${gh.repo}` : ""); } catch { /* best-effort */ }
+          }
+          return sections.join("\n\n") + `\n\n## Checkout FAILED (exit ${clone.code})\n${lastLines(clone.stderr || clone.stdout, 40)}${diag}`;
         }
         sections.push(`## Checkout\n${cloneUrl} @ ${a.branch} → ${dir}`);
 

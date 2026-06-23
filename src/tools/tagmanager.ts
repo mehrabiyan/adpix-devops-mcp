@@ -4,7 +4,7 @@ import type { Deps } from "../deps.js";
 import type { Session } from "../ssh.js";
 import { uploadFile } from "../adpix.js";
 import { shq, redactSecrets, lastLines, parseComposePs, table } from "../util.js";
-import { ensureSharedDeployKey, sharedKeyInstructions, toSshUrl, gitSshEnv, coreSshCommand } from "../github.js";
+import { ensureSharedDeployKey, sharedKeyInstructions, toSshUrl, gitSshEnv, coreSshCommand, diagnoseDeployKey, parseGithubRemote } from "../github.js";
 import type { ToolDef } from "./types.js";
 
 const serverParam = z.string().optional().describe("Registered server name. Omit to use the default server.");
@@ -125,7 +125,14 @@ async function checkoutTmRepo(deps: Deps, s: Session, dir: string, repoUrl: stri
       if (clone.code === 0) sections.push("## Repo reset\nThe existing checkout couldn't authenticate (stale git state); re-cloned fresh with the deploy key. Generated secrets were preserved.");
     }
   }
-  if (clone.code !== 0) return (sections.length ? sections.join("\n\n") + "\n\n" : "") + `## Checkout FAILED (exit ${clone.code})\n${lastLines(clone.stderr || clone.stdout, 30)}`;
+  if (clone.code !== 0) {
+    let diag = "";
+    if (keyEnv && /Permission denied|Could not read/i.test(clone.stderr + clone.stdout)) {
+      const gh = parseGithubRemote(repoUrl);
+      try { diag = "\n\n" + await diagnoseDeployKey(s, keyEnv, gh ? `${gh.owner}/${gh.repo}` : ""); } catch { /* best-effort */ }
+    }
+    return (sections.length ? sections.join("\n\n") + "\n\n" : "") + `## Checkout FAILED (exit ${clone.code})\n${lastLines(clone.stderr || clone.stdout, 30)}${diag}`;
+  }
   sections.push(`## Checkout\n${cloneUrl} @ ${branch} → ${dir}`);
   return null;
 }

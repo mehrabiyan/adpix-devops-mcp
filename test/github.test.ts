@@ -6,6 +6,7 @@ import { allTools } from "../src/tools/index.js";
 import {
   coreSshCommand,
   deployKeyInstructions,
+  diagnoseDeployKey,
   ensureDeployKey,
   ensureSharedDeployKey,
   gitSshEnv,
@@ -93,6 +94,32 @@ describe("deployKeyInstructions", () => {
     expect(msg).toContain("ssh-ed25519 AAAAPUB host");
     expect(msg).toContain("https://github.com/mehrabiyan/adpix/settings/keys");
     expect(msg).toContain("write access");
+  });
+});
+
+describe("diagnoseDeployKey (asks GitHub who the key is, from the failing host)", () => {
+  const prefix = gitSshEnv("/root/.ssh/adpix_deploy_ed25519");
+  const fp: Responder = [/ssh-keygen -lf/, { stdout: "256 SHA256:abc adpix-deploy-mcp (ED25519)" }];
+
+  it("key not recognised by GitHub → it is NOT in the repo's deploy keys (laptop keychain false-positive)", async () => {
+    const { session } = fakeSession([fp, [/-T git@github\.com/, { stdout: "git@github.com: Permission denied (publickey)." }]]);
+    const out = await diagnoseDeployKey(session, prefix, "mehrabiyan/adpix");
+    expect(out).toMatch(/does not recognise this key/);
+    expect(out).toMatch(/NOT in mehrabiyan\/adpix/);
+    expect(out).toMatch(/macOS keychain/);
+  });
+
+  it("key authenticates as a DIFFERENT repo → wrong repo's deploy key", async () => {
+    const { session } = fakeSession([fp, [/-T git@github\.com/, { stdout: "Hi mehrabiyan/AdpixTagManager! You've successfully authenticated, but GitHub does not provide shell access." }]]);
+    const out = await diagnoseDeployKey(session, prefix, "mehrabiyan/adpix");
+    expect(out).toMatch(/deploy key for mehrabiyan\/AdpixTagManager, NOT mehrabiyan\/adpix/);
+  });
+
+  it("key authenticates as the expected repo → the clone failure is NOT the key", async () => {
+    const { session } = fakeSession([fp, [/-T git@github\.com/, { stdout: "Hi mehrabiyan/adpix! You've successfully authenticated, but GitHub does not provide shell access." }]]);
+    const out = await diagnoseDeployKey(session, prefix, "mehrabiyan/adpix");
+    expect(out).toMatch(/the key IS authorized for mehrabiyan\/adpix/);
+    expect(out).toMatch(/egress to github\.com:22/);
   });
 });
 
