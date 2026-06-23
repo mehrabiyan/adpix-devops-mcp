@@ -247,8 +247,9 @@ function renderChat() {
 // ============================================================ SERVERS
 SCREENS.servers = (c) => {
   const f = S.fleet || { cluster: { name: "" }, nodes: [] };
-  c.innerHTML = H(STR[S.lang].nav.servers, `${f.nodes.length} servers${f.cluster.name ? " in cluster " + f.cluster.name : ""}`, bigBtn("add", t("addServer"), "plus", true));
+  c.innerHTML = H(STR[S.lang].nav.servers, `${f.nodes.length} servers${f.cluster.name ? " in cluster " + f.cluster.name : ""}`, `${bigBtn("setup", "Setup wizard", "deploys")}${bigBtn("add", t("addServer"), "plus", true)}`);
   c.querySelector('[data-act="add"]').onclick = addServerWizard;
+  c.querySelector('[data-act="setup"]').onclick = setupWizard;
   const cols = "1.4fr .8fr 1.1fr 1.1fr 1fr .8fr";
   const tbl = el(`<div style="${cardOpen}"><div style="display:grid;grid-template-columns:${cols};gap:12px;padding:11px 18px;border-bottom:1px solid var(--c-border);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--c-hint)"><span>Name</span><span>Role</span><span>Host</span><span>OS</span><span>Status</span><span style="text-align:end">Last seen</span></div><div class="rows"></div></div>`);
   c.appendChild(tbl);
@@ -790,6 +791,174 @@ function idpUpdateForm() {
     close();
     verifyAction({ name: "stack_update", title: "Update the IdP / account center — stateless-only (database preserved)", destructive: true }, a);
   };
+}
+
+// ============================================================ SETUP WIZARD (full-screen, guided)
+async function setupWizard() {
+  const scrim = el(`<div class="scrim show" style="z-index:80"></div>`);
+  const host = el(`<div style="position:fixed;inset:0;z-index:81;display:flex;align-items:center;justify-content:center;padding:18px"></div>`);
+  const card = el(`<div style="width:min(980px,97vw);height:min(90vh,840px);background:var(--c-card);border:1px solid var(--c-border);border-radius:16px;box-shadow:var(--c-shadow-menu);display:flex;overflow:hidden"></div>`);
+  host.appendChild(card); document.body.append(scrim, host);
+  const close = () => { scrim.remove(); host.remove(); };
+  const W = { step: 0, sel: { analytics: true, tagmanager: false, account: false }, topology: "single", cluster: "production", catalog: [], servers: [], repos: [], settings: {}, deploy: {}, verify: {} };
+  try { W.catalog = (await api("/api/wizard/apps")).apps || []; } catch (e) { /* offline */ }
+  const STEPS = [["apps", "Apps & scale"], ["servers", "Servers"], ["repos", "GitHub keys"], ["settings", "Settings"], ["preflight", "Preflight"], ["review", "Review"], ["deploy", "Deploy"], ["verify", "Verify"], ["done", "Greenlight"]];
+  const deployable = () => W.catalog.filter((a) => a.deployable && W.sel[a.id]);
+  const selectedIds = () => W.catalog.filter((a) => W.sel[a.id]).map((a) => a.id);
+  const firstServer = () => (W.servers[0] || {}).name;
+  const RENDER = {}, VALID = {};
+
+  function shell() {
+    card.innerHTML = `<aside style="width:212px;flex:none;background:var(--c-sunken);border-inline-end:1px solid var(--c-divider);padding:20px 14px;display:flex;flex-direction:column">
+      <div style="font-weight:600;font-size:15px;margin-bottom:16px;display:flex;align-items:center;gap:8px">${ic("deploys", 18)} Setup wizard</div>
+      ${STEPS.map((s, k) => `<div style="display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:8px;font-size:12.5px;margin-bottom:2px;${k === W.step ? "background:var(--c-brand-tint);color:var(--c-brand);font-weight:600" : k < W.step ? "color:var(--c-muted)" : "color:var(--c-hint)"}"><span style="width:19px;height:19px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font-size:10.5px;${k < W.step ? "background:var(--c-pos);color:#fff" : k === W.step ? "background:var(--c-brand);color:#fff" : "border:1.5px solid var(--c-border)"}">${k < W.step ? "✓" : k + 1}</span>${esc(s[1])}</div>`).join("")}
+      <div style="flex:1"></div><button class="wx btn btn-sm">Cancel</button></aside>
+      <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+        <div class="wc" style="flex:1;overflow:auto;padding:24px 28px"></div>
+        <div style="display:flex;align-items:center;gap:12px;padding:13px 22px;border-top:1px solid var(--c-divider);background:var(--c-sunken)"><button class="wb btn" ${W.step === 0 ? "disabled" : ""}>Back</button><div class="we" style="flex:1;color:var(--c-neg);font-size:12.5px"></div><button class="wn btn btn-primary">${nlabel()}</button></div>
+      </div>`;
+    card.querySelector(".wx").onclick = close;
+    card.querySelector(".wb").onclick = () => { if (W.step > 0) { W.step--; shell(); } };
+    card.querySelector(".wn").onclick = next;
+    RENDER[STEPS[W.step][0]](card.querySelector(".wc"));
+  }
+  const nlabel = () => ({ review: "Deploy", done: "Finish" }[STEPS[W.step][0]] || "Next");
+  const seterr = (m) => { const e = card.querySelector(".we"); if (e) e.textContent = m || ""; };
+  async function next() {
+    seterr(""); const k = STEPS[W.step][0]; const b = card.querySelector(".wn"); b.disabled = true; const t0 = b.textContent; b.innerHTML = `<span class="spin"></span>`;
+    try { const r = VALID[k] ? await VALID[k]() : true; if (r === true) { if (W.step === STEPS.length - 1) close(); else { W.step++; shell(); } } else { seterr(typeof r === "string" ? r : "Complete this step."); b.disabled = false; b.textContent = t0; } }
+    catch (e) { seterr(e.message); b.disabled = false; b.textContent = t0; }
+  }
+  const h2 = (t, sub) => `<h2 style="margin:0 0 4px;font-size:19px;font-weight:600">${esc(t)}</h2><p class="muted" style="margin:0 0 18px;font-size:13px">${esc(sub)}</p>`;
+
+  // 1. apps + topology
+  RENDER.apps = (c) => {
+    c.innerHTML = h2("What do you want to run?", "Pick the apps. The wizard handles repos, keys, settings, deploy, and verification.") + `<div class="apps" style="display:flex;flex-direction:column;gap:10px"></div><div style="margin-top:22px"><div style="font-weight:600;font-size:13px;margin-bottom:8px">Topology</div><div class="topo" style="display:flex;gap:10px"></div></div>`;
+    c.querySelector(".apps").innerHTML = W.catalog.map((a) => `<label style="display:flex;gap:11px;align-items:flex-start;border:1.5px solid ${W.sel[a.id] ? "var(--c-brand)" : "var(--c-border)"};border-radius:11px;padding:13px 15px;cursor:pointer"><input type="checkbox" data-a="${a.id}" ${W.sel[a.id] ? "checked" : ""} style="margin-top:2px"><div><div style="font-weight:600;font-size:14px">${esc(a.name)}${a.deployable ? "" : ` <span class="muted" style="font-weight:400;font-size:11.5px">· configured separately</span>`}</div><div class="muted" style="font-size:12.5px;margin-top:2px">${esc(a.blurb)}</div></div></label>`).join("");
+    c.querySelectorAll("[data-a]").forEach((x) => (x.onchange = () => { W.sel[x.dataset.a] = x.checked; RENDER.apps(c); }));
+    c.querySelector(".topo").innerHTML = [["single", "Single server"], ["cluster", "HA cluster"]].map(([v, l]) => `<label style="flex:1;border:1.5px solid ${W.topology === v ? "var(--c-brand)" : "var(--c-border)"};border-radius:10px;padding:11px 14px;cursor:pointer;display:flex;gap:9px;align-items:center"><input type="radio" name="wtopo" ${W.topology === v ? "checked" : ""} data-t="${v}"><span style="font-size:13px;font-weight:500">${l}</span></label>`).join("");
+    c.querySelectorAll("[data-t]").forEach((x) => (x.onchange = () => { W.topology = x.dataset.t; RENDER.apps(c); }));
+  };
+  VALID.apps = () => (selectedIds().length ? true : "Select at least one app.");
+
+  // 2. servers
+  RENDER.servers = (c) => {
+    c.innerHTML = h2("Add your server(s)", "Connect over SSH (key or root password). Each is diagnosed before it's added.") + `<div class="slist" style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px"></div><div class="saddwrap"></div>`;
+    drawServers(c); drawAddForm(c.querySelector(".saddwrap"), c);
+  };
+  function drawServers(c) {
+    c.querySelector(".slist").innerHTML = W.servers.length ? W.servers.map((s) => `<div style="display:flex;align-items:center;gap:10px;border:1px solid var(--c-border);border-radius:10px;padding:10px 13px"><span style="width:8px;height:8px;border-radius:50%;background:var(--c-pos)"></span><b class="mono" style="font-size:13px">${esc(s.name)}</b><span class="mono muted" style="font-size:12px">${esc(s.host)}</span>${W.topology === "cluster" ? `<span class="muted" style="font-size:11.5px">· ${esc(s.role || "node")}</span>` : ""}<span style="flex:1"></span>${pill("added", "pos")}</div>`).join("") : `<div class="muted" style="font-size:12.5px">No servers yet.</div>`;
+  }
+  function drawAddForm(w, c) {
+    w.innerHTML = `<div style="border:1.5px dashed var(--c-border);border-radius:11px;padding:14px"><div style="font-weight:600;font-size:13px;margin-bottom:10px">Add a server</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:9px"><input class="input" id="wsn" placeholder="name (e.g. prod1)"><input class="input" id="wsh" placeholder="host / IP"><input class="input" id="wsu" placeholder="ssh user (root)"><input class="input" id="wsp" placeholder="port (22)">${W.topology === "cluster" ? `<select class="input" id="wsr"><option value="node">node</option><option value="witness">witness</option></select>` : ""}</div><div style="margin-top:9px"><div style="display:flex;gap:14px;margin:6px 0"><label style="font-size:12.5px"><input type="radio" name="wsa" value="key" checked> SSH key</label><label style="font-size:12.5px"><input type="radio" name="wsa" value="pass"> Root password</label></div><textarea class="input wsak" rows="2" placeholder="paste private key (-----BEGIN OPENSSH PRIVATE KEY-----)" style="resize:none"></textarea><input class="input wsap" type="password" placeholder="root password" style="display:none"></div><div class="wsd" style="margin-top:9px;font-size:12px"></div><button class="btn btn-primary wsadd" style="margin-top:10px">Diagnose &amp; add</button></div>`;
+    w.querySelectorAll("[name=wsa]").forEach((r) => (r.onchange = () => { const key = w.querySelector("[value=key]").checked; w.querySelector(".wsak").style.display = key ? "block" : "none"; w.querySelector(".wsap").style.display = key ? "none" : "block"; }));
+    w.querySelector(".wsadd").onclick = async () => {
+      const g = (id) => (w.querySelector(id) || {}).value || "";
+      const name = g("#wsn").trim(), hostv = g("#wsh").trim();
+      if (!name || !hostv) return toast("name + host required", true);
+      const usePass = w.querySelector("[value=pass]").checked;
+      const auth = usePass ? { password: w.querySelector(".wsap").value } : { privateKey: w.querySelector(".wsak").value };
+      const role = W.topology === "cluster" ? (g("#wsr") || "node") : "node";
+      const sd = w.querySelector(".wsd"); const btn = w.querySelector(".wsadd"); btn.disabled = true; btn.innerHTML = `<span class="spin"></span>`;
+      try {
+        const body = { name, host: hostv, port: Number(g("#wsp")) || 22, username: g("#wsu").trim() || "root", ...auth };
+        const diag = await api("/api/wizard/diagnose", { method: "POST", body: JSON.stringify(body) });
+        sd.innerHTML = diag.checks.map((ch) => `<div style="color:var(--c-${ch.ok ? "pos" : ch.soft ? "warn" : "neg"})">${ch.ok ? "✓" : "✗"} ${esc(ch.name)} — ${esc(ch.detail)}</div>`).join("");
+        if (!diag.canAdd) { toast("Fix the failed checks", true); return; }
+        await api("/api/wizard/add-server", { method: "POST", body: JSON.stringify({ ...body, role, cluster: W.topology === "cluster" ? W.cluster : "" }) });
+        W.servers.push({ name, host: hostv, role });
+        await loadClusters().catch(() => {}); await loadFleet().catch(() => {});
+        drawServers(c); drawAddForm(w, c);
+      } catch (e) { sd.innerHTML = `<div style="color:var(--c-neg)">${esc(e.message)}</div>`; }
+      finally { btn.disabled = false; btn.textContent = "Diagnose & add"; }
+    };
+  }
+  VALID.servers = () => (W.servers.length ? true : "Add at least one server.");
+
+  // 3. repos + keys
+  RENDER.repos = async (c) => { c.innerHTML = h2("GitHub deploy keys", "One read-only key per repo, managed on the MCP. Add each to the repo once, then Verify.") + `<div class="rlist"><div class="skel" style="width:60%"></div></div>`; await loadRepos(c); };
+  async function loadRepos(c) {
+    try { W.repos = (await api("/api/wizard/verify-repos", { method: "POST", body: JSON.stringify({ appIds: selectedIds() }) })).repos || []; }
+    catch (e) { c.querySelector(".rlist").innerHTML = `<div class="muted">${esc(e.message)}</div>`; return; }
+    c.querySelector(".rlist").innerHTML = W.repos.map((r, i) => `<div style="border:1px solid var(--c-border);border-radius:11px;padding:13px;margin-bottom:10px"><div style="display:flex;align-items:center;gap:9px"><b class="mono" style="font-size:13px">${esc(r.owner)}/${esc(r.repo)}</b><span class="muted" style="font-size:11.5px">· ${esc(r.apps.join(", "))}</span><span style="flex:1"></span>${r.authorized ? pill("authorized", "pos") : pill("not added", "warn")}</div>${r.authorized ? "" : `<div style="margin-top:9px"><div class="muted" style="font-size:12px;margin-bottom:5px">Add this key at <a href="${esc(r.addUrl)}" target="_blank" style="color:var(--c-brand)">Settings → Deploy keys</a> (leave write access OFF):</div><pre class="out" style="font-size:11px;white-space:pre-wrap;user-select:all">${esc(r.pubKey || "(generating…)")}</pre><div style="display:flex;gap:8px;margin-top:7px"><button class="btn btn-sm rcopy" data-i="${i}">Copy key</button><button class="btn btn-sm btn-primary rver">I added it — Verify</button></div></div>`}</div>`).join("");
+    c.querySelectorAll(".rcopy").forEach((b) => (b.onclick = () => { navigator.clipboard.writeText(W.repos[+b.dataset.i].pubKey); toast("Key copied"); }));
+    c.querySelectorAll(".rver").forEach((b) => (b.onclick = () => loadRepos(c)));
+  }
+  VALID.repos = () => (W.repos.length && W.repos.every((r) => r.authorized) ? true : "Add the deploy key to each repo, then Verify.");
+
+  // 4. settings
+  RENDER.settings = (c) => {
+    const apps = deployable();
+    apps.forEach((a) => { W.settings[a.id] = W.settings[a.id] || {}; if (!W.settings[a.id].__server__) W.settings[a.id].__server__ = firstServer(); });
+    c.innerHTML = h2("Settings", "Required configuration per app. Stored only for this deploy.") + apps.map((a) => `<div style="border:1px solid var(--c-border);border-radius:11px;padding:14px;margin-bottom:12px"><div style="font-weight:600;font-size:14px;margin-bottom:10px">${esc(a.name)}</div><label class="fld"><span class="lab">deploy to server</span><select class="input" data-srv="${a.id}">${W.servers.map((s) => `<option ${W.settings[a.id].__server__ === s.name ? "selected" : ""}>${esc(s.name)}</option>`).join("")}</select></label>${a.settings.map((st) => `<label class="fld"><span class="lab">${esc(st.label)}${st.required ? " *" : ""}</span><input class="input" data-app="${a.id}" data-k="${st.key}" ${st.secret ? 'type="password"' : ""} placeholder="${esc(st.placeholder || "")}" value="${esc(W.settings[a.id][st.key] || "")}"></label>`).join("")}</div>`).join("");
+    c.querySelectorAll("[data-app][data-k]").forEach((i) => (i.oninput = () => { W.settings[i.dataset.app][i.dataset.k] = i.value.trim(); }));
+    c.querySelectorAll("[data-srv]").forEach((s) => (s.onchange = () => { W.settings[s.dataset.srv].__server__ = s.value; }));
+  };
+  VALID.settings = () => { for (const a of deployable()) for (const st of a.settings) if (st.required && !(W.settings[a.id] || {})[st.key]) return `${a.name}: ${st.label} is required.`; return true; };
+
+  // 5. preflight
+  function preItems() {
+    const missing = deployable().flatMap((a) => a.settings.filter((s) => s.required && !((W.settings[a.id] || {})[s.key])).map((s) => `${a.name}:${s.label}`));
+    return [[W.servers.length > 0, "Servers", `${W.servers.length} added & diagnosed`], [W.repos.length > 0 && W.repos.every((r) => r.authorized), "GitHub keys", "all repos authorized"], [missing.length === 0, "Settings", missing.length ? `missing ${missing.join(", ")}` : "complete"], [deployable().length > 0, "Apps", `${deployable().length} to deploy`]];
+  }
+  RENDER.preflight = (c) => { c.innerHTML = h2("Preflight", "Everything required before deploy.") + preItems().map(([ok, n, d]) => `<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--c-divider)"><span style="color:var(--c-${ok ? "pos" : "neg"})">${ic(ok ? "check" : "warn", 16)}</span><b style="font-size:13px;min-width:110px">${esc(n)}</b><span class="muted" style="font-size:12.5px">${esc(d)}</span></div>`).join(""); };
+  VALID.preflight = () => { const bad = preItems().find(([ok]) => !ok); return bad ? `${bad[1]}: ${bad[2]}` : true; };
+
+  // 6. review
+  RENDER.review = (c) => { c.innerHTML = h2("Review", "Deploy plan — secrets are masked.") + deployable().map((a) => { const srv = (W.settings[a.id] || {}).__server__ || firstServer(); const set = a.settings.map((s) => `${s.label}: ${s.secret ? "••••" : ((W.settings[a.id] || {})[s.key] || "(default)")}`).join("<br>"); return `<div style="border:1px solid var(--c-border);border-radius:11px;padding:13px;margin-bottom:10px"><b>${esc(a.name)}</b> → <span class="mono">${esc(srv)}</span><div class="muted" style="font-size:12px;margin-top:6px">${set}</div></div>`; }).join(""); };
+
+  // 7. deploy (auto-start + stream)
+  RENDER.deploy = (c) => {
+    c.innerHTML = h2("Deploy", "Installing — first build can take 10–25 min. You can watch the logs below.") + `<div class="dlist"></div>`;
+    const dl = c.querySelector(".dlist");
+    deployable().forEach((a) => {
+      const srv = (W.settings[a.id] || {}).__server__ || firstServer();
+      const box = el(`<div style="border:1px solid var(--c-border);border-radius:11px;padding:13px;margin-bottom:10px"><div style="display:flex;align-items:center;gap:9px"><b>${esc(a.name)}</b><span class="mono muted" style="font-size:12px">${esc(srv)}</span><span style="flex:1"></span><span class="dstat">${pill("queued", "idle")}</span></div><div class="dlog" style="display:none;margin-top:10px;font-family:var(--font-mono);font-size:11px;background:var(--c-code-bg);border-radius:8px;padding:10px;max-height:200px;overflow:auto;white-space:pre-wrap"></div></div>`);
+      dl.appendChild(box); const log = box.querySelector(".dlog"), stat = box.querySelector(".dstat");
+      const d = W.deploy[a.id];
+      if (d && d.done) { stat.innerHTML = pill(d.ok ? "done" : "failed", d.ok ? "pos" : "neg"); return; }
+      if (d && d.jobId) { stat.innerHTML = pill("running", "warn"); return; }
+      const args = {}; const s = W.settings[a.id] || {}; for (const k in s) if (k !== "__server__" && s[k]) args[k] = s[k];
+      args.server = srv; args.branch = "main"; if (a.id === "analytics") args.deployKey = true;
+      W.deploy[a.id] = { starting: true };
+      startJob(a.installTool, args).then((r) => {
+        W.deploy[a.id] = { jobId: r.job.id }; log.style.display = "block"; stat.innerHTML = pill("running", "warn");
+        return streamJob(r.job.id, (ev) => {
+          if (ev.type === "log") { log.appendChild(el(`<div style="color:${/ERROR|FAIL|REFUSED/i.test(ev.line) ? "var(--c-neg)" : "var(--c-text)"}">${esc(ev.line.replace(/^\$ \[[^\]]*\]\s*/, ""))}</div>`)); log.scrollTop = log.scrollHeight; }
+          if (ev.type === "done") { const ok = ev.status === "succeeded"; W.deploy[a.id] = { done: true, ok }; stat.innerHTML = pill(ok ? "done" : "failed", ok ? "pos" : "neg"); }
+        });
+      }).catch((e) => { W.deploy[a.id] = { done: true, ok: false }; stat.innerHTML = pill("error", "neg"); log.style.display = "block"; log.textContent = e.message; });
+    });
+  };
+  VALID.deploy = () => (deployable().every((a) => (W.deploy[a.id] || {}).done) ? true : "Wait for all installs to finish (watch the logs).");
+
+  // 8. verify
+  RENDER.verify = async (c) => { c.innerHTML = h2("Verify", "Confirming each app is up + healthy.") + `<div class="vlist"><div class="skel" style="width:60%"></div></div>`; await runVerify(c); };
+  async function runVerify(c) {
+    const apps = deployable();
+    const rows = await Promise.all(apps.map(async (a) => { const srv = (W.settings[a.id] || {}).__server__ || firstServer(); try { const r = await api("/api/wizard/verify-deploy", { method: "POST", body: JSON.stringify({ server: srv, appId: a.id }) }); W.verify[a.id] = r; return { a, srv, r }; } catch (e) { return { a, srv, r: { error: e.message } }; } }));
+    c.querySelector(".vlist").innerHTML = rows.map(({ a, srv, r }) => { const ok = r.up && r.healthy; return `<div style="border:1px solid var(--c-border);border-radius:11px;padding:13px;margin-bottom:10px;display:flex;align-items:center;gap:10px"><span style="color:var(--c-${ok ? "pos" : r.up ? "warn" : "neg"})">${ic(ok ? "check" : "warn", 17)}</span><div style="flex:1"><b>${esc(a.name)}</b> <span class="mono muted" style="font-size:12px">${esc(srv)}</span><div class="muted" style="font-size:12px">${r.error ? esc(r.error) : `${r.running || 0}/${r.total || 0} containers up · health ${r.healthy ? "OK" : "pending"}${r.url ? ` · ${esc(r.url)}` : ""}`}</div></div></div>`; }).join("") + `<button class="btn btn-sm vretry">Re-check</button>`;
+    c.querySelector(".vretry").onclick = () => runVerify(c);
+  }
+  VALID.verify = () => (deployable().every((a) => (W.verify[a.id] || {}).up) ? true : "Some apps aren't up — re-check, or go back to Deploy.");
+
+  // 9. greenlight
+  RENDER.done = async (c) => {
+    const urls = deployable().map((a) => ({ name: a.name, url: (W.verify[a.id] || {}).url })).filter((x) => x.url);
+    const srv = firstServer();
+    c.innerHTML = `<div style="text-align:center;padding:6px 0 16px"><div style="font-size:34px">🚀</div><h2 style="margin:8px 0 4px;font-size:20px">Your apps are live</h2><p class="muted" style="font-size:13px">${deployable().length} app(s) deployed${W.topology === "cluster" ? ` · ${W.servers.length} server(s)` : ""}.</p></div>
+      <div style="margin-bottom:18px">${urls.length ? urls.map((u) => `<div style="display:flex;align-items:center;gap:10px;border:1px solid var(--c-border);border-radius:10px;padding:11px 13px;margin-bottom:8px"><b style="font-size:13px">${esc(u.name)}</b><a href="${esc(u.url)}" target="_blank" class="mono" style="flex:1;color:var(--c-brand);font-size:12.5px;text-decoration:none">${esc(u.url)}</a><button class="btn btn-sm ucopy" data-u="${esc(u.url)}">Copy</button></div>`).join("") : `<div class="muted" style="font-size:12.5px">App URLs appear once health is confirmed (HTTP-on-IP otherwise — see Servers).</div>`}</div>
+      <div style="font-weight:600;font-size:13px;margin-bottom:8px">What's left (recommended)</div><div class="left" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+      <div class="rdy" style="margin-top:16px"></div>`;
+    c.querySelectorAll(".ucopy").forEach((b) => (b.onclick = () => { navigator.clipboard.writeText(b.dataset.u); toast("Copied"); }));
+    const items = [["watchdog_install", "24/7 watchdog", { server: srv, force: true }], ["harden_server", "Harden server", { server: srv, apply: false }], ["obs_deploy", "Monitoring stack", { server: srv }]];
+    if (W.topology === "cluster") items.push(["ha_standup", "Stand up HA quorum", { mode: "keepalived" }]);
+    c.querySelector(".left").innerHTML = items.map(([tool, l], i) => `<button class="btn btn-sm lft" data-i="${i}">${esc(l)}</button>`).join("");
+    c.querySelectorAll(".lft").forEach((b) => (b.onclick = () => { const it = items[+b.dataset.i]; action(it[0], it[2]); }));
+    try { const r = await runTool("launch_readiness", { sites: W.topology === "cluster" ? 200000 : 20000 }); c.querySelector(".rdy").innerHTML = `<div class="muted" style="font-size:11.5px;margin-bottom:5px">Launch readiness</div><pre class="out" style="white-space:pre-wrap;font-size:11px;max-height:170px;overflow:auto">${esc(String(r.result))}</pre>`; } catch (e) { /* needs default server */ }
+  };
+
+  shell();
 }
 
 // ============================================================ command palette
