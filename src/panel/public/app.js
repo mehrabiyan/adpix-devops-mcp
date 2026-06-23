@@ -947,8 +947,12 @@ async function setupWizard() {
   const accountSelected = () => deployable().some((a) => a.id === "account");
   VALID.settings = () => {
     for (const a of deployable()) for (const st of a.settings) { if (st.type === "toggle") continue; const skip = st.requiredUnless && (W.settings[a.id] || {})[st.requiredUnless]; if (st.required && !skip && !(W.settings[a.id] || {})[st.key]) return `${a.name}: ${st.label} is required.`; }
-    // Tag Manager needs an OIDC issuer — either deploy the Account app (auto-wired) or set it.
-    if (deployable().some((a) => a.id === "tagmanager") && !(W.settings.tagmanager || {}).authIssuer && !accountSelected()) return "Tag Manager needs an account center: also deploy the Account (IdP) app, or set its OIDC issuer.";
+    // Tag Manager + Console need an OIDC issuer — either deploy the Account app (auto-wired) or set it.
+    for (const id of ["tagmanager", "console"]) {
+      const app = deployable().find((a) => a.id === id);
+      if (app && !(W.settings[id] || {}).authIssuer && !accountSelected())
+        return `${app.name} needs an account center: also deploy the Account (IdP) app, or set its OIDC issuer.`;
+    }
     return true;
   };
 
@@ -967,8 +971,11 @@ async function setupWizard() {
   RENDER.deploy = (c) => {
     c.innerHTML = h2("Deploy", "Installing — first build can take 10–25 min. You can watch the logs below.") + `<div class="dlist"></div>`;
     const dl = c.querySelector(".dlist");
-    const order = { account: 0, analytics: 1, tagmanager: 2 };           // Account first → its issuer wires into TM
-    const accIssuer = () => { const acc = W.settings.account || {}; if (acc.domain) return `https://${acc.domain}`; const host = (W.servers.find((sv) => sv.name === (acc.__server__ || firstServer())) || {}).host; return host ? `http://${host}:9696` : ""; };
+    // Account first (its issuer wires into TM/console), then TM core, then the console (needs the api),
+    // then Analytics. The IdP also needs the console/analytics ORIGINS to register their redirect URIs.
+    const order = { account: 0, tagmanager: 1, console: 2, analytics: 3 };
+    const appOrigin = (id, port) => { const st = W.settings[id]; if (!st) return ""; if (st.domain) return `https://${st.domain}`; const host = (W.servers.find((sv) => sv.name === (st.__server__ || firstServer())) || {}).host; return host ? (port === 80 ? `http://${host}` : `http://${host}:${port}`) : ""; };
+    const accIssuer = () => appOrigin("account", 9696);
     deployable().slice().sort((x, y) => (order[x.id] ?? 9) - (order[y.id] ?? 9)).forEach((a) => {
       const srv = (W.settings[a.id] || {}).__server__ || firstServer();
       const box = el(`<div style="border:1px solid var(--c-border);border-radius:11px;padding:13px;margin-bottom:10px"><div style="display:flex;align-items:center;gap:9px"><b>${esc(a.name)}</b><span class="mono muted" style="font-size:12px">${esc(srv)}</span><span style="flex:1"></span><span class="dstat">${pill("queued", "idle")}</span></div><div class="dlog" style="display:none;margin-top:10px;font-family:var(--font-mono);font-size:11px;background:var(--c-code-bg);border-radius:8px;padding:10px;max-height:200px;overflow:auto;white-space:pre-wrap"></div></div>`);
@@ -979,6 +986,11 @@ async function setupWizard() {
       const args = {}; const s = W.settings[a.id] || {}; for (const k in s) if (k !== "__server__" && s[k]) args[k] = s[k];
       args.server = srv; args.branch = "main"; if (a.id === "analytics") args.deployKey = true;
       if (a.id === "tagmanager" && !args.authIssuer) { const iss = accIssuer(); if (iss) args.authIssuer = iss; } // auto-wire from the Account app
+      if (a.id === "account") { // register the console + analytics redirect origins on the IdP
+        const co = appOrigin("console", 3000); if (co) args.consoleOrigin = co;
+        const ao = appOrigin("analytics", 80); if (ao) { args.analyticsOrigin = ao; args.analyticsApiOrigin = ao; }
+      }
+      if (a.id === "console") { if (!args.authIssuer) { const iss = accIssuer(); if (iss) args.authIssuer = iss; } if (!args.analyticsUrl) { const ao = appOrigin("analytics", 80); if (ao) args.analyticsUrl = ao; } }
       W.deploy[a.id] = { starting: true };
       startJob(a.installTool, args).then((r) => {
         W.deploy[a.id] = { jobId: r.job.id }; log.style.display = "block"; stat.innerHTML = pill("running", "warn");
@@ -989,7 +1001,7 @@ async function setupWizard() {
           // `echo "NOT healthy…"` and the benign first-attempt `could not read Username`.
           if (ev.type === "done") {
             const result = (ev.job && ev.job.result) || "";
-            const bad = ev.status !== "succeeded" || /## (Checkout|Deploy) FAILED|Deploy INCOMPLETE|Account NOT healthy|Nothing installed yet|add the key above to the repo|Could not generate the OIDC/i.test(result);
+            const bad = ev.status !== "succeeded" || /## (Checkout|Deploy|build) FAILED|Deploy INCOMPLETE|(Account|Console) NOT healthy|Bring-up FAILED|Nothing installed yet|add the key above to the repo|Could not generate the OIDC/i.test(result);
             W.deploy[a.id] = { done: true, ok: !bad }; stat.innerHTML = pill(!bad ? "done" : "failed", !bad ? "pos" : "neg");
           }
         });

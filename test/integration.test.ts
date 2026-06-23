@@ -131,6 +131,7 @@ describe("MCP tools/call dispatch", () => {
  * per-group source audit; destructive/heavy paths are asserted in the per-handler unit tests.
  */
 const FIXTURES: Record<string, Record<string, unknown>> = {
+  console_install: { server: "prod", authIssuer: "https://auth.adpix.io" },
   service_relocate: { stack: "analytics", service: "ingest", fromServer: "prod", toServer: "spare", apply: false },
   server_add: { name: "prod", host: "203.0.113.7", verify: false },
   server_list: {},

@@ -77,6 +77,23 @@ export const APPS: AppDef[] = [
       { key: "adminEmail", label: "Bootstrap admin email", required: false, placeholder: "admin@example.com" },
     ],
   },
+  {
+    id: "console",
+    name: "AdPix Tag Manager Console",
+    blurb: "The Tag Manager management UI (apps/console, Next.js). Shares the Tag Manager repo + deploy key. NEXT_PUBLIC_* are baked at build time, so a URL change needs a rebuild.",
+    repoUrl: TM_REPO_URL,
+    keyName: "adpix_tm",
+    project: "adpix-console",
+    deployable: true,
+    installTool: "console_install",
+    defaultDir: "/opt/adpix-tagmanager",
+    urlEnv: "NEXT_PUBLIC_TAGMANAGER_URL",
+    settings: [
+      { key: "domain", label: "Domain (HTTPS) — blank = http on the server IP:3000", required: false, placeholder: "tag.example.com" },
+      { key: "authIssuer", label: "Account center (OIDC issuer) — blank = use the Account app you deploy here", required: false, placeholder: "auto-wired from the Account app" },
+      { key: "analyticsUrl", label: "Analytics dashboard URL (optional)", required: false, placeholder: "https://app.example.com" },
+    ],
+  },
 ];
 
 export function appById(id: string): AppDef | undefined { return APPS.find((a) => a.id === id); }

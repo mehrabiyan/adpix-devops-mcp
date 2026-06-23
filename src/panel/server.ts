@@ -249,16 +249,18 @@ export function createPanelServer(opts: PanelOpts): Server {
         if (!app) { sendJson(res, 404, { error: "unknown app" }); return; }
         try {
           const r = await withSession(deps, b.server ? String(b.server) : undefined, async (s, srv) => {
-            const dir = (app.id === "tagmanager" || app.id === "account") ? (app.defaultDir || srv.adpixDir) : srv.adpixDir;
+            const dir = (app.id === "tagmanager" || app.id === "account" || app.id === "console") ? (app.defaultDir || srv.adpixDir) : srv.adpixDir;
             const st = await stackState(s, dir, app.project);
             let healthy = false, url = "";
             if (st.up) {
-              const port = app.id === "account" ? 9696 : 8686;
+              const port = app.id === "account" ? 9696 : app.id === "console" ? 3000 : 8686;
+              const path = app.id === "console" ? "/" : "/healthz";   // the console (Next.js) has no /healthz
               if (app.id === "analytics") { const g = await s.exec(waitHealthyCmd(20), { timeoutMs: 30_000 }); healthy = g.code === 0; }
-              else { const g = await s.exec(`curl -fsS -o /dev/null -m 5 -w '%{http_code}' http://localhost:${port}/healthz 2>/dev/null || echo 000`, { timeoutMs: 20_000 }); healthy = /^[23]/.test(g.stdout.trim()); }
+              else { const g = await s.exec(`curl -fsS -o /dev/null -m 5 -w '%{http_code}' http://localhost:${port}${path} 2>/dev/null || echo 000`, { timeoutMs: 20_000 }); healthy = /^[23]/.test(g.stdout.trim()); }
               if (app.urlEnv) {
-                // account writes deploy/.env.account; analytics/TM use the checkout .env
-                if (app.id === "account") url = (await s.exec(`grep -h '^${app.urlEnv}=' ${dir.replace(/'/g, "")}/deploy/.env.account 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\\n'`)).stdout.trim();
+                // account → deploy/.env.account; console → deploy/.env.console; analytics/TM → the checkout .env
+                const envFile = app.id === "account" ? "/deploy/.env.account" : app.id === "console" ? "/deploy/.env.console" : "";
+                if (envFile) url = (await s.exec(`grep -h '^${app.urlEnv}=' ${dir.replace(/'/g, "")}${envFile} 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\\n'`)).stdout.trim();
                 else url = await readEnvVar(s, dir, app.urlEnv);
               }
             }

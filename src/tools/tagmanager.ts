@@ -51,6 +51,59 @@ const TM_AUTH_DOCKERFILE =
   `RUN pnpm install --prod=false\n` +
   `EXPOSE 9696\n` +
   `CMD ["node", "--experimental-strip-types", "apps/auth/src/server.ts"]\n`;
+
+// The console is a Next.js SPA: NEXT_PUBLIC_* are inlined at BUILD time, so they come in as build args
+// (the repo ships no Dockerfile for it — we ship one, like Dockerfile.auth, until CD owns it).
+const TM_CONSOLE_DOCKERFILE =
+  `FROM node:22-alpine\n` +
+  `RUN corepack enable\n` +
+  `WORKDIR /app\n` +
+  `COPY . .\n` +
+  ["NEXT_PUBLIC_API_URL", "NEXT_PUBLIC_AUTH_ISSUER", "NEXT_PUBLIC_OIDC_CLIENT_ID", "NEXT_PUBLIC_ACCOUNT_URL", "NEXT_PUBLIC_ANALYTICS_URL", "NEXT_PUBLIC_TAGMANAGER_URL"].map((a) => `ARG ${a}\n`).join("") +
+  `ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL NEXT_PUBLIC_AUTH_ISSUER=$NEXT_PUBLIC_AUTH_ISSUER NEXT_PUBLIC_OIDC_CLIENT_ID=$NEXT_PUBLIC_OIDC_CLIENT_ID NEXT_PUBLIC_ACCOUNT_URL=$NEXT_PUBLIC_ACCOUNT_URL NEXT_PUBLIC_ANALYTICS_URL=$NEXT_PUBLIC_ANALYTICS_URL NEXT_PUBLIC_TAGMANAGER_URL=$NEXT_PUBLIC_TAGMANAGER_URL NEXT_TELEMETRY_DISABLED=1\n` +
+  `RUN pnpm install --prod=false\n` +
+  `RUN pnpm --filter @adpix/console build\n` +
+  `EXPOSE 3000\n` +
+  `WORKDIR /app/apps/console\n` +
+  `CMD ["pnpm", "start"]\n`;
+
+// Console compose (project adpix-console). With `bundleCaddy` it also fronts <domain> on :80/:443
+// (auto Let's Encrypt) and path-strips /api/* to the host-published TM api (8686) via the host gateway.
+function consoleComposeYaml(opts: { dir: string; bundleCaddy: boolean }): string {
+  const args = [
+    `        NEXT_PUBLIC_API_URL: \${NEXT_PUBLIC_API_URL:?set in deploy/.env.console}`,
+    `        NEXT_PUBLIC_AUTH_ISSUER: \${NEXT_PUBLIC_AUTH_ISSUER:?set in deploy/.env.console}`,
+    `        NEXT_PUBLIC_OIDC_CLIENT_ID: \${NEXT_PUBLIC_OIDC_CLIENT_ID:-tm-console}`,
+    `        NEXT_PUBLIC_ACCOUNT_URL: \${NEXT_PUBLIC_ACCOUNT_URL:-}`,
+    `        NEXT_PUBLIC_ANALYTICS_URL: \${NEXT_PUBLIC_ANALYTICS_URL:-}`,
+    `        NEXT_PUBLIC_TAGMANAGER_URL: \${NEXT_PUBLIC_TAGMANAGER_URL:-}`,
+  ].join("\n");
+  const caddy = opts.bundleCaddy
+    ? `  caddy:\n` +
+      `    image: caddy:2-alpine\n` +
+      `    restart: unless-stopped\n` +
+      `    depends_on:\n      - console\n` +
+      `    ports:\n      - "80:80"\n      - "443:443"\n` +
+      `    extra_hosts:\n      - "host.docker.internal:host-gateway"\n` +
+      `    volumes:\n` +
+      `      - ${opts.dir}/deploy/Caddyfile.console:/etc/caddy/Caddyfile:ro\n` +
+      `      - caddy_console_data:/data\n` +
+      `      - caddy_console_config:/config\n`
+    : "";
+  const vols = opts.bundleCaddy ? `volumes:\n  caddy_console_data: {}\n  caddy_console_config: {}\n` : "";
+  return (
+    `services:\n` +
+    `  console:\n` +
+    `    build:\n` +
+    `      context: ..\n` +
+    `      dockerfile: deploy/Dockerfile.console\n` +
+    `      args:\n${args}\n` +
+    `    restart: unless-stopped\n` +
+    `    ports:\n      - "\${CONSOLE_PORT:-3000}:3000"\n` +
+    caddy +
+    vols
+  );
+}
 // The auth server REFUSES to boot in production without a stable RSA signing key (keystore.ts), so we
 // generate one and embed it as a YAML literal block (env-files can't hold multi-line PEM). mode 600.
 // When `domain` is set we also add a Caddy front door (auto Let's Encrypt + auto-renew) on :80/:443
@@ -427,6 +480,86 @@ export const tagmanagerTools: ToolDef[] = [
             `${a.domain ? `Caddy serves ${a.domain} on :443 (Let's Encrypt). Direct: http://${srv.host}:${a.port}. ` : `Open port ${a.port} in the firewall (no domain set → HTTP only). `}` +
             `Set AUTH_ISSUER=${issuer} when installing Tag Manager.`
         );
+        return sections.join("\n\n");
+      });
+    },
+  },
+
+  {
+    name: "console_install",
+    title: "Install the Tag Manager console (UI)",
+    description:
+      "Build + run the Tag Manager management UI (apps/console, Next.js) on :3000. NEXT_PUBLIC_* (api url, " +
+      "issuer, client id, product urls) are inlined at BUILD time — changing them later needs a rebuild, not a " +
+      "restart. With a domain it also fronts <domain> with Caddy (auto Let's Encrypt) and path-strips /api/* to " +
+      "the host-published TM api (8686) — UNLESS another front door already holds :80/:443, in which case it runs " +
+      "console-only and prints the site block to add to your existing Caddy. Ships its own Dockerfile.console.",
+    schema: {
+      server: serverParam,
+      dir: dirParam,
+      repoUrl: z.string().default(TM_REPO_URL),
+      branch: z.string().default("main"),
+      domain: z.string().optional().describe("Public domain for the console UI, e.g. tag.adpix.io (HTTPS). Omit → http on the server IP:port."),
+      authIssuer: z.string().describe("The IdP issuer, e.g. https://auth.adpix.io (NEXT_PUBLIC_AUTH_ISSUER + ACCOUNT_URL)"),
+      apiUrl: z.string().optional().describe("Public TM api base for the SPA (NEXT_PUBLIC_API_URL). Default: domain ? https://<domain>/api : http://<host>:8686"),
+      analyticsUrl: z.string().optional().describe("Analytics dashboard URL (NEXT_PUBLIC_ANALYTICS_URL), e.g. https://app.adpix.io"),
+      oidcClientId: z.string().default("tm-console").describe("The console's OIDC client id (must match the IdP's registered client)"),
+      port: z.number().int().min(1).max(65535).default(3000),
+      timeoutSeconds: z.number().int().min(60).max(7200).default(3600),
+    },
+    annotations: { idempotentHint: true, openWorldHint: true },
+    handler: async (deps, args) => {
+      const a = args as { server?: string; dir: string; repoUrl: string; branch: string; domain?: string; authIssuer: string; apiUrl?: string; analyticsUrl?: string; oidcClientId: string; port: number; timeoutSeconds: number };
+      return withSession(deps, a.server, async (s, srv) => {
+        const dir = a.dir;
+        const sections: string[] = [];
+        const docker = await s.exec("command -v docker >/dev/null && docker compose version >/dev/null 2>&1 && echo ok || echo no");
+        if (docker.stdout.trim() !== "ok") return `Docker (with the compose plugin) isn't available on ${srv.name}. Install Docker first, then re-run console_install.`;
+
+        const halt = await checkoutTmRepo(deps, s, dir, a.repoUrl, a.branch, srv.name, sections, "console_install");
+        if (halt) return halt;
+
+        const apiUrl = a.apiUrl || (a.domain ? `https://${a.domain}/api` : `http://${srv.host}:8686`);
+        const tagUrl = a.domain ? `https://${a.domain}` : `http://${srv.host}:${a.port}`;
+        // One reverse proxy owns :80/:443 — if something already holds them (the IdP/Analytics Caddy),
+        // don't bundle a second (port clash); run console-only + print the route to add.
+        const held = a.domain ? /:443\s/.test((await s.exec(`ss -ltn 2>/dev/null | grep ':443 ' || true`)).stdout) : false;
+        const bundleCaddy = !!a.domain && !held;
+
+        await uploadFile(s, `${dir}/deploy/Dockerfile.console`, TM_CONSOLE_DOCKERFILE, "644");
+        await uploadFile(s, `${dir}/deploy/docker-compose.console.yml`, consoleComposeYaml({ dir, bundleCaddy }), "644");
+        await uploadFile(
+          s,
+          `${dir}/deploy/.env.console`,
+          `NEXT_PUBLIC_API_URL=${apiUrl}\nNEXT_PUBLIC_AUTH_ISSUER=${a.authIssuer}\nNEXT_PUBLIC_OIDC_CLIENT_ID=${a.oidcClientId}\nNEXT_PUBLIC_ACCOUNT_URL=${a.authIssuer}\nNEXT_PUBLIC_ANALYTICS_URL=${a.analyticsUrl || ""}\nNEXT_PUBLIC_TAGMANAGER_URL=${tagUrl}\nCONSOLE_PORT=${a.port}\n`,
+          "600"
+        );
+        if (bundleCaddy) {
+          await uploadFile(s, `${dir}/deploy/Caddyfile.console`, `${a.domain} {\n\tencode gzip\n\thandle_path /api/* {\n\t\treverse_proxy host.docker.internal:8686\n\t}\n\thandle {\n\t\treverse_proxy console:3000\n\t}\n}\n`, "644");
+          await s.exec(`command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi active && { ufw allow 80/tcp; ufw allow 443/tcp; } || true`, { timeoutMs: 30_000 });
+        }
+        sections.push(`## Config\nConsole UI ${tagUrl} · api ${apiUrl} · issuer ${a.authIssuer} · client ${a.oidcClientId}${bundleCaddy ? " · bundled Caddy (Let's Encrypt) + /api path-strip" : a.domain ? " · :443 already in use → console-only (add the route below to your front door)" : ""}. NEXT_PUBLIC_* are baked at build time — a URL change needs a rebuild.`);
+
+        const CC = `cd ${shq(dir)} && docker compose -p adpix-console -f deploy/docker-compose.console.yml --env-file deploy/.env.console`;
+        const build = await s.exec(`${CC} build 2>&1`, { timeoutMs: a.timeoutSeconds * 1000 });
+        if (build.code !== 0) return sections.join("\n\n") + `\n\n## build FAILED (exit ${build.code})\n${redactSecrets(lastLines(build.stdout, 40))}`;
+        const up = await s.exec(`${CC} up -d 2>&1`, { timeoutMs: 600_000 });
+        sections.push(`## compose up (exit ${up.code})\n${redactSecrets(lastLines(up.stdout, 15))}`);
+        if (up.code !== 0) return sections.join("\n\n") + `\n\nBring-up FAILED — see above.`;
+
+        const gate = await s.exec(
+          `code=000; for i in $(seq 1 40); do code=$(curl -fsS -o /dev/null -m 5 -w '%{http_code}' http://localhost:${a.port}/ 2>/dev/null || echo 000); case "$code" in 2*|3*) echo "healthy after ~$((i*5))s (HTTP $code)"; exit 0;; esac; sleep 5; done; echo "NOT healthy after 200s (last $code)"; exit 1`,
+          { timeoutMs: 240_000 }
+        );
+        sections.push(`## Health gate\n${gate.stdout.trim()}`);
+        if (gate.code !== 0) {
+          const logs = await s.exec(`${CC} logs --no-color --tail 50 console 2>&1`, { timeoutMs: 30_000 });
+          return sections.join("\n\n") + `\n\n## Console NOT healthy — container logs (last 50)\n${redactSecrets(lastLines(logs.stdout || logs.stderr, 50))}`;
+        }
+        if (a.domain && !bundleCaddy) {
+          sections.push(`## Add this to your existing front door (it already owns :443)\n\`\`\`\n${a.domain} {\n\tencode gzip\n\thandle_path /api/* { reverse_proxy 172.17.0.1:8686 }\n\thandle { reverse_proxy 172.17.0.1:${a.port} }\n}\n\`\`\`\nThen reload it. (console + api are host-published; reach them via the docker bridge gateway.)`);
+        }
+        sections.push(`## Done\nTag Manager console at ${tagUrl}. OIDC client \`${a.oidcClientId}\` — its redirect URIs must be registered on the IdP (account_install consoleOrigin=${tagUrl}).`);
         return sections.join("\n\n");
       });
     },

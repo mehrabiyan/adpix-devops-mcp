@@ -38,6 +38,24 @@ const SERVICES = [
   "clickhouse",
 ] as const;
 
+/**
+ * Map the known upstream app-bug signatures (deploy.sh / migrate.sh / ClickHouse / api) to their exact
+ * fix + workaround — see docs/upstream-app-fixes.md (A1–A4). Turns an opaque deploy failure into "here's
+ * the one line to fix" so a non-adaptive caller (the panel, anyone) isn't stuck guessing.
+ */
+function diagnoseAppFailure(out: string): string {
+  const hits: string[] = [];
+  if (/insecure\/missing secrets|SERVER_API_KEY \(default\)|CLICKHOUSE_PASSWORD \(empty\)/i.test(out))
+    hits.push("A1 — deploy.sh reused a weak/partial .env (SERVER_API_KEY=demo… / empty CLICKHOUSE_PASSWORD). Fix: set strong values (e.g. `openssl rand -hex 24`) for those keys in .env and re-run; upstream: make deploy.sh's secret provisioning idempotent + validating.");
+  if (/does not have 'replace' attribute|from_env substitution/i.test(out))
+    hits.push("A2 — ClickHouse won't start with a non-empty password: ops/clickhouse/users.d/allow-network.xml needs `<password from_env=\"CLICKHOUSE_PASSWORD\" replace=\"replace\"/>`.");
+  if (/postgres not ready after/i.test(out))
+    hits.push("A3 — migrate.sh exports an empty PGSSLMODE, so pg_isready never passes even though Postgres is up. Workaround: set `PGSSLMODE=disable` in .env; upstream: only export PGSSLMODE when set.");
+  if (/Syntax error at position|UNKNOWN_IDENTIFIER 'ip'|UNKNOWN_IDENTIFIER|Cannot find column/i.test(out))
+    hits.push("A4 — migrate.sh splits SQL on `;` inside comments, corrupting the ClickHouse schema (e.g. the missing `events_local.ip`). Workaround: apply migrations/clickhouse/*.sql via `clickhouse-client --multiquery`; upstream: pipe each file to --multiquery (delete the hand-rolled splitter).");
+  return hits.length ? `\n\n## Known upstream issue detected (docs/upstream-app-fixes.md)\n${hits.map((h) => `  - ${h}`).join("\n")}` : "";
+}
+
 async function composePsTable(s: Session, dir: string): Promise<string> {
   const r = await s.exec(`${composeCmd(dir)} ps -a --format json`, { timeoutMs: 60_000 });
   const rows = parseComposePs(r.stdout);
@@ -233,7 +251,8 @@ export const lifecycleTools: ToolDef[] = [
           return sections.join("\n\n") +
             "\n\n## Deploy FAILED\ndeploy.sh exited non-zero — the stack is NOT up. The script is idempotent: fix the cause and re-run adpix_install to resume. " +
             "Common causes: Docker daemon not running, out of disk on /var/lib/docker, OOM during the image build (need ~4GB RAM), or a migration error (Postgres/ClickHouse not healthy within 120s). " +
-            "Dig in with adpix_logs / run_command. (The error is usually in the last lines above.)";
+            "Dig in with adpix_logs / run_command. (The error is usually in the last lines above.)" +
+            diagnoseAppFailure(dep.stdout);
         }
 
         // deploy.sh exit 0 does NOT guarantee a running stack — verify the containers actually came up.
@@ -241,7 +260,8 @@ export const lifecycleTools: ToolDef[] = [
         if (!st.up) {
           return sections.join("\n\n") +
             `\n\n## Deploy INCOMPLETE\ndeploy.sh finished but only ${st.running}/${st.total} containers are running — the stack is not up.\n${await composePsTable(s, dir)}\n` +
-            `Re-run adpix_install (idempotent) after checking adpix_logs.`;
+            `Re-run adpix_install (idempotent) after checking adpix_logs.` +
+            diagnoseAppFailure(dep.stdout);
         }
         sections.push(`## Containers\n${st.running}/${st.total} running.`);
 

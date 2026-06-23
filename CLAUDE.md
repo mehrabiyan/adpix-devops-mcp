@@ -4,9 +4,9 @@ Guidance for Claude Code working in this repo.
 
 ## What this is
 
-`adpix-devops-mcp` — an [MCP](https://modelcontextprotocol.io) server that acts as a DevOps/SRE for the AdPix stack (Analytics, Tag Manager, Account/IdP). It reaches target servers over SSH and runs Docker/compose, Postgres/ClickHouse, CI/CD, HA, monitoring, and install/lifecycle operations. **85 tools.** Ships with a web **control panel** (AdPix Cloud) and a guided **setup wizard**.
+`adpix-devops-mcp` — an [MCP](https://modelcontextprotocol.io) server that acts as a DevOps/SRE for the AdPix stack (Analytics, Tag Manager, Account/IdP). It reaches target servers over SSH and runs Docker/compose, Postgres/ClickHouse, CI/CD, HA, monitoring, and install/lifecycle operations. **86 tools.** Ships with a web **control panel** (AdPix Cloud) and a guided **setup wizard**.
 
-TypeScript ESM. Node 18+. `tsc` → `dist/`. Tests: vitest (**605**, all green — keep it that way).
+TypeScript ESM. Node 18+. `tsc` → `dist/`. Tests: vitest (**612**, all green — keep it that way).
 
 ## Build / test / run loop
 

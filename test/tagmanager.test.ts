@@ -5,6 +5,53 @@ import type { ExecResult, Session } from "../src/ssh.js";
 import { allTools } from "../src/tools/index.js";
 import { tmHealthGate } from "../src/tools/tagmanager.js";
 
+describe("console_install (the Tag Manager UI)", () => {
+  const decode = (calls: string[], file: string) => {
+    const c = calls.find((x) => x.includes(file) && x.includes("base64 -d"));
+    return Buffer.from(c?.match(/echo '([A-Za-z0-9+/=]+)'/)?.[1] ?? "", "base64").toString("utf8");
+  };
+  it("builds the console + bundles Caddy (port 443 free), bakes the NEXT_PUBLIC build env", async () => {
+    const { deps, calls } = fakeDeps([
+      [/docker compose version/, { stdout: "ok" }],
+      [/command -v git/, { code: 0 }],
+      [/git (clone|fetch)/, { code: 0 }],
+      [/ss -ltn/, { stdout: "" }],                       // :443 free → bundle Caddy
+      [/base64 -d/, { code: 0 }],
+      [/-p adpix-console .*build/, { code: 0 }],
+      [/-p adpix-console .*up -d/, { code: 0 }],
+      [/seq 1 40/, { code: 0, stdout: "healthy after ~10s (HTTP 200)" }],
+    ]);
+    const out = await tool("console_install").handler(deps, { dir: "/opt/adpix-tagmanager", repoUrl: "https://github.com/mehrabiyan/AdpixTagManager.git", branch: "main", domain: "tag.adpix.io", authIssuer: "https://auth.adpix.io", analyticsUrl: "https://app.adpix.io", oidcClientId: "tm-console", port: 3000, timeoutSeconds: 3600 });
+    const compose = decode(calls, "docker-compose.console.yml");
+    expect(compose).toContain("console:");
+    expect(compose).toContain("caddy:");                 // bundled (port free)
+    expect(compose).toContain("Dockerfile.console");
+    const env = decode(calls, ".env.console");
+    expect(env).toContain("NEXT_PUBLIC_API_URL=https://tag.adpix.io/api");
+    expect(env).toContain("NEXT_PUBLIC_AUTH_ISSUER=https://auth.adpix.io");
+    expect(env).toContain("NEXT_PUBLIC_TAGMANAGER_URL=https://tag.adpix.io");
+    expect(calls.some((c) => /Caddyfile\.console/.test(c))).toBe(true);
+    expect(out).toMatch(/Tag Manager console at https:\/\/tag\.adpix\.io/);
+  });
+
+  it("does NOT bundle a second Caddy when :443 is already held — prints the route instead", async () => {
+    const { deps, calls } = fakeDeps([
+      [/docker compose version/, { stdout: "ok" }],
+      [/command -v git/, { code: 0 }],
+      [/git (clone|fetch)/, { code: 0 }],
+      [/ss -ltn/, { stdout: "LISTEN 0 0 0.0.0.0:443 0.0.0.0:*" }],   // :443 held by the IdP/Analytics Caddy
+      [/base64 -d/, { code: 0 }],
+      [/-p adpix-console .*build/, { code: 0 }],
+      [/-p adpix-console .*up -d/, { code: 0 }],
+      [/seq 1 40/, { code: 0, stdout: "healthy after ~10s (HTTP 200)" }],
+    ]);
+    const out = await tool("console_install").handler(deps, { dir: "/opt/adpix-tagmanager", repoUrl: "https://github.com/mehrabiyan/AdpixTagManager.git", branch: "main", domain: "tag.adpix.io", authIssuer: "https://auth.adpix.io", oidcClientId: "tm-console", port: 3000, timeoutSeconds: 3600 });
+    expect(decode(calls, "docker-compose.console.yml")).not.toContain("caddy:");   // no second front door
+    expect(out).toMatch(/Add this to your existing front door/);
+    expect(out).toMatch(/handle_path \/api\/\*/);
+  });
+});
+
 describe("tmHealthGate (edge is behind varnish, not host-published)", () => {
   it("accepts the edge when its container is running even if the host probe fails", () => {
     const g = tmHealthGate(60);

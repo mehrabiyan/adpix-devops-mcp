@@ -363,15 +363,15 @@ Servers normally come from the registry (`server_add`). For a single-server setu
 
 ```bash
 npm install
-npm test        # vitest — 605 tests, no network
+npm test        # vitest — 612 tests, no network
 npm run build
 npm run dev     # run from source over stdio
 ```
 
 **Testing** (vitest, all hermetic — the `Deps` seam swaps in a fake SSH/registry/local layer, so nothing touches a network):
 
-- **Unit** (per-handler): every one of the **85 tools** has a direct `tool("…").handler(fakeDeps, args)` test that drives its logic against mocked command output (regexes match the real shell/SQL strings). Destructive paths assert their guards (refuse-without-confirm, impact previews, verify-before-swap, disk/merge preflights, downtime warnings).
-- **Integration** (`test/integration.test.ts`): drives the **real MCP server** end to end — a SDK `Client` talks to `buildServer(fakeDeps)` over an in-memory transport. Asserts the `tools/list` contract (all tools, well-formed JSON Schemas, preserved annotations), JSON-Schema **input validation** (bad-typed args are rejected), the call dispatch, and the handler-throw → `isError` mapping. An **exhaustive every-tool smoke** calls all 85 tools through the protocol with minimal valid args and asserts each returns content (no schema rejection, no crash).
+- **Unit** (per-handler): every one of the **86 tools** has a direct `tool("…").handler(fakeDeps, args)` test that drives its logic against mocked command output (regexes match the real shell/SQL strings). Destructive paths assert their guards (refuse-without-confirm, impact previews, verify-before-swap, disk/merge preflights, downtime warnings).
+- **Integration** (`test/integration.test.ts`): drives the **real MCP server** end to end — a SDK `Client` talks to `buildServer(fakeDeps)` over an in-memory transport. Asserts the `tools/list` contract (all tools, well-formed JSON Schemas, preserved annotations), JSON-Schema **input validation** (bad-typed args are rejected), the call dispatch, and the handler-throw → `isError` mapping. An **exhaustive every-tool smoke** calls all 86 tools through the protocol with minimal valid args and asserts each returns content (no schema rejection, no crash).
 - **Transport** (`test/http.test.ts`): the hosted HTTP mode — `/healthz`, Bearer auth (constant-time), 404s, and a real `initialize` + `tools/list` round-trip.
 - Plus the pure layers: guard patterns, registry round-trip + permissions, parsers, the watchdog/autodeploy/AI-fixer bash templates (incl. `bash -n`).
 

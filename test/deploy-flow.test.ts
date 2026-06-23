@@ -232,6 +232,30 @@ describe("C. a broken existing checkout is normalized, then re-cloned if it stil
   });
 });
 
+// ════════════════════════════════════════════ M5. install self-diagnostics ═════════════════════════
+describe("CM. adpix_install maps known upstream app-bug signatures to the exact fix", () => {
+  const dep = (stdout: string): Resp[] => [
+    [/command -v git/, { code: 0 }],
+    [/git (clone|fetch)/, { code: 0 }],
+    [/deploy\.sh/, { code: 1, stdout }],
+  ];
+  const runFail = (stdout: string) => fakeDeps(dep(stdout), KEY_AUTHORIZED).deps;
+
+  it("ClickHouse from_env without replace → A2 with the exact xml fix", async () => {
+    const out = await tool("adpix_install").handler(runFail("Failed to preprocess config: Element <password> has value and does not have 'replace' attribute, can't process from_env substitution"), { branch: "main", repoUrl: "https://github.com/mehrabiyan/adpix.git", skipPreflight: true, timeoutSeconds: 600, deployKey: false });
+    expect(out).toMatch(/A2 — ClickHouse won't start/);
+    expect(out).toContain('replace="replace"');
+  });
+
+  it("weak .env secrets → A1, and a corrupted CH migration → A4", async () => {
+    const a1 = await tool("adpix_install").handler(runFail("APP_ENV=production but insecure/missing secrets: [SERVER_API_KEY (default) CLICKHOUSE_PASSWORD (empty)]"), { branch: "main", repoUrl: "https://github.com/mehrabiyan/adpix.git", skipPreflight: true, timeoutSeconds: 600, deployKey: false });
+    expect(a1).toMatch(/A1 — deploy.sh reused a weak/);
+    const a4 = await tool("adpix_install").handler(runFail("Code: 47. DB::Exception: Missing columns: 'ip' ... UNKNOWN_IDENTIFIER"), { branch: "main", repoUrl: "https://github.com/mehrabiyan/adpix.git", skipPreflight: true, timeoutSeconds: 600, deployKey: false });
+    expect(a4).toMatch(/A4 — migrate.sh splits SQL/);
+    expect(a4).toContain("--multiquery");
+  });
+});
+
 // ════════════════════════════════════════════ D. branch-agnostic clone ════════════════════════════
 describe("D. clone is branch-agnostic (no `git clone -b`, so a differing default branch can't fail)", () => {
   it("adpix_install clones without -b and checks out the branch afterward", async () => {

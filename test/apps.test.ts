@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 import { APPS, appById, distinctRepos, appsCatalog } from "../src/panel/apps.js";
 
 describe("apps registry", () => {
-  it("has analytics + tagmanager + account", () => {
-    expect(APPS.map((a) => a.id).sort()).toEqual(["account", "analytics", "tagmanager"]);
+  it("has analytics + tagmanager + account + console", () => {
+    expect(APPS.map((a) => a.id).sort()).toEqual(["account", "analytics", "console", "tagmanager"]);
     expect(appById("analytics")?.installTool).toBe("adpix_install");
     expect(appById("tagmanager")?.installTool).toBe("tm_install");
     expect(appById("account")?.deployable).toBe(true);          // IdP now deploys as a container
     expect(appById("account")?.installTool).toBe("account_install");
+    expect(appById("console")?.installTool).toBe("console_install");  // the TM management UI
+    expect(appById("console")?.project).toBe("adpix-console");
   });
 
   it("dedupes repos: tagmanager + account share ONE deploy key/repo, analytics is separate", () => {
