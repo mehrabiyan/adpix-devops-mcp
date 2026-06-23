@@ -8,8 +8,8 @@ if (TOKEN) sessionStorage.setItem("adpix_token", TOKEN);
 history.replaceState(null, "", location.pathname);
 function authHeaders(mut) { if (S.mode === "session") return mut ? { "x-adpix-csrf": S.csrf } : {}; return TOKEN ? { "x-adpix-token": TOKEN } : {}; }
 async function api(path, opts = {}) {
-  // the silent 3s job poll (GET /api/jobs) shouldn't flicker the top loader; everything else does
-  const count = !(path === "/api/jobs" && (!opts.method || opts.method === "GET"));
+  // the silent 3s polls (jobs + version) shouldn't flicker the top loader; everything else does
+  const count = !((path === "/api/jobs" || path === "/api/version") && (!opts.method || opts.method === "GET"));
   if (count) bumpBusy(1);
   try {
     const res = await fetch(path, { ...opts, credentials: "same-origin", headers: { ...(opts.body ? { "content-type": "application/json" } : {}), ...authHeaders(!!opts.body), ...(opts.headers || {}) } });
@@ -39,6 +39,14 @@ async function pollJobs() {
     reflectLoader(); updateActivityBadge();
     if (was > 0 && running === 0) { await loadFleet().catch(() => {}); render(); } // refresh when work finishes
   } catch { /* keep polling */ }
+  // Nudge a reload when the panel has been rebuilt (the SPA's in-memory app.js would otherwise stay stale).
+  try { const v = await api("/api/version"); if (S.buildId && v.buildId && v.buildId !== S.buildId && !S.reloadNudged) { S.reloadNudged = true; nudgeReload(); } } catch {}
+}
+function nudgeReload() {
+  if (document.getElementById("reloadnudge")) return;
+  const bar = el(`<div id="reloadnudge" style="position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:400;background:var(--c-brand);color:#fff;padding:9px 14px;border-radius:999px;box-shadow:0 6px 24px rgba(0,0,0,.25);font-size:13px;font-weight:600;display:flex;align-items:center;gap:10px">Panel updated — reload to get the latest <button id="reloadnow" style="background:#fff;color:var(--c-brand);border:0;border-radius:999px;padding:4px 11px;font-weight:700;cursor:pointer">Reload</button></div>`);
+  document.body.appendChild(bar);
+  document.getElementById("reloadnow").onclick = () => location.reload();
 }
 function startJobPoll() { mountTopLoader(); pollJobs(); if (jobPollTimer) clearInterval(jobPollTimer); jobPollTimer = setInterval(pollJobs, 3000); }
 const runTool = (n, a = {}) => api(`/api/tools/${n}`, { method: "POST", body: JSON.stringify({ args: a }) });
@@ -1007,8 +1015,9 @@ async function setupWizard() {
     c.querySelector(".left").innerHTML = items.map(([tool, l], i) => `<button class="btn btn-sm lft" data-i="${i}">${esc(l)}</button>`).join("");
     c.querySelectorAll(".lft").forEach((b) => (b.onclick = () => { const it = items[+b.dataset.i]; action(it[0], it[2]); }));
     // launch_readiness is AdPix-Analytics-specific (its capacity model, CH replication, ingest tier).
-    // Only show it when Analytics was deployed — otherwise it false-flags "/opt/adpix not installed".
-    if (deployable().some((a) => a.id === "analytics")) {
+    // Only show it when Analytics actually deployed AND verified up — keying off selection would
+    // false-flag "/opt/adpix not installed" for an Account/TM-only run.
+    if ((W.verify.analytics || {}).up) {
       const srvA = (W.settings.analytics || {}).__server__ || firstServer();
       try { const r = await runTool("launch_readiness", { server: srvA, sites: W.topology === "cluster" ? 200000 : 20000 }); c.querySelector(".rdy").innerHTML = `<div class="muted" style="font-size:11.5px;margin-bottom:5px">Launch readiness (Analytics)</div><pre class="out" style="white-space:pre-wrap;font-size:11px;max-height:170px;overflow:auto">${esc(String(r.result))}</pre>`; } catch (e) { /* needs a server */ }
     } else {
@@ -1086,7 +1095,7 @@ function renderSetup(msg = "") { authShell(`<p class="muted" style="margin-top:0
 // ============================================================ boot
 async function boot() {
   let me = null; try { me = await api("/api/me"); } catch {}
-  if (me) { S.me = me.actor; S.mode = me.mode; if (me.csrf) S.csrf = me.csrf; if (me.killed) { authShell(`<div class="badge b-neg"><span class="dot"></span>Kill-switch engaged</div><p class="muted">Destructive ops disabled, sessions revoked. An owner must release it.</p><button class="btn" id="r" style="width:100%;justify-content:center;margin-top:8px">Reload</button>`); document.getElementById("r").onclick = () => location.reload(); return; } try { const { tools } = await api("/api/catalog"); S.catalog = tools; } catch (e) { authShell(`<div class="empty">Failed to load: ${esc(e.message)}</div>`); return; } await loadClusters(); await loadFleet(); render(); startJobPoll(); return; }
+  if (me) { S.me = me.actor; S.mode = me.mode; S.buildId = me.buildId; if (me.csrf) S.csrf = me.csrf; if (me.killed) { authShell(`<div class="badge b-neg"><span class="dot"></span>Kill-switch engaged</div><p class="muted">Destructive ops disabled, sessions revoked. An owner must release it.</p><button class="btn" id="r" style="width:100%;justify-content:center;margin-top:8px">Reload</button>`); document.getElementById("r").onclick = () => location.reload(); return; } try { const { tools } = await api("/api/catalog"); S.catalog = tools; } catch (e) { authShell(`<div class="empty">Failed to load: ${esc(e.message)}</div>`); return; } await loadClusters(); await loadFleet(); render(); startJobPoll(); return; }
   let status = {}; try { status = await fetch("/api/status").then((r) => r.json()); } catch {}
   if (status.adminsExist) return renderLogin();
   if (TOKEN) return renderSetup();

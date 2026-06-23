@@ -56,6 +56,9 @@ export interface PanelOpts {
 }
 
 const PUBLIC_DIR = fileURLToPath(new URL("./public/", import.meta.url));
+// Build id = app.js size+mtime at startup. The SPA compares it on each poll and nudges a reload
+// when it changes (a rebuilt panel), so an in-memory stale app.js can't silently misbehave.
+const BUILD_ID = (() => { try { const st = fs.statSync(PUBLIC_DIR + "app.js"); return `${st.size}-${Math.round(st.mtimeMs)}`; } catch { return "0"; } })();
 const MAX_BODY = 4 * 1024 * 1024;
 const CONTENT_TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml" };
 const HEADERS: Record<string, string> = {
@@ -143,9 +146,10 @@ export function createPanelServer(opts: PanelOpts): Server {
         return;
       }
 
+      if (path === "/api/version" && method === "GET") { sendJson(res, 200, { buildId: BUILD_ID }); return; }
       if (path === "/api/me" && method === "GET") {
         const csrf = actor.viaToken ? undefined : sessions.get(actor.sessionId)?.csrf;
-        sendJson(res, 200, { actor: { username: actor.username, role: actor.role, scopes: actor.scopes }, mode: actor.viaToken ? "token" : "session", csrf, killed, adminsExist: loadAdmins().length > 0 });
+        sendJson(res, 200, { actor: { username: actor.username, role: actor.role, scopes: actor.scopes }, mode: actor.viaToken ? "token" : "session", csrf, killed, adminsExist: loadAdmins().length > 0, buildId: BUILD_ID });
         return;
       }
       if (path === "/api/catalog" && method === "GET") { sendJson(res, 200, { tools: buildCatalog() }); return; }
