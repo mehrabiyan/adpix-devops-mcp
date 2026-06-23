@@ -21,13 +21,13 @@ async function streamJob(id, onEvent, signal) { const res = await fetch(`/api/jo
 
 // ============================================================ i18n
 const STR = {
-  en: { nav: { dashboard: "Dashboard", servers: "Servers", ha: "High availability", databases: "Databases", backups: "Backups", deploys: "Deploys", dns: "DNS & connect", monitoring: "Monitoring", jobs: "Jobs & audit", security: "Security", settings: "Settings" },
+  en: { nav: { dashboard: "Dashboard", assistant: "Assistant", servers: "Servers", ha: "High availability", databases: "Databases", backups: "Backups", deploys: "Deploys", dns: "DNS & connect", monitoring: "Monitoring", jobs: "Jobs & audit", security: "Security", settings: "Settings" },
     grp: { overview: "Overview", fleet: "Fleet", data: "Data", delivery: "Delivery", observe: "Observe", govern: "Govern" },
     fleetOverview: "Fleet overview", backupAll: "Backup all", deploy: "Deploy", addServer: "Add server", search: "Search servers, screens, actions…", collapse: "Collapse",
     quorumHealthy: "Quorum healthy", clusterTopology: "Cluster topology", nodeHealth: "Node health", recentJobs: "Recent jobs", activeAlerts: "Active alerts", viewAll: "View all",
     activity: "Activity", noJobs: "No active jobs. Everything is idle.", containers: "Containers", logs: "Logs", refresh: "Refresh", cancel: "Cancel", back: "Back", next: "Next",
     typeToConfirm: "This is irreversible. Type the target name to confirm:", soon: "Soon" },
-  fa: { nav: { dashboard: "داشبورد", servers: "سرورها", ha: "دسترس‌پذیری بالا", databases: "پایگاه‌داده", backups: "پشتیبان‌گیری", deploys: "استقرار", dns: "DNS و اتصال", monitoring: "پایش", jobs: "کارها و ممیزی", security: "امنیت", settings: "تنظیمات" },
+  fa: { nav: { dashboard: "داشبورد", assistant: "دستیار", servers: "سرورها", ha: "دسترس‌پذیری بالا", databases: "پایگاه‌داده", backups: "پشتیبان‌گیری", deploys: "استقرار", dns: "DNS و اتصال", monitoring: "پایش", jobs: "کارها و ممیزی", security: "امنیت", settings: "تنظیمات" },
     grp: { overview: "نمای کلی", fleet: "فلیت", data: "داده", delivery: "تحویل", observe: "مشاهده", govern: "حاکمیت" },
     fleetOverview: "نمای کلی فلیت", backupAll: "پشتیبان‌گیری همه", deploy: "استقرار", addServer: "افزودن سرور", search: "جستجوی سرور، صفحه، عملیات…", collapse: "جمع کردن",
     quorumHealthy: "حد نصاب سالم", clusterTopology: "توپولوژی خوشه", nodeHealth: "سلامت گره‌ها", recentJobs: "کارهای اخیر", activeAlerts: "هشدارهای فعال", viewAll: "مشاهده همه",
@@ -46,7 +46,7 @@ const IP = {
   jobs: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01", security: "M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z",
   settings: "M12 9a3 3 0 100 6 3 3 0 000-6zM19.4 13a7.5 7.5 0 000-2l2-1.5-2-3.5-2.3 1a7.5 7.5 0 00-1.7-1L15 3h-4l-.4 2.5a7.5 7.5 0 00-1.7 1l-2.3-1-2 3.5L6.6 11a7.5 7.5 0 000 2l-2 1.5 2 3.5 2.3-1a7.5 7.5 0 001.7 1L11 21h4l.4-2.5a7.5 7.5 0 001.7-1l2.3 1 2-3.5z",
   search: "M11 4a7 7 0 100 14 7 7 0 000-14zm9 16l-3.5-3.5", sun: "M12 8a4 4 0 100 8 4 4 0 000-8zM12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19",
-  moon: "M21 12.8A8 8 0 1111.2 3a6.3 6.3 0 009.8 9.8z", bell: "M6 9a6 6 0 1112 0c0 5 2 6 2 6H4s2-1 2-6M10 20a2 2 0 004 0", wave: "M3 12h4l2 6 4-12 2 6h6",
+  moon: "M21 12.8A8 8 0 1111.2 3a6.3 6.3 0 009.8 9.8z", bell: "M6 9a6 6 0 1112 0c0 5 2 6 2 6H4s2-1 2-6M10 20a2 2 0 004 0", wave: "M3 12h4l2 6 4-12 2 6h6", assistant: "M21 15a2 2 0 01-2 2H8l-5 4V5a2 2 0 012-2h14a2 2 0 012 2zM8 10h8M8 13h5",
   copy: "M9 9h11v11H9zM5 15V5a2 2 0 012-2h10", play: "M6 4l14 8-14 8z", x: "M18 6L6 18M6 6l12 12", chevron: "M6 9l6 6 6-6", chevL: "M15 6l-6 6 6 6",
   plus: "M12 5v14M5 12h14", restart: "M3 12a9 9 0 103-6.7M3 4v4h4", stop: "M6 6h12v12H6z", bolt: "M13 2L4 14h7l-1 8 9-12h-7z", check: "M20 6L9 17l-5-5", warn: "M12 9v4M12 17h.01M10.3 3.9 2.4 18a2 2 0 001.7 3h15.8a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z",
 };
@@ -54,8 +54,8 @@ const ic = (n, sz = 18, sw = 1.85) => `<svg width="${sz}" height="${sz}" viewBox
 const LOGO = `<svg viewBox="0 0 150 130" width="26" height="22"><rect x="6" y="44" width="22" height="48" rx="11" fill="var(--c-brand)"/><rect x="36" y="10" width="22" height="116" rx="11" fill="var(--c-text)"/><rect x="66" y="30" width="22" height="76" rx="11" fill="var(--c-brand)"/><rect x="96" y="10" width="22" height="116" rx="11" fill="var(--amber-300)"/><rect x="126" y="48" width="22" height="40" rx="11" fill="var(--c-text)"/></svg>`;
 
 // ============================================================ nav + state + utils
-const NAV = [{ grp: "overview", items: ["dashboard"] }, { grp: "fleet", items: ["servers", "ha"] }, { grp: "data", items: ["databases", "backups"] }, { grp: "delivery", items: ["deploys", "dns"] }, { grp: "observe", items: ["monitoring", "jobs"] }, { grp: "govern", items: ["security", "settings"] }];
-const S = { lang: localStorage.getItem("adpix_lang") || "en", theme: localStorage.getItem("adpix_theme") || "light", screen: "dashboard", collapsed: false, catalog: [], mode: "token", csrf: "", me: { username: "local", role: "owner" }, sd: null, fleet: null, cluster: "", clusters: [] };
+const NAV = [{ grp: "overview", items: ["dashboard", "assistant"] }, { grp: "fleet", items: ["servers", "ha"] }, { grp: "data", items: ["databases", "backups"] }, { grp: "delivery", items: ["deploys", "dns"] }, { grp: "observe", items: ["monitoring", "jobs"] }, { grp: "govern", items: ["security", "settings"] }];
+const S = { lang: localStorage.getItem("adpix_lang") || "en", theme: localStorage.getItem("adpix_theme") || "light", screen: "dashboard", collapsed: false, catalog: [], mode: "token", csrf: "", me: { username: "local", role: "owner" }, sd: null, fleet: null, cluster: "", clusters: [], chat: [] };
 const el = (h) => { const d = document.createElement("div"); d.innerHTML = h.trim(); return d.firstElementChild; };
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 function toast(m, err = false) { let w = document.querySelector(".toasts"); if (!w) { w = el(`<div class="toasts"></div>`); document.body.appendChild(w); } const tt = el(`<div class="toast ${err ? "err" : ""}">${esc(m)}</div>`); w.appendChild(tt); setTimeout(() => tt.remove(), 4200); }
@@ -176,6 +176,43 @@ function topologyCard(f) {
     <div style="display:flex;gap:12px;flex-wrap:wrap">${nodes.length ? nodes.map(nodeCard).join("") : `<div class="muted" style="font-size:12.5px;padding:8px">No data nodes yet — add servers (role: node) to this cluster.</div>`}</div>
   </div>`;
 }
+
+// ============================================================ ASSISTANT (chat)
+SCREENS.assistant = (c) => {
+  c.innerHTML = H("Assistant", "Ask about your fleet — it investigates with read-only tools and tells you which actions to run. It never makes changes.");
+  const wrap = el(`<div style="${cardOpen};display:flex;flex-direction:column;height:calc(100vh - 210px);min-height:420px">
+    <div class="chatlog" style="flex:1;overflow:auto;padding:18px 18px 8px;display:flex;flex-direction:column;gap:14px"></div>
+    <div style="border-top:1px solid var(--c-divider);padding:12px;display:flex;gap:10px;align-items:flex-end"><textarea class="input ci" rows="1" placeholder="e.g. Is prod3 healthy? Which stacks are behind? Any failed deploys lately?" style="flex:1;resize:none;max-height:140px;padding:10px 12px"></textarea><button class="btn btn-primary send" style="height:40px">Send</button></div>
+  </div>`);
+  c.appendChild(wrap);
+  const log = wrap.querySelector(".chatlog"), inp = wrap.querySelector(".ci"), sendBtn = wrap.querySelector(".send");
+  const bubble = (m) => {
+    const me = m.role === "user";
+    const steps = m.steps && m.steps.length ? `<div class="muted" style="font-size:11px;margin-top:7px;border-top:1px dashed var(--c-divider);padding-top:5px">looked up: ${m.steps.map((s) => `<span class="mono">${esc(s.tool)}</span>`).join(", ")}</div>` : "";
+    return `<div style="display:flex;justify-content:${me ? "flex-end" : "flex-start"}"><div style="max-width:82%;background:${me ? "var(--c-brand-tint)" : "var(--c-sunken)"};border:1px solid ${me ? "var(--c-brand)" : "var(--c-border)"};border-radius:12px;padding:10px 13px;font-size:13.5px;line-height:1.55;white-space:pre-wrap;${m.pending ? "color:var(--c-muted)" : ""}">${m.pending ? `<span class="spin"></span> thinking…` : esc(m.content)}${steps}</div></div>`;
+  };
+  const draw = () => { log.innerHTML = S.chat.length ? S.chat.map(bubble).join("") : `<div class="muted" style="font-size:13px;text-align:center;margin:auto;max-width:420px;line-height:1.6">Ask anything about your fleet — health, versions, deploys, quorum, security. The assistant runs read-only checks and, for changes, tells you exactly which panel action to run.</div>`; log.scrollTop = log.scrollHeight; };
+  draw();
+  const send = async () => {
+    const q = inp.value.trim(); if (!q || sendBtn.disabled) return;
+    S.chat.push({ role: "user", content: q }); inp.value = ""; inp.style.height = "auto";
+    S.chat.push({ role: "assistant", content: "", pending: true }); draw();
+    sendBtn.disabled = true;
+    try {
+      const hist = S.chat.filter((m) => !m.pending).map((m) => ({ role: m.role, content: m.content }));
+      const r = await api("/api/chat", { method: "POST", body: JSON.stringify({ messages: hist }) });
+      S.chat = S.chat.filter((m) => !m.pending);
+      S.chat.push({ role: "assistant", content: r.reply || "(no reply)", steps: r.steps });
+    } catch (e) {
+      S.chat = S.chat.filter((m) => !m.pending);
+      S.chat.push({ role: "assistant", content: "Error: " + e.message });
+    } finally { sendBtn.disabled = false; draw(); inp.focus(); }
+  };
+  sendBtn.onclick = send;
+  inp.onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } };
+  inp.oninput = () => { inp.style.height = "auto"; inp.style.height = Math.min(inp.scrollHeight, 140) + "px"; };
+  inp.focus();
+};
 
 // ============================================================ SERVERS
 SCREENS.servers = (c) => {

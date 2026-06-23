@@ -25,6 +25,7 @@ import { buildQuorumView } from "./aggregate/cluster.js";
 import { buildDeployView } from "./aggregate/deploy.js";
 import { buildMcpStatus } from "./aggregate/mcp.js";
 import { buildStacksStatus } from "./aggregate/stacks.js";
+import { runChat } from "./chat.js";
 import { classifyError } from "./errors.js";
 import { loadRegistry, saveRegistry, findServerByHost } from "../registry.js";
 import { panelMcpKeyPath, ensureMcpKey, saveUploadedKey } from "./keys.js";
@@ -266,6 +267,16 @@ export function createPanelServer(opts: PanelOpts): Server {
       if (path.startsWith("/api/admin/")) {
         if (actor.role !== "owner") { sendJson(res, 403, { error: "owner only" }); return; }
         return await handleAdmin(req, res, path, method, { sessions, audit: (t, tg, o) => audit(actor, t, tg, {}, o), getKilled: () => killed, setKilled: (v) => { killed = v; if (v) sessions.revokeAll(); } });
+      }
+
+      // ---- chat assistant: server-side tool-use loop over READ-ONLY tools ----
+      if (path === "/api/chat" && method === "POST") {
+        const b = await readBody(req);
+        const messages = Array.isArray(b.messages) ? (b.messages as { role: "user" | "assistant"; content: string }[]) : [];
+        if (!messages.length) { sendJson(res, 400, { error: "messages required" }); return; }
+        const out = await runChat(deps, { messages, actor: { role: actor.role, scopes: actor.scopes, username: actor.username }, audit: (tool, input) => audit(actor, tool, "", (input ?? {}) as Record<string, unknown>, "chat read-only") });
+        sendJson(res, 200, out);
+        return;
       }
 
       // ---- read-only tool, synchronous ----
