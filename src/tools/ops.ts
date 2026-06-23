@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { withSession } from "../deps.js";
-import { composeCmd, waitHealthyCmd, uploadFile } from "../adpix.js";
+import { composeCmd, notInstalledMsg, waitHealthyCmd, uploadFile } from "../adpix.js";
 import { shq, lastLines } from "../util.js";
 import type { ToolDef } from "./types.js";
 
@@ -32,12 +32,15 @@ export const opsTools: ToolDef[] = [
       return withSession(deps, a.server, async (s, srv) => {
         const dir = srv.adpixDir;
         const svc = shq(a.service);
+        // refuse destructive sub-actions without confirm BEFORE touching the server (verify-before-destroy)
+        if ((a.action === "stop" || a.action === "restart") && !a.confirm) {
+          return `REFUSED: ${a.action} ${a.service} on ${srv.name} interrupts live traffic for that container. Re-run with confirm:true.`;
+        }
+        const ni = await notInstalledMsg(s, dir, srv.name);
+        if (ni) return ni;
         if (a.action === "status") {
           const r = await s.exec(`${composeCmd(dir)} ps ${svc} 2>&1`, { timeoutMs: 60_000 });
           return `Status of ${a.service} on ${srv.name}:\n${r.stdout.trim() || "(no such service / not running)"}`;
-        }
-        if ((a.action === "stop" || a.action === "restart") && !a.confirm) {
-          return `REFUSED: ${a.action} ${a.service} on ${srv.name} interrupts live traffic for that container. Re-run with confirm:true.`;
         }
         const r = await s.exec(`${composeCmd(dir)} ${a.action} ${svc} 2>&1`, { timeoutMs: 300_000 });
         const lines = [`${a.action} ${a.service} on ${srv.name} (exit ${r.code}).`, lastLines(r.stdout, 15)];

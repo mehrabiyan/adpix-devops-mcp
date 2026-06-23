@@ -13,6 +13,17 @@ export const HEALTH_ROUTES: { path: string; service: string }[] = [
   { path: "/t.js", service: "tracker script" },
 ];
 
+/**
+ * Guard for ops that cd into the AdPix checkout (logs/restart/container control). Returns a clear
+ * "not installed" message when the checkout is absent — instead of the raw `cd: No such file or
+ * directory` that confuses operators on a freshly-added-but-not-yet-provisioned server. null = ok.
+ */
+export async function notInstalledMsg(s: Session, dir: string, server: string): Promise<string | null> {
+  const r = await s.exec(`test -d ${shq(dir + "/.git")} && echo yes || echo no`);
+  if (r.stdout.trim() === "yes") return null;
+  return `AdPix is not installed at ${dir} on ${server}. Provision it first — Deploys → Install (or run adpix_install) — then retry.`;
+}
+
 /** The production compose invocation, run from the AdPix checkout dir. */
 export function composeCmd(dir: string): string {
   return `cd ${shq(dir)} && docker compose -p ${COMPOSE_PROJECT} -f compose.yaml -f compose.prod.yaml`;

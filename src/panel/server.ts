@@ -26,7 +26,7 @@ import { buildDeployView } from "./aggregate/deploy.js";
 import { buildMcpStatus } from "./aggregate/mcp.js";
 import { buildStacksStatus } from "./aggregate/stacks.js";
 import { classifyError } from "./errors.js";
-import { loadRegistry, saveRegistry } from "../registry.js";
+import { loadRegistry, saveRegistry, findServerByHost } from "../registry.js";
 import { panelMcpKeyPath, ensureMcpKey, saveUploadedKey } from "./keys.js";
 import { shq } from "../util.js";
 
@@ -231,6 +231,8 @@ export function createPanelServer(opts: PanelOpts): Server {
         const name = String(b.name || ""); const host = String(b.host || ""); const port = Number(b.port) || 22; const username = String(b.username || "root");
         const role = b.role === "witness" ? "witness" : "node"; const clusterName = b.cluster ? String(b.cluster) : "";
         if (!name || !host) { sendJson(res, 400, { error: "name + host are required" }); return; }
+        const dupHost = findServerByHost(loadRegistry(), host, port, name);
+        if (dupHost) { sendJson(res, 409, { error: `${host}:${port} is already registered as "${dupHost}". A host can only be added once — registering the same machine again (e.g. as a witness AND a node) corrupts quorum. Remove "${dupHost}" first, or reuse that name.` }); return; }
         try {
           // pasted/uploaded key → persist to a mode-600 file; else a path; else (password) the MCP key below
           let keyPath = b.privateKey ? saveUploadedKey(name, String(b.privateKey)) : (b.privateKeyPath ? String(b.privateKeyPath) : "");
@@ -305,12 +307,16 @@ export function createPanelServer(opts: PanelOpts): Server {
         if (!tool || !cat) { sendJson(res, 404, { error: `unknown tool "${b.tool}"` }); return; }
         const az = authorize(actor.role, actor.scopes, cat, args);
         if (!az.ok) { audit(actor, tool.name, targetOf(args), args, `denied: ${az.reason}`); sendJson(res, 403, { error: az.reason }); return; }
-        if (killed && cat.destructive) { sendJson(res, 423, { error: "kill-switch engaged — destructive ops are disabled" }); return; }
-        if (cat.destructive) {
+        // container_control's "status" is a read-only sub-action of an otherwise-destructive tool —
+        // it needs no confirm/nonce, so the status "pulse" click doesn't hit the nonce gate.
+        const effectivelyReadOnly = cat.readOnly || (tool.name === "container_control" && (args as Record<string, unknown>).action === "status");
+        const needsConfirm = cat.destructive && !effectivelyReadOnly;
+        if (killed && needsConfirm) { sendJson(res, 423, { error: "kill-switch engaged — destructive ops are disabled" }); return; }
+        if (needsConfirm) {
           const cz = nonces.consume(String(b.nonce ?? ""), actor.sessionId, tool.name, targetOf(args), argsHash({ ...args, confirm: true }));
           if (!cz.ok) { sendJson(res, 428, { error: cz.reason }); return; }
         }
-        const r = engine.enqueue(tool, cat.destructive ? { ...args, confirm: true } : args, { confirm: true, idempotencyKey: b.idempotencyKey as string, actor: actor.username });
+        const r = engine.enqueue(tool, needsConfirm ? { ...args, confirm: true } : args, { confirm: true, idempotencyKey: b.idempotencyKey as string, actor: actor.username });
         if ("error" in r) { sendJson(res, 400, r); return; }
         audit(actor, tool.name, targetOf(args), args, `job ${r.id} enqueued`);
         sendJson(res, 202, { job: r });

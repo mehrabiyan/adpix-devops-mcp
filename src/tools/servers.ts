@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { loadRegistry, saveRegistry, registryPath } from "../registry.js";
+import { loadRegistry, saveRegistry, registryPath, findServerByHost } from "../registry.js";
 import { withSession } from "../deps.js";
 import { checkCommand } from "../guard.js";
 import { lastLines, shq } from "../util.js";
@@ -62,6 +62,15 @@ export const serverTools: ToolDef[] = [
       }
 
       const reg = loadRegistry();
+      const dupHost = findServerByHost(reg, a.host, a.port, a.name);
+      if (dupHost) {
+        return (
+          `Refused: ${a.host}:${a.port} is already registered as "${dupHost}". ` +
+          `A host must map to ONE server name — registering the same machine twice (e.g. as both a witness ` +
+          `and a data node) corrupts quorum math and double-probes the box. ` +
+          `Remove "${dupHost}" first (server_remove), or reuse that name.`
+        );
+      }
       reg.servers[a.name] = {
         host: a.host, port: a.port, username: a.username,
         privateKeyPath: a.privateKeyPath, adpixDir: a.adpixDir, webhookUrl: a.webhookUrl,

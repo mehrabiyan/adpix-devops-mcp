@@ -11,7 +11,7 @@ function deps(responses: [RegExp, Partial<ExecResult>][]) {
   const calls: string[] = [];
   const session: Session = {
     server: SRV, authMethod: "publickey", close: () => {},
-    exec: async (cmd) => { calls.push(cmd); for (const [re, r] of responses) if (re.test(cmd)) return { code: 0, stdout: "", stderr: "", ...r }; return { code: 0, stdout: "", stderr: "" }; },
+    exec: async (cmd) => { calls.push(cmd); for (const [re, r] of responses) if (re.test(cmd)) return { code: 0, stdout: "", stderr: "", ...r }; return { code: 0, stdout: /test -d .*\.git/.test(cmd) ? "yes" : "", stderr: "" }; },
   };
   return { deps: { resolve: () => SRV, connect: async () => session, local: async () => ({ code: 0, stdout: "", stderr: "" }) } as Deps, calls };
 }

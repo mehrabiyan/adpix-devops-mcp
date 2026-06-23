@@ -27,7 +27,7 @@ function fakeDeps(responses: Resp[]) {
     exec: async (cmd: string) => {
       calls.push(cmd);
       for (const [re, res] of responses) if (re.test(cmd)) return { code: 0, stdout: "", stderr: "", ...(typeof res === "function" ? res(cmd) : res) };
-      return { code: 0, stdout: "", stderr: "" };
+      return { code: 0, stdout: /test -d .*\.git/.test(cmd) ? "yes" : "", stderr: "" };
     },
   };
   return { deps: { resolve: () => server, connect: async () => session, local: async () => ({ code: 0, stdout: "", stderr: "" }) } as Deps, calls };

@@ -4,6 +4,7 @@ import type { Session } from "../ssh.js";
 import {
   ADPIX_REPO_URL,
   composeCmd,
+  notInstalledMsg,
   readEnvVar,
   readSiteAddress,
   waitHealthyCmd,
@@ -351,6 +352,8 @@ export const lifecycleTools: ToolDef[] = [
       const a = args as { server?: string; service?: (typeof SERVICES)[number] };
       return withSession(deps, a.server, async (s, srv) => {
         const dir = srv.adpixDir;
+        const ni = await notInstalledMsg(s, dir, srv.name);
+        if (ni) return ni;
         const target = a.service ?? "";
         const r = await s.exec(`${composeCmd(dir)} restart ${target} 2>&1`, { timeoutMs: 300_000 });
         const gate = await s.exec(waitHealthyCmd(90), { timeoutMs: 120_000 });
@@ -379,6 +382,8 @@ export const lifecycleTools: ToolDef[] = [
       const a = args as { server?: string; service?: string; lines: number; since?: string; grep?: string };
       return withSession(deps, a.server, async (s, srv) => {
         const dir = srv.adpixDir;
+        const ni = await notInstalledMsg(s, dir, srv.name);
+        if (ni) return ni;
         let cmd = `${composeCmd(dir)} logs --no-color --tail=${a.lines}`;
         if (a.since) cmd += ` --since=${shq(a.since)}`;
         if (a.service) cmd += ` ${a.service}`;

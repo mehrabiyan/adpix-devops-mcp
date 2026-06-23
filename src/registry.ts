@@ -85,6 +85,21 @@ export function saveRegistry(reg: RegistryFile): void {
   fs.writeFileSync(registryPath(), JSON.stringify(reg, null, 2) + "\n", { mode: 0o600 });
 }
 
+/**
+ * Name of an already-registered server with the same host:port (excluding `exceptName`), or
+ * undefined. A host must map to ONE name — registering it twice (e.g. as both a witness and a
+ * data node) silently corrupts quorum math (3 "votes" that are really 1 machine) and double-probes
+ * the same box.
+ */
+export function findServerByHost(reg: RegistryFile, host: string, port = 22, exceptName?: string): string | undefined {
+  const h = host.trim().toLowerCase();
+  for (const [name, s] of Object.entries(reg.servers)) {
+    if (name === exceptName) continue;
+    if (s.host.trim().toLowerCase() === h && (s.port ?? 22) === port) return name;
+  }
+  return undefined;
+}
+
 /** Server assembled from ADPIX_SSH_* env vars — lets a single-server setup skip the registry. */
 function envServer(): ServerConfig | undefined {
   const host = process.env.ADPIX_SSH_HOST;
