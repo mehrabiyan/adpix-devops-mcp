@@ -273,7 +273,9 @@ export function createPanelServer(opts: PanelOpts): Server {
       if (syncM && method === "POST") {
         const tool = toolByName.get(syncM[1]); const cat = catByName.get(syncM[1]);
         if (!tool || !cat) { sendJson(res, 404, { error: `unknown tool` }); return; }
-        if (!cat.readOnly) { sendJson(res, 409, { error: `${tool.name} is not read-only — POST it to /api/jobs` }); return; }
+        // smtp_test is a non-destructive interactive diagnostic — allowed to run synchronously for an inline result.
+        const syncAllowed = cat.readOnly || tool.name === "smtp_test";
+        if (!syncAllowed) { sendJson(res, 409, { error: `${tool.name} is not read-only — POST it to /api/jobs` }); return; }
         const b = await readBody(req); const args = (b.args as Record<string, unknown>) ?? {};
         const az = authorize(actor.role, actor.scopes, cat, args);
         if (!az.ok) { audit(actor, tool.name, targetOf(args), args, `denied: ${az.reason}`); sendJson(res, 403, { error: az.reason }); return; }

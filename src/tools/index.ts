@@ -18,6 +18,7 @@ import { installTools } from "./install.js";
 import { haTools } from "./ha.js";
 import { opsTools } from "./ops.js";
 import { stackTools } from "./stack.js";
+import { smtpTools } from "./smtp.js";
 
 export const allTools: ToolDef[] = [
   ...serverTools,
@@ -39,4 +40,5 @@ export const allTools: ToolDef[] = [
   ...haTools,
   ...opsTools,
   ...stackTools,
+  ...smtpTools,
 ];

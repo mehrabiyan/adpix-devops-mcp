@@ -440,11 +440,40 @@ function mcpUpdateCard() {
   };
   card.querySelector(".refresh").onclick = load; load(); return card;
 }
+function smtpCard() {
+  const servers = (S.fleet?.nodes || []).map((n) => n.name);
+  const srvField = servers.length ? selField("server", servers, "(default server)") : `<input class="input" data-k="server" placeholder="(default server)">`;
+  const card = el(`<div style="${cardOpen}"><div style="${cardHead}">Email · SMTP test</div><div class="card-pad">
+    <div class="muted" style="font-size:12px;line-height:1.5;margin-bottom:12px">Validate an SMTP server from a host — DNS → connect → TLS → auth → optional test send. Enter working values in the AdPix <b>admin → email</b> settings afterward (the app stores them encrypted).</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <label class="fld" style="grid-column:1/3"><span class="lab">server</span>${srvField}</label>
+      <label class="fld"><span class="lab">host</span><input class="input" data-k="host" placeholder="smtp.sendgrid.net"></label>
+      <label class="fld"><span class="lab">port</span><input class="input" data-k="port" data-num="1" placeholder="587"></label>
+      <label class="fld"><span class="lab">security</span>${selField("security", ["starttls", "tls", "none"], "starttls (default)")}</label>
+      <label class="fld"><span class="lab">from</span><input class="input" data-k="from" placeholder="no-reply@you.com"></label>
+      <label class="fld"><span class="lab">username</span><input class="input" data-k="username" placeholder="(optional)"></label>
+      <label class="fld"><span class="lab">password</span><input class="input" type="password" data-k="password" placeholder="(optional)"></label>
+      <label class="fld" style="grid-column:1/3"><span class="lab">test recipient — send a real email</span><input class="input" data-k="to" placeholder="you@you.com — omit to stop after auth"></label>
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-top:12px"><button class="btn btn-primary test">Run test</button></div>
+    <div class="res" style="margin-top:12px"></div>
+  </div></div>`);
+  card.querySelector(".test").onclick = async () => {
+    const a = {}; card.querySelectorAll("[data-k]").forEach((i) => { const v = i.value.trim(); if (v) a[i.dataset.k] = i.dataset.num ? Number(v) : v; });
+    if (!a.host || !a.from) return toast("host and from are required", true);
+    const res = card.querySelector(".res"); const b = card.querySelector(".test"); b.disabled = true; b.innerHTML = `<span class="spin"></span>`;
+    try { const r = await runTool("smtp_test", a); res.innerHTML = `<pre class="out">${esc(String(r.result))}</pre>`; }
+    catch (e) { res.innerHTML = `<pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre>`; }
+    finally { b.disabled = false; b.textContent = "Run test"; }
+  };
+  return card;
+}
 SCREENS.settings = (c) => {
   c.innerHTML = H(STR[S.lang].nav.settings, "Control-plane updates, admins, sessions, audit, secrets.");
   c.appendChild(mcpUpdateCard());
   const grid = el(`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px;align-items:start"></div>`); c.appendChild(grid);
   const a = el(`<div style="display:flex;flex-direction:column;gap:16px"></div>`), b = el(`<div style="display:flex;flex-direction:column;gap:16px"></div>`); grid.append(a, b);
+  a.appendChild(smtpCard());
   if (S.me.role === "owner") { a.append(adminUsers(), adminSessions()); b.append(adminAudit(), adminKill()); }
   else a.appendChild(el(`<div style="${cardOpen};padding:16px" class="muted">Signed in as <b>${esc(S.me.username)}</b> · role <b>${esc(S.me.role)}</b>. Admin controls are owner-only.</div>`));
 };

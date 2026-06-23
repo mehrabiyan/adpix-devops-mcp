@@ -204,6 +204,7 @@ const FIXTURES: Record<string, Record<string, unknown>> = {
   connect_configs: {},
   mcp_status: {},
   stack_status: {},
+  smtp_test: { host: "smtp.example.com", from: "a@b.c" },
   stack_update: { stack: "analytics", confirm: false },
   container_control: { service: "api", action: "status", confirm: false },
   metrics_query: { query: "up" },
