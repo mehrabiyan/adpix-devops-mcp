@@ -348,6 +348,7 @@ export const lifecycleTools: ToolDef[] = [
       server: serverParam,
       service: z.enum(SERVICES).optional().describe("Omit to restart the whole stack"),
     },
+    annotations: { destructiveHint: true, openWorldHint: true },
     handler: async (deps, args) => {
       const a = args as { server?: string; service?: (typeof SERVICES)[number] };
       return withSession(deps, a.server, async (s, srv) => {

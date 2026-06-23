@@ -179,14 +179,16 @@ function topologyCard(f) {
 }
 
 // ============================================================ ASSISTANT (floating on-page chatbot)
-function chatBubble(m) {
+function chatBubble(m, mi) {
   const me = m.role === "user";
   const steps = m.steps && m.steps.length ? `<div class="muted" style="font-size:11px;margin-top:7px;border-top:1px dashed var(--c-divider);padding-top:5px">looked up: ${m.steps.map((s) => `<span class="mono">${esc(s.tool)}</span>`).join(", ")}</div>` : "";
-  return `<div style="display:flex;justify-content:${me ? "flex-end" : "flex-start"}"><div style="max-width:84%;background:${me ? "var(--c-brand-tint)" : "var(--c-sunken)"};border:1px solid ${me ? "var(--c-brand)" : "var(--c-border)"};border-radius:12px;padding:9px 12px;font-size:13px;line-height:1.55;white-space:pre-wrap;${m.pending ? "color:var(--c-muted)" : ""}">${m.pending ? `<span class="spin"></span> thinking…` : esc(m.content)}${steps}</div></div>`;
+  const props = !m.pending && m.proposed && m.proposed.length ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:9px">${m.proposed.map((p, pi) => `<button class="btn btn-sm ${p.destructive ? "btn-danger" : "btn-primary"} cprop" data-mi="${mi}" data-pi="${pi}">${ic("play", 13)} ${esc(p.title)}</button>`).join("")}</div>` : "";
+  return `<div style="display:flex;justify-content:${me ? "flex-end" : "flex-start"}"><div style="max-width:84%;background:${me ? "var(--c-brand-tint)" : "var(--c-sunken)"};border:1px solid ${me ? "var(--c-brand)" : "var(--c-border)"};border-radius:12px;padding:9px 12px;font-size:13px;line-height:1.55;white-space:pre-wrap;${m.pending ? "color:var(--c-muted)" : ""}">${m.pending ? `<span class="spin"></span> thinking…` : esc(m.content)}${steps}${props}</div></div>`;
 }
 function drawChat() {
   const log = document.querySelector(".chat-panel .chatlog"); if (!log) return;
-  log.innerHTML = S.chat.length ? S.chat.map(chatBubble).join("") : `<div class="muted" style="font-size:12.5px;text-align:center;margin:auto;max-width:300px;line-height:1.6">Ask about your fleet — health, versions, deploys, quorum, security. Read-only: it runs checks and tells you which action to run.</div>`;
+  log.innerHTML = S.chat.length ? S.chat.map((m, i) => chatBubble(m, i)).join("") : `<div class="muted" style="font-size:12.5px;text-align:center;margin:auto;max-width:300px;line-height:1.6">Ask about your fleet — health, versions, deploys, quorum, security. It runs read-only checks itself, and proposes actions as one-click confirm buttons.</div>`;
+  log.querySelectorAll(".cprop").forEach((b) => { const p = S.chat[+b.dataset.mi].proposed[+b.dataset.pi]; b.onclick = () => verifyAction({ name: p.tool, title: p.title, destructive: !!p.destructive }, p.input || {}); });
   log.scrollTop = log.scrollHeight;
 }
 async function chatSend() {
@@ -200,7 +202,7 @@ async function chatSend() {
     const hist = S.chat.filter((m) => !m.pending).map((m) => ({ role: m.role, content: m.content }));
     const r = await api("/api/chat", { method: "POST", body: JSON.stringify({ messages: hist }) });
     S.chat = S.chat.filter((m) => !m.pending);
-    S.chat.push({ role: "assistant", content: r.reply || "(no reply)", steps: r.steps });
+    S.chat.push({ role: "assistant", content: r.reply || "(no reply)", steps: r.steps, proposed: r.proposed });
   } catch (e) {
     S.chat = S.chat.filter((m) => !m.pending);
     S.chat.push({ role: "assistant", content: "Error: " + e.message });
