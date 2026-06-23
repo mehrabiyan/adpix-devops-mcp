@@ -466,6 +466,16 @@ SCREENS.security = (c) => {
   c.querySelector('[data-act="h"]').onclick = () => action("harden_server", { apply: false });
   c.querySelector('[data-act="p"]').onclick = () => verifyAction({ name: "patch_system", title: "Apply system patches", destructive: true }, {});
   const wrap = el(`<div style="display:flex;flex-direction:column;gap:16px"></div>`); c.appendChild(wrap);
+  // launch readiness scorecard (read-only)
+  const rc = el(`<div style="${cardOpen}"><div style="${cardHead}">Launch readiness · go / no-go</div><div class="card-pad"><div class="muted" style="font-size:12.5px;margin-bottom:10px">Scores the live deployment against the launch-critical invariants for your target scale (capacity, replication, shared Redis, ingest replicas, secrets, backups, monitoring, the P1 gate, TLS).</div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><label style="font-size:12.5px;color:var(--c-muted)">Target sites</label><input class="input rsites" value="200000" style="width:120px"><button class="btn btn-primary rrun">Run readiness check</button></div><div class="rres" style="margin-top:12px"></div></div></div>`);
+  rc.querySelector(".rrun").onclick = async () => {
+    const sites = Number(rc.querySelector(".rsites").value) || 200000;
+    const res = rc.querySelector(".rres"), b = rc.querySelector(".rrun"); b.disabled = true; b.innerHTML = `<span class="spin"></span>`;
+    try { const r = await runTool("launch_readiness", { sites }); res.innerHTML = `<pre class="out" style="white-space:pre-wrap">${esc(String(r.result))}</pre>`; }
+    catch (e) { res.innerHTML = `<pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre>`; }
+    finally { b.disabled = false; b.textContent = "Run readiness check"; }
+  };
+  wrap.appendChild(rc);
   const gateCard = el(`<div style="${cardOpen}"><div style="${cardHead};display:flex;align-items:center;justify-content:space-between">Launch gate<button class="btn btn-sm refresh">${t("refresh")}</button></div><div class="card-pad gbody"><div class="skel" style="width:50%"></div></div></div>`);
   const auditCard = el(`<div style="${cardOpen}"><div style="${cardHead};display:flex;align-items:center;gap:14px"><span style="flex:none;font-weight:500">Security audit</span><div class="scorewrap" style="flex:1"></div><span class="scoretext mono muted" style="flex:none;font-size:11.5px"></span></div><div class="abody"><div class="card-pad"><div class="skel" style="width:60%"></div></div></div></div>`);
   wrap.append(gateCard, auditCard);

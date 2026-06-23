@@ -49,7 +49,7 @@ const GROUP: Record<string, string> = {
   // security
   security_audit: "security", harden_server: "security", patch_system: "security", launch_gate: "security",
   secrets_preflight: "security", oidc_health: "security", edge_validate: "security", launch_smoke: "security",
-  predeploy_gate: "security",
+  predeploy_gate: "security", launch_readiness: "security", scale_ingest: "deploys",
   // settings / self
   ai_setup: "settings", ai_fix: "settings", mcp_self_update: "settings", mcp_status: "settings", stack_update: "deploys", stack_status: "deploys", capacity_plan: "settings",
   consult_topic: "settings", scale_assessment: "settings", watchdog_install: "settings", watchdog_status: "settings", smtp_test: "settings",
