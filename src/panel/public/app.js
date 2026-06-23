@@ -980,14 +980,18 @@ async function setupWizard() {
       args.server = srv; args.branch = "main"; if (a.id === "analytics") args.deployKey = true;
       if (a.id === "tagmanager" && !args.authIssuer) { const iss = accIssuer(); if (iss) args.authIssuer = iss; } // auto-wire from the Account app
       W.deploy[a.id] = { starting: true };
-      let outbuf = "";
       startJob(a.installTool, args).then((r) => {
         W.deploy[a.id] = { jobId: r.job.id }; log.style.display = "block"; stat.innerHTML = pill("running", "warn");
         return streamJob(r.job.id, (ev) => {
-          if (ev.type === "log") { outbuf += ev.line + "\n"; log.appendChild(el(`<div style="color:${/ERROR|FAIL|REFUSED/i.test(ev.line) ? "var(--c-neg)" : "var(--c-text)"}">${esc(ev.line.replace(/^\$ \[[^\]]*\]\s*/, ""))}</div>`)); log.scrollTop = log.scrollHeight; }
-          // The install tools return text (job succeeds) even on a soft failure — a failed checkout,
-          // an unauthorized key, or an unhealthy container. Catch those so the pill says "failed".
-          if (ev.type === "done") { const bad = /Checkout FAILED|Deploy FAILED|Permission denied|Nothing installed|NOT healthy|add the key above|could not read Username/i.test(outbuf); const ok = ev.status === "succeeded" && !bad; W.deploy[a.id] = { done: true, ok }; stat.innerHTML = pill(ok ? "done" : "failed", ok ? "pos" : "neg"); }
+          if (ev.type === "log") { log.appendChild(el(`<div style="color:${/ERROR|FAIL|REFUSED/i.test(ev.line) ? "var(--c-neg)" : "var(--c-text)"}">${esc(ev.line.replace(/^\$ \[[^\]]*\]\s*/, ""))}</div>`)); log.scrollTop = log.scrollHeight; }
+          // The install tools return text (job succeeds) even on a soft failure. Judge by the tool's
+          // RESULT markdown (clean) — NOT the command trace, whose echoes contain literals like
+          // `echo "NOT healthy…"` and the benign first-attempt `could not read Username`.
+          if (ev.type === "done") {
+            const result = (ev.job && ev.job.result) || "";
+            const bad = ev.status !== "succeeded" || /## (Checkout|Deploy) FAILED|Deploy INCOMPLETE|Account NOT healthy|Nothing installed yet|add the key above to the repo|Could not generate the OIDC/i.test(result);
+            W.deploy[a.id] = { done: true, ok: !bad }; stat.innerHTML = pill(!bad ? "done" : "failed", !bad ? "pos" : "neg");
+          }
         });
       }).catch((e) => { W.deploy[a.id] = { done: true, ok: false }; stat.innerHTML = pill("error", "neg"); log.style.display = "block"; log.textContent = e.message; });
     });
@@ -1013,7 +1017,14 @@ async function setupWizard() {
       <div style="font-weight:600;font-size:13px;margin-bottom:8px">What's left (recommended)</div><div class="left" style="display:flex;flex-wrap:wrap;gap:8px"></div>
       <div class="rdy" style="margin-top:16px"></div>`;
     c.querySelectorAll(".ucopy").forEach((b) => (b.onclick = () => { navigator.clipboard.writeText(b.dataset.u); toast("Copied"); }));
-    const items = [["watchdog_install", "24/7 watchdog", { server: srv, force: true }], ["harden_server", "Harden server", { server: srv, apply: false }], ["obs_deploy", "Monitoring stack", { server: srv }]];
+    // Point the watchdog at the stack actually deployed + up on this server — else it would probe the
+    // Analytics front door (http:80) on an IdP/TM-only box and alert forever.
+    const upHere = (id) => deployable().some((a) => a.id === id && (((W.settings[a.id] || {}).__server__ || firstServer()) === srv) && (W.verify[a.id] || {}).up);
+    const wd = upHere("analytics") ? { project: "adanalytics" }
+      : upHere("account") ? { project: "adpix-account", dir: "/opt/adpix-tagmanager", healthUrl: "http://127.0.0.1:9696/healthz" }
+      : upHere("tagmanager") ? { project: "adpix-tm", dir: "/opt/adpix-tagmanager", healthUrl: "http://127.0.0.1:8686/healthz" }
+      : { force: true };
+    const items = [["watchdog_install", "24/7 watchdog", { server: srv, ...wd }], ["harden_server", "Harden server", { server: srv, apply: false }], ["obs_deploy", "Monitoring stack", { server: srv }]];
     if (W.topology === "cluster") items.push(["ha_standup", "Stand up HA quorum", { mode: "keepalived" }]);
     c.querySelector(".left").innerHTML = items.map(([tool, l], i) => `<button class="btn btn-sm lft" data-i="${i}">${esc(l)}</button>`).join("");
     c.querySelectorAll(".lft").forEach((b) => (b.onclick = () => { const it = items[+b.dataset.i]; action(it[0], it[2]); }));

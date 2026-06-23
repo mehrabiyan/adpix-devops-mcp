@@ -69,6 +69,9 @@ export const watchdogTools: ToolDef[] = [
       "Runs on the server itself, so protection continues when no MCP client is connected. Idempotent.",
     schema: {
       server: serverParam,
+      project: z.string().default("adanalytics").describe("Compose project to watch: adanalytics (Analytics), adpix-account (IdP), adpix-tm (Tag Manager)"),
+      dir: z.string().optional().describe("Checkout dir to verify is running (default: the server's adpixDir)"),
+      healthUrl: z.string().optional().describe("HTTP health endpoint to probe (default: the Analytics front door http://127.0.0.1:80<httpPath>; IdP: http://127.0.0.1:9696/healthz; TM: http://127.0.0.1:8686/healthz)"),
       intervalSeconds: z.number().int().min(15).max(3600).default(60),
       autoRestart: z.boolean().default(true).describe("Restart unhealthy containers automatically"),
       webhookUrl: z
@@ -87,15 +90,18 @@ export const watchdogTools: ToolDef[] = [
     annotations: { idempotentHint: true },
     handler: async (deps, args) => {
       const a = args as {
-        server?: string; intervalSeconds: number; autoRestart: boolean;
+        server?: string; project: string; dir?: string; healthUrl?: string;
+        intervalSeconds: number; autoRestart: boolean;
         webhookUrl?: string; httpPath: string; realertEvery: number;
         aiEscalate: boolean; escalateAfter: number; force: boolean;
       };
       return withSession(deps, a.server, async (s, srv) => {
+        const dir = a.dir || srv.adpixDir;
         // The watchdog monitors a RUNNING stack — on a cloned-but-down or undeployed server its first
         // check fails immediately (docker-daemon / no containers) and it alerts on a problem that's
-        // really "not deployed yet". Refuse with clear guidance unless forced.
-        const ni = await requireStack(s, srv.adpixDir, srv.name, { needRunning: true });
+        // really "not deployed yet". Refuse with clear guidance unless forced. Checks the SAME project
+        // the watchdog will probe, so it doesn't false-flag an IdP/TM box for a missing Analytics stack.
+        const ni = await requireStack(s, dir, srv.name, { needRunning: true, project: a.project });
         if (ni && !a.force) return `${ni}\n\n(The watchdog monitors a running stack — install/bring it up first. Pass force:true to install the watchdog anyway.)`;
         const webhook = a.webhookUrl ?? srv.webhookUrl;
         if (a.aiEscalate) {
@@ -107,13 +113,15 @@ export const watchdogTools: ToolDef[] = [
           }
         }
         const script = renderWatchdogScript({
-          adpixDir: srv.adpixDir,
+          adpixDir: dir,
           webhookUrl: webhook,
           autoRestart: a.autoRestart,
           httpPath: a.httpPath,
           realertEvery: a.realertEvery,
           aiEscalate: a.aiEscalate,
           escalateAfter: a.escalateAfter,
+          project: a.project,
+          healthUrl: a.healthUrl,
         });
         await uploadFile(s, WATCHDOG_SCRIPT_PATH, script, "755");
         await uploadFile(s, `/etc/systemd/system/${WATCHDOG_SERVICE}`, WATCHDOG_SERVICE_UNIT, "644");

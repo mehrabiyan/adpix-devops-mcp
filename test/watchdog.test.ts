@@ -26,6 +26,21 @@ describe("watchdog script template", () => {
     expect(s).toContain("com.docker.compose.project=$PROJECT");
   });
 
+  it("defaults to the Analytics project + front-door TLS check", () => {
+    const s = renderWatchdogScript(opts);
+    expect(s).toContain("PROJECT=adanalytics");
+    expect(s).toContain('HEALTH_URL=\'http://127.0.0.1:80/_apx_health\'');
+    expect(s).toContain("SITE_ADDRESS=");      // analytics fronts a Caddy/TLS domain
+  });
+
+  it("watches a non-Analytics project on its own port and drops the Caddy/TLS check (IdP/TM box)", () => {
+    const s = renderWatchdogScript({ ...opts, project: "adpix-account", healthUrl: "http://127.0.0.1:9696/healthz" });
+    expect(s).toContain("PROJECT=adpix-account");
+    expect(s).toContain('HEALTH_URL=\'http://127.0.0.1:9696/healthz\'');
+    expect(s).toContain("http:9696($code)");   // labelled by the real port, not http:80
+    expect(s).not.toContain("SITE_ADDRESS=");  // no Caddy front door on an IdP-only box
+  });
+
   it("renders autoRestart:false and empty webhook safely", () => {
     const s = renderWatchdogScript({ ...opts, autoRestart: false, webhookUrl: undefined });
     expect(s).toContain("AUTO_RESTART=0");

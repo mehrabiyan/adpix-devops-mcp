@@ -106,6 +106,10 @@ describe("B. account_install embeds a stable OIDC key so the IdP can boot under 
     expect(yaml).toContain("NODE_ENV: production");
     expect(calls.some((c) => /openssl genpkey/.test(c))).toBe(false);  // existing key reused (idempotent)
     expect(out).toMatch(/Account\/IdP up/);
+    // the wizard now judges deploy success by the RESULT markdown — a healthy install must NOT trip
+    // its failure markers (regression: the benign first-attempt `could not read Username` and the
+    // health-gate command echo `NOT healthy…` used to false-flag a healthy IdP as "failed").
+    expect(out).not.toMatch(/## (Checkout|Deploy) FAILED|Deploy INCOMPLETE|Account NOT healthy|Nothing installed yet/);
   });
 
   it("generates the key once when none exists yet", async () => {

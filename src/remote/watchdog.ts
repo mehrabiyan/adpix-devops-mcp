@@ -25,16 +25,24 @@ export interface WatchdogOpts {
   aiEscalate?: boolean;
   /** Escalate after this many consecutive failed checks. */
   escalateAfter?: number;
+  /** Compose project whose containers must be running (adanalytics | adpix-account | adpix-tm). */
+  project?: string;
+  /** Primary HTTP health endpoint to probe (default: the Analytics Caddy front door on :80). */
+  healthUrl?: string;
 }
 
 export function renderWatchdogScript(o: WatchdogOpts): string {
   const clean = (s: string) => s.replace(/'/g, ""); // keep the script's single-quoting intact
+  const project = o.project ?? "adanalytics";
+  const healthUrl = o.healthUrl ?? `http://127.0.0.1:80${o.httpPath}`;
+  const port = (healthUrl.match(/:(\d+)/) ?? [])[1] ?? "80";
+  const isFrontDoor = project === "adanalytics"; // only Analytics fronts a Caddy/TLS domain
   return `#!/usr/bin/env bash
 # adpix-watchdog — installed by adpix-devops-mcp. Do not edit in place:
 # re-run the watchdog_install tool to change settings.
 # One pass per invocation (driven by adpix-watchdog.timer):
-#   - every compose container of project "adanalytics" must be running & healthy
-#   - the Caddy front door must answer the health path (HTTP, and HTTPS in domain mode)
+#   - every compose container of project "${project}" must be running & healthy
+#   - the health endpoint (${healthUrl}) must answer 2xx/3xx
 #   - unhealthy services are restarted (if enabled), incidents logged,
 #     webhook pinged on down/recovery transitions.
 set -u
@@ -42,10 +50,11 @@ ADPIX_DIR='${clean(o.adpixDir)}'
 WEBHOOK_URL='${clean(o.webhookUrl ?? "")}'
 AUTO_RESTART=${o.autoRestart ? 1 : 0}
 HTTP_PATH='${clean(o.httpPath)}'
+HEALTH_URL='${clean(healthUrl)}'
 REALERT_EVERY=${Math.max(2, Math.floor(o.realertEvery))}
 AI_ESCALATE=${o.aiEscalate ? 1 : 0}
 ESCALATE_AFTER=${Math.max(2, Math.floor(o.escalateAfter ?? 5))}
-PROJECT=adanalytics
+PROJECT=${project}
 LOG_DIR=/var/log/adpix-watchdog
 STATE_FILE="$LOG_DIR/state.json"
 INCIDENTS="$LOG_DIR/incidents.jsonl"
@@ -80,16 +89,16 @@ else
 $(docker ps -a --filter "label=com.docker.compose.project=$PROJECT" --format '{{.Names}}|{{.State}}|{{.Status}}' 2>/dev/null)
 EOF
 
-  # --- front door over HTTP (Caddy answers redirects in domain mode -> 3xx ok) --
-  code=$(curl -ksS -o /dev/null -m 10 -w '%{http_code}' "http://127.0.0.1:80$HTTP_PATH" 2>/dev/null || echo 000)
-  case "$code" in 2*|3*) : ;; *) bad="$bad http:80($code)" ;; esac
-
-  # --- full TLS path in domain mode ---------------------------------------------
+  # --- health endpoint over HTTP (Caddy answers redirects in domain mode -> 3xx ok) --
+  code=$(curl -ksS -o /dev/null -m 10 -w '%{http_code}' "$HEALTH_URL" 2>/dev/null || echo 000)
+  case "$code" in 2*|3*) : ;; *) bad="$bad http:${port}($code)" ;; esac
+${isFrontDoor ? `
+  # --- full TLS path in domain mode (Analytics front door only) -----------------
   SITE=$(grep ^SITE_ADDRESS= "$ADPIX_DIR/.env" 2>/dev/null | head -1 | cut -d= -f2-)
   if [ -n "$SITE" ] && [ "$SITE" != ":80" ]; then
     code2=$(curl -ksS -o /dev/null -m 10 --resolve "$SITE:443:127.0.0.1" -w '%{http_code}' "https://$SITE$HTTP_PATH" 2>/dev/null || echo 000)
     case "$code2" in 2*) : ;; *) bad="$bad https:443($code2)" ;; esac
-  fi
+  fi` : ""}
 fi
 
 bad=$(echo "$bad" | sed -e 's/^ *//' -e 's/ *$//')
