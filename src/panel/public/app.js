@@ -910,7 +910,7 @@ async function setupWizard() {
 
   // 5. preflight
   function preItems() {
-    const missing = deployable().flatMap((a) => a.settings.filter((s) => s.required && !((W.settings[a.id] || {})[s.key])).map((s) => `${a.name}:${s.label}`));
+    const missing = deployable().flatMap((a) => a.settings.filter((s) => s.type !== "toggle" && s.required && !(s.requiredUnless && (W.settings[a.id] || {})[s.requiredUnless]) && !((W.settings[a.id] || {})[s.key])).map((s) => `${a.name}:${s.label}`));
     return [[W.servers.length > 0, "Servers", `${W.servers.length} added & diagnosed`], [W.repos.length > 0 && W.repos.every((r) => r.authorized), "GitHub keys", "all repos authorized"], [missing.length === 0, "Settings", missing.length ? `missing ${missing.join(", ")}` : "complete"], [deployable().length > 0, "Apps", `${deployable().length} to deploy`]];
   }
   RENDER.preflight = (c) => { c.innerHTML = h2("Preflight", "Everything required before deploy.") + preItems().map(([ok, n, d]) => `<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--c-divider)"><span style="color:var(--c-${ok ? "pos" : "neg"})">${ic(ok ? "check" : "warn", 16)}</span><b style="font-size:13px;min-width:110px">${esc(n)}</b><span class="muted" style="font-size:12.5px">${esc(d)}</span></div>`).join(""); };
