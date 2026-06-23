@@ -8,10 +8,39 @@ if (TOKEN) sessionStorage.setItem("adpix_token", TOKEN);
 history.replaceState(null, "", location.pathname);
 function authHeaders(mut) { if (S.mode === "session") return mut ? { "x-adpix-csrf": S.csrf } : {}; return TOKEN ? { "x-adpix-token": TOKEN } : {}; }
 async function api(path, opts = {}) {
-  const res = await fetch(path, { ...opts, credentials: "same-origin", headers: { ...(opts.body ? { "content-type": "application/json" } : {}), ...authHeaders(!!opts.body), ...(opts.headers || {}) } });
-  if (!res.ok && res.status !== 202) { let m = res.statusText; try { m = (await res.json()).error || m; } catch {} const e = new Error(m); e.status = res.status; throw e; }
-  return res.status === 204 ? null : res.json();
+  // the silent 3s job poll (GET /api/jobs) shouldn't flicker the top loader; everything else does
+  const count = !(path === "/api/jobs" && (!opts.method || opts.method === "GET"));
+  if (count) bumpBusy(1);
+  try {
+    const res = await fetch(path, { ...opts, credentials: "same-origin", headers: { ...(opts.body ? { "content-type": "application/json" } : {}), ...authHeaders(!!opts.body), ...(opts.headers || {}) } });
+    if (!res.ok && res.status !== 202) { let m = res.statusText; try { m = (await res.json()).error || m; } catch {} const e = new Error(m); e.status = res.status; throw e; }
+    return res.status === 204 ? null : res.json();
+  } finally { if (count) bumpBusy(-1); }
 }
+// ---- global "work happening" indicator: a top progress bar + live job count ----
+let busyN = 0, jobsRunning = 0, jobPollTimer = null;
+function bumpBusy(d) { busyN = Math.max(0, busyN + d); reflectLoader(); }
+function reflectLoader() { const b = document.getElementById("gloader"); if (b) b.style.opacity = (busyN > 0 || jobsRunning > 0) ? "1" : "0"; }
+function mountTopLoader() {
+  if (document.getElementById("gloader")) return;
+  document.head.appendChild(el(`<style>@keyframes gload{0%{transform:translateX(-100%) scaleX(.35)}50%{transform:translateX(15%) scaleX(.55)}100%{transform:translateX(125%) scaleX(.35)}}#gloader>i{display:block;height:100%;background:linear-gradient(90deg,transparent 0,var(--c-brand) 50%,transparent 100%);transform-origin:left center;animation:gload 1.15s var(--ease-standard,ease) infinite}</style>`));
+  document.body.appendChild(el(`<div id="gloader" style="position:fixed;top:0;inset-inline:0;height:3px;z-index:300;overflow:hidden;pointer-events:none;opacity:0;transition:opacity .3s"><i></i></div>`));
+}
+function updateActivityBadge() {
+  const btn = document.getElementById("activity"); if (!btn) return;
+  btn.querySelector(".jobbadge")?.remove();
+  if (jobsRunning > 0) btn.appendChild(el(`<span class="jobbadge" style="position:absolute;top:-4px;inset-inline-end:-4px;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--c-brand);color:#fff;font-size:10px;font-weight:700;line-height:1;display:flex;align-items:center;justify-content:center;border:2px solid var(--c-topbar)">${jobsRunning}</span>`));
+}
+async function pollJobs() {
+  try {
+    const { jobs } = await listJobs();
+    const running = jobs.filter((j) => j.status === "running" || j.status === "queued").length;
+    const was = jobsRunning; jobsRunning = running;
+    reflectLoader(); updateActivityBadge();
+    if (was > 0 && running === 0) { await loadFleet().catch(() => {}); render(); } // refresh when work finishes
+  } catch { /* keep polling */ }
+}
+function startJobPoll() { mountTopLoader(); pollJobs(); if (jobPollTimer) clearInterval(jobPollTimer); jobPollTimer = setInterval(pollJobs, 3000); }
 const runTool = (n, a = {}) => api(`/api/tools/${n}`, { method: "POST", body: JSON.stringify({ args: a }) });
 const startJob = (tool, a = {}) => api("/api/jobs", { method: "POST", body: JSON.stringify({ tool, args: a, idempotencyKey: `${tool}:${Date.now()}` }) });
 async function startDestructive(tool, a = {}) { const pv = await api("/api/preview", { method: "POST", body: JSON.stringify({ tool, args: a }) }); return api("/api/jobs", { method: "POST", body: JSON.stringify({ tool, args: a, nonce: pv.nonce, idempotencyKey: `${tool}:${Date.now()}` }) }); }
@@ -81,7 +110,7 @@ function render() {
       <div style="flex:1"></div>
       <button class="icon-btn" id="lang" style="border-radius:999px">${S.lang === "en" ? "EN" : "فا"}</button>
       <button class="icon-btn" id="theme" style="border-radius:999px">${ic(S.theme === "dark" ? "sun" : "moon", 17)}</button>
-      <button class="icon-btn" id="activity" title="${t("activity")}" style="position:relative;border-radius:999px">${ic("wave", 17)}${aj ? `<span class="pulse" style="position:absolute;top:5px;inset-inline-end:5px;width:8px;height:8px;border-radius:50%;background:var(--c-brand);border:2px solid var(--c-topbar)"></span>` : ""}</button>
+      <button class="icon-btn" id="activity" title="${t("activity")}" style="position:relative;border-radius:999px">${ic("wave", 17)}</button>
       <button class="icon-btn" style="border-radius:999px">${ic("bell", 17)}</button>
       <button class="icon-btn" id="account" title="${esc(S.me.username)} · ${esc(S.me.role)}" style="background:var(--c-brand);color:#fff;border-color:transparent;font-weight:600;border-radius:999px;font-size:13px">${esc((S.me.username.slice(0, 2)).toUpperCase())}</button>
     </header>
@@ -102,6 +131,7 @@ function render() {
   app.querySelector("#account").onclick = async () => { if (S.mode !== "session") return toast(`${S.me.username} · ${S.me.role} (token mode)`); if (confirm(`Log out ${S.me.username}?`)) { try { await api("/api/logout", { method: "POST", body: "{}" }); } catch {} location.reload(); } };
   (SCREENS[S.screen] || SCREENS.dashboard)(document.getElementById("content"));
   mountChat();
+  updateActivityBadge();
 }
 function navItem(id, aj) {
   const count = id === "servers" && S.fleet ? S.fleet.nodes.length : id === "jobs" && aj ? aj : id === "deploys" && S.fleet ? 0 : "";
@@ -976,7 +1006,14 @@ async function setupWizard() {
     if (W.topology === "cluster") items.push(["ha_standup", "Stand up HA quorum", { mode: "keepalived" }]);
     c.querySelector(".left").innerHTML = items.map(([tool, l], i) => `<button class="btn btn-sm lft" data-i="${i}">${esc(l)}</button>`).join("");
     c.querySelectorAll(".lft").forEach((b) => (b.onclick = () => { const it = items[+b.dataset.i]; action(it[0], it[2]); }));
-    try { const r = await runTool("launch_readiness", { sites: W.topology === "cluster" ? 200000 : 20000 }); c.querySelector(".rdy").innerHTML = `<div class="muted" style="font-size:11.5px;margin-bottom:5px">Launch readiness</div><pre class="out" style="white-space:pre-wrap;font-size:11px;max-height:170px;overflow:auto">${esc(String(r.result))}</pre>`; } catch (e) { /* needs default server */ }
+    // launch_readiness is AdPix-Analytics-specific (its capacity model, CH replication, ingest tier).
+    // Only show it when Analytics was deployed — otherwise it false-flags "/opt/adpix not installed".
+    if (deployable().some((a) => a.id === "analytics")) {
+      const srvA = (W.settings.analytics || {}).__server__ || firstServer();
+      try { const r = await runTool("launch_readiness", { server: srvA, sites: W.topology === "cluster" ? 200000 : 20000 }); c.querySelector(".rdy").innerHTML = `<div class="muted" style="font-size:11.5px;margin-bottom:5px">Launch readiness (Analytics)</div><pre class="out" style="white-space:pre-wrap;font-size:11px;max-height:170px;overflow:auto">${esc(String(r.result))}</pre>`; } catch (e) { /* needs a server */ }
+    } else {
+      c.querySelector(".rdy").innerHTML = `<div class="muted" style="font-size:12px;line-height:1.5">All deployed apps are up + healthy (see Verify). The 200k launch-readiness scorecard is for AdPix Analytics — deploy it (Apps step) to see that go/no-go.</div>`;
+    }
   };
 
   shell();
@@ -1049,7 +1086,7 @@ function renderSetup(msg = "") { authShell(`<p class="muted" style="margin-top:0
 // ============================================================ boot
 async function boot() {
   let me = null; try { me = await api("/api/me"); } catch {}
-  if (me) { S.me = me.actor; S.mode = me.mode; if (me.csrf) S.csrf = me.csrf; if (me.killed) { authShell(`<div class="badge b-neg"><span class="dot"></span>Kill-switch engaged</div><p class="muted">Destructive ops disabled, sessions revoked. An owner must release it.</p><button class="btn" id="r" style="width:100%;justify-content:center;margin-top:8px">Reload</button>`); document.getElementById("r").onclick = () => location.reload(); return; } try { const { tools } = await api("/api/catalog"); S.catalog = tools; } catch (e) { authShell(`<div class="empty">Failed to load: ${esc(e.message)}</div>`); return; } await loadClusters(); await loadFleet(); render(); return; }
+  if (me) { S.me = me.actor; S.mode = me.mode; if (me.csrf) S.csrf = me.csrf; if (me.killed) { authShell(`<div class="badge b-neg"><span class="dot"></span>Kill-switch engaged</div><p class="muted">Destructive ops disabled, sessions revoked. An owner must release it.</p><button class="btn" id="r" style="width:100%;justify-content:center;margin-top:8px">Reload</button>`); document.getElementById("r").onclick = () => location.reload(); return; } try { const { tools } = await api("/api/catalog"); S.catalog = tools; } catch (e) { authShell(`<div class="empty">Failed to load: ${esc(e.message)}</div>`); return; } await loadClusters(); await loadFleet(); render(); startJobPoll(); return; }
   let status = {}; try { status = await fetch("/api/status").then((r) => r.json()); } catch {}
   if (status.adminsExist) return renderLogin();
   if (TOKEN) return renderSetup();
