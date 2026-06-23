@@ -88,34 +88,43 @@ export async function ensureDeployKey(
  * keyName "adpix" → /root/.ssh/adpix_deploy_ed25519; "adpix_tm" → /root/.ssh/adpix_tm_deploy_ed25519.
  */
 export interface SharedKeyStatus { pubKey: string; sshUrl: string; owner: string; repo: string; authorized: boolean; prodKeyPath: string }
-export async function ensureSharedDeployKey(deps: Deps, s: Session, repoUrl: string, keyName: string): Promise<SharedKeyStatus> {
+
+function mcpKeyPaths(keyName: string): { dir: string; keyPath: string; prodKeyPath: string } {
+  const dir = path.join(registryDir(), ".ssh");
+  return { dir, keyPath: path.join(dir, `${keyName}_deploy_ed25519`), prodKeyPath: `/root/.ssh/${keyName}_deploy_ed25519` };
+}
+
+/**
+ * Generate (once) the canonical deploy key ON THE MCP and report whether GitHub authorizes it —
+ * WITHOUT a server session. This is steps 1–2 of ensureSharedDeployKey, used by the setup wizard to
+ * show the key + a "Verify" check before any server is involved.
+ */
+export async function mcpDeployKeyStatus(deps: Deps, repoUrl: string, keyName: string): Promise<SharedKeyStatus> {
   const gh = parseGithubRemote(repoUrl);
   if (!gh) throw new Error(`Not a GitHub repo URL: ${repoUrl}`);
   const sshUrl = `git@github.com:${gh.owner}/${gh.repo}.git`;
-  const dir = path.join(registryDir(), ".ssh");
-  const keyPath = path.join(dir, `${keyName}_deploy_ed25519`);
-  const prodKeyPath = `/root/.ssh/${keyName}_deploy_ed25519`;
-
-  // 1. Ensure the canonical key exists ON THE MCP (generate once, never on the prod servers).
+  const { dir, keyPath, prodKeyPath } = mcpKeyPaths(keyName);
   await deps.local(
     `install -d -m700 ${shq(dir)} && [ -f ${shq(keyPath)} ] || ssh-keygen -t ed25519 -N '' -C ${shq("adpix-deploy-mcp")} -f ${shq(keyPath)} >/dev/null 2>&1`,
     { timeoutMs: 30_000 }
   );
   const pub = (await deps.local(`cat ${shq(keyPath + ".pub")} 2>/dev/null`)).stdout.trim();
-
-  // 2. Authorized on GitHub? Checked from the MCP (it has GitHub egress for its own self-update).
   const test = await deps.local(
     `GIT_SSH_COMMAND=${shq(sshOpts(keyPath, true))} git ls-remote ${shq(sshUrl)} HEAD >/dev/null 2>&1 && echo OK || echo NO`,
     { timeoutMs: 45_000 }
   );
-  const authorized = /\bOK\b/.test(test.stdout);
-  if (!authorized) return { pubKey: pub, sshUrl, owner: gh.owner, repo: gh.repo, authorized: false, prodKeyPath };
+  return { pubKey: pub, sshUrl, owner: gh.owner, repo: gh.repo, authorized: /\bOK\b/.test(test.stdout), prodKeyPath };
+}
 
-  // 3. Distribute the (read-only) key to the target server at the canonical path. base64 over the
-  // wire to avoid any quoting/newline trouble; written 0600 under a tight umask.
+export async function ensureSharedDeployKey(deps: Deps, s: Session, repoUrl: string, keyName: string): Promise<SharedKeyStatus> {
+  const st = await mcpDeployKeyStatus(deps, repoUrl, keyName);
+  if (!st.authorized) return st;
+  // Distribute the (read-only) key to the target server at the canonical path. base64 over the wire
+  // to avoid any quoting/newline trouble; written 0600 under a tight umask.
+  const { keyPath, prodKeyPath } = mcpKeyPaths(keyName);
   const b64 = (await deps.local(`base64 < ${shq(keyPath)} | tr -d '\\n'`)).stdout.trim();
   await s.exec(`umask 077; install -d -m700 "$(dirname ${shq(prodKeyPath)})" && printf %s ${shq(b64)} | base64 -d > ${shq(prodKeyPath)} && chmod 600 ${shq(prodKeyPath)}`);
-  return { pubKey: pub, sshUrl, owner: gh.owner, repo: gh.repo, authorized: true, prodKeyPath };
+  return st;
 }
 
 /** Instructions for authorizing the ONE shared MCP deploy key (added to GitHub a single time). */

@@ -1,0 +1,93 @@
+import { ADPIX_REPO_URL } from "../adpix.js";
+import { parseGithubRemote } from "../github.js";
+
+/**
+ * The deployable-apps catalog — the single, extensible source the Setup Wizard drives. Adding a
+ * future app is just one entry here: its GitHub repo, the MCP deploy-key name (apps that share a
+ * repo share a key), the install tool + compose project, and the settings the operator must supply.
+ *
+ * Today: Analytics (its own repo) + Tag Manager and the Account/IdP center (both in the
+ * AdpixTagManager repo, so one deploy key covers both).
+ */
+const TM_REPO_URL = "https://github.com/mehrabiyan/AdpixTagManager.git";
+
+export interface AppSetting { key: string; label: string; required: boolean; secret?: boolean; placeholder?: string }
+export interface AppDef {
+  id: string;
+  name: string;
+  blurb: string;
+  repoUrl: string;
+  keyName: string;       // MCP deploy-key name (shared per repo)
+  project: string;       // docker compose project
+  deployable: boolean;   // false = repo/key managed here but deploy is configured separately
+  installTool?: string;  // tool the wizard runs to deploy it
+  defaultDir?: string;
+  settings: AppSetting[];
+  urlEnv?: string;       // .env key whose value is the public URL once up
+}
+
+export const APPS: AppDef[] = [
+  {
+    id: "analytics",
+    name: "AdPix Analytics",
+    blurb: "Privacy-first web analytics — ingest + ClickHouse + dashboard.",
+    repoUrl: ADPIX_REPO_URL,
+    keyName: "adpix",
+    project: "adanalytics",
+    deployable: true,
+    installTool: "adpix_install",
+    urlEnv: "PUBLIC_BASE_URL",
+    settings: [
+      { key: "domain", label: "Domain (HTTPS via Caddy)", required: false, placeholder: "analytics.example.com — omit for HTTP-on-IP" },
+      { key: "adminEmail", label: "Admin email", required: false, placeholder: "admin@example.com" },
+    ],
+  },
+  {
+    id: "tagmanager",
+    name: "AdPix Tag Manager",
+    blurb: "Tag delivery — edge + Varnish + CDN (api:8686, edge:8585).",
+    repoUrl: TM_REPO_URL,
+    keyName: "adpix_tm",
+    project: "adpix-tm",
+    deployable: true,
+    installTool: "tm_install",
+    defaultDir: "/opt/adpix-tagmanager",
+    settings: [
+      { key: "databaseUrl", label: "Control DB URL", required: true, placeholder: "postgres://user:pass@host:5432/db" },
+      { key: "authIssuer", label: "OIDC issuer", required: true, placeholder: "https://account.adpix.io" },
+      { key: "s3AccessKey", label: "Object-store access key", required: true },
+      { key: "s3SecretKey", label: "Object-store secret key", required: true, secret: true },
+      { key: "purgeToken", label: "Purge token", required: true, secret: true },
+    ],
+  },
+  {
+    id: "account",
+    name: "AdPix Account (IdP)",
+    blurb: "Central identity / OIDC account center. Ships in the Tag Manager repo (apps/auth), so it shares that deploy key.",
+    repoUrl: TM_REPO_URL,
+    keyName: "adpix_tm",
+    project: "adpix-auth",
+    deployable: false, // apps/auth has no compose in the repo — deployed separately (configurable)
+    settings: [],
+  },
+];
+
+export function appById(id: string): AppDef | undefined { return APPS.find((a) => a.id === id); }
+
+/** Distinct GitHub repos across the selected apps (so a shared repo → one key + one verify). */
+export function distinctRepos(appIds: string[]): { repoUrl: string; keyName: string; owner: string; repo: string; apps: string[] }[] {
+  const out: Record<string, { repoUrl: string; keyName: string; owner: string; repo: string; apps: string[] }> = {};
+  for (const id of appIds) {
+    const app = appById(id); if (!app) continue;
+    const gh = parseGithubRemote(app.repoUrl); if (!gh) continue;
+    const key = `${gh.owner}/${gh.repo}`;
+    if (!out[key]) out[key] = { repoUrl: app.repoUrl, keyName: app.keyName, owner: gh.owner, repo: gh.repo, apps: [] };
+    out[key].apps.push(app.name);
+  }
+  return Object.values(out);
+}
+
+/** Public catalog (no secrets) for the wizard UI. */
+export function appsCatalog() {
+  return APPS.map((a) => ({ id: a.id, name: a.name, blurb: a.blurb, repo: a.repoUrl, deployable: a.deployable, installTool: a.installTool, defaultDir: a.defaultDir, settings: a.settings }));
+}

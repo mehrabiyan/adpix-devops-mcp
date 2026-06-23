@@ -27,6 +27,10 @@ import { buildMcpStatus } from "./aggregate/mcp.js";
 import { buildStacksStatus } from "./aggregate/stacks.js";
 import { runChat } from "./chat.js";
 import { anthropicKeyStatus, setAnthropicKey, clearAnthropicKey } from "./secrets.js";
+import { appsCatalog, distinctRepos, appById } from "./apps.js";
+import { mcpDeployKeyStatus } from "../github.js";
+import { withSession } from "../deps.js";
+import { stackState, readEnvVar, waitHealthyCmd } from "../adpix.js";
 import { classifyError } from "./errors.js";
 import { loadRegistry, saveRegistry, findServerByHost } from "../registry.js";
 import { panelMcpKeyPath, ensureMcpKey, saveUploadedKey } from "./keys.js";
@@ -214,6 +218,48 @@ export function createPanelServer(opts: PanelOpts): Server {
         sendJson(res, 200, await buildDbView(deps, eng, url.searchParams.get("server") ?? undefined));
         return;
       }
+      // ---- setup wizard: the deployable-apps catalog ----
+      if (path === "/api/wizard/apps" && method === "GET") { sendJson(res, 200, { apps: appsCatalog() }); return; }
+
+      // ---- setup wizard: per-repo deploy-key (generate on the MCP) + GitHub authorization check ----
+      if (path === "/api/wizard/verify-repos" && method === "POST") {
+        if (actor.role !== "owner") { sendJson(res, 403, { error: "owner only" }); return; }
+        const b = await readBody(req);
+        const appIds = Array.isArray(b.appIds) ? (b.appIds as string[]).map(String) : [];
+        const repos = distinctRepos(appIds);
+        const out = await Promise.all(repos.map(async (r) => {
+          try {
+            const st = await mcpDeployKeyStatus(deps, r.repoUrl, r.keyName);
+            return { owner: r.owner, repo: r.repo, apps: r.apps, authorized: st.authorized, pubKey: st.pubKey, addUrl: `https://github.com/${r.owner}/${r.repo}/settings/keys` };
+          } catch (e) { return { owner: r.owner, repo: r.repo, apps: r.apps, authorized: false, pubKey: "", addUrl: "", error: (e as Error).message }; }
+        }));
+        sendJson(res, 200, { repos: out });
+        return;
+      }
+
+      // ---- setup wizard: is an app actually up + healthy on a server? ----
+      if (path === "/api/wizard/verify-deploy" && method === "POST") {
+        if (actor.role !== "owner") { sendJson(res, 403, { error: "owner only" }); return; }
+        const b = await readBody(req);
+        const app = appById(String(b.appId || ""));
+        if (!app) { sendJson(res, 404, { error: "unknown app" }); return; }
+        try {
+          const r = await withSession(deps, b.server ? String(b.server) : undefined, async (s, srv) => {
+            const dir = app.id === "tagmanager" ? (app.defaultDir || srv.adpixDir) : srv.adpixDir;
+            const st = await stackState(s, dir, app.project);
+            let healthy = false, url = "";
+            if (st.up) {
+              if (app.id === "analytics") { const g = await s.exec(waitHealthyCmd(20), { timeoutMs: 30_000 }); healthy = g.code === 0; }
+              else { const g = await s.exec(`curl -fsS -o /dev/null -m 5 -w '%{http_code}' http://localhost:8686/healthz 2>/dev/null || echo 000`, { timeoutMs: 20_000 }); healthy = /^[23]/.test(g.stdout.trim()); }
+              if (app.urlEnv) url = await readEnvVar(s, dir, app.urlEnv);
+            }
+            return { installed: st.cloned, up: st.up, running: st.running, total: st.total, healthy, url };
+          });
+          sendJson(res, 200, r);
+        } catch (e) { sendJson(res, 200, { installed: false, up: false, running: 0, total: 0, healthy: false, url: "", error: (e as Error).message }); }
+        return;
+      }
+
       // ---- add-server wizard: full connectivity DIAGNOSIS (key or password) ----
       if ((path === "/api/wizard/diagnose" || path === "/api/wizard/verify-server") && method === "POST") {
         if (!["owner", "operator"].includes(actor.role)) { sendJson(res, 403, { error: "owner/operator only" }); return; }
