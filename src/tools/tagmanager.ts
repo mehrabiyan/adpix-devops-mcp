@@ -53,8 +53,23 @@ const TM_AUTH_DOCKERFILE =
   `CMD ["node", "--experimental-strip-types", "apps/auth/src/server.ts"]\n`;
 // The auth server REFUSES to boot in production without a stable RSA signing key (keystore.ts), so we
 // generate one and embed it as a YAML literal block (env-files can't hold multi-line PEM). mode 600.
-function authComposeYaml(pem: string): string {
+// When `domain` is set we also add a Caddy front door (auto Let's Encrypt + auto-renew) on :80/:443
+// reverse-proxying to auth:9696 — so https://<domain> serves a real cert without manual TLS wiring.
+function authComposeYaml(pem: string, opts: { domain?: string; dir?: string } = {}): string {
   const body = pem.trim().split(/\r?\n/).map((l) => "        " + l).join("\n");
+  const caddyfile = `${opts.dir ?? "/opt/adpix-tagmanager"}/deploy/Caddyfile.account`;
+  const caddy = opts.domain
+    ? `  caddy:\n` +
+      `    image: caddy:2-alpine\n` +
+      `    restart: unless-stopped\n` +
+      `    depends_on:\n      - auth\n` +
+      `    ports:\n      - "80:80"\n      - "443:443"\n` +
+      `    volumes:\n` +
+      `      - ${caddyfile}:/etc/caddy/Caddyfile:ro\n` +
+      `      - caddy_data:/data\n` +
+      `      - caddy_config:/config\n`
+    : "";
+  const caddyVols = opts.domain ? `  caddy_data: {}\n  caddy_config: {}\n` : "";
   return (
     `services:\n` +
     `  auth:\n` +
@@ -67,6 +82,7 @@ function authComposeYaml(pem: string): string {
     `      AUTH_ISSUER: \${AUTH_ISSUER:?set AUTH_ISSUER in deploy/.env.account}\n` +
     `      DB_DIR: /data\n` +
     `      NODE_ENV: production\n` +
+    `      TRUST_PROXY: "1"\n` +
     `      BOOTSTRAP_ADMIN_EMAIL: \${BOOTSTRAP_ADMIN_EMAIL:-}\n` +
     `      BOOTSTRAP_ADMIN_PASSWORD: \${BOOTSTRAP_ADMIN_PASSWORD:-}\n` +
     `      OIDC_PRIVATE_KEY_PEM: |\n${body}\n` +
@@ -79,8 +95,10 @@ function authComposeYaml(pem: string): string {
     `      interval: 5s\n` +
     `      timeout: 3s\n` +
     `      retries: 24\n` +
+    caddy +
     `volumes:\n` +
-    `  authdata: {}\n`
+    `  authdata: {}\n` +
+    caddyVols
   );
 }
 
@@ -347,9 +365,16 @@ export const tagmanagerTools: ToolDef[] = [
         if (!/BEGIN/.test(pem)) return sections.join("\n\n") + `\n\nCould not generate the OIDC signing key (openssl missing?). Install openssl on ${srv.name} and re-run.`;
 
         await uploadFile(s, `${dir}/deploy/Dockerfile.auth`, TM_AUTH_DOCKERFILE, "644");
-        await uploadFile(s, `${dir}/deploy/docker-compose.auth.yml`, authComposeYaml(pem), "600");
+        await uploadFile(s, `${dir}/deploy/docker-compose.auth.yml`, authComposeYaml(pem, { domain: a.domain, dir }), "600");
         await uploadFile(s, `${dir}/deploy/.env.account`, `AUTH_ISSUER=${issuer}\nAUTH_PORT=${a.port}\nBOOTSTRAP_ADMIN_EMAIL=${adminEmail}\nBOOTSTRAP_ADMIN_PASSWORD=${adminPw}\n`, "600");
-        sections.push(`## Config\nIssuer ${issuer} · admin ${adminEmail} · embedded PGlite (volume authdata) · stable signing key. Wire this issuer as AUTH_ISSUER in Tag Manager + Analytics.`);
+        // With a domain, front the IdP with Caddy: automatic Let's Encrypt (HTTP-01/TLS-ALPN) + renew.
+        if (a.domain) {
+          await uploadFile(s, `${dir}/deploy/Caddyfile.account`, `${a.domain} {\n\treverse_proxy auth:9696\n}\n`, "644");
+          // Open the host firewall (ufw, if active) for the ACME challenge + HTTPS. A cloud firewall
+          // (Hetzner/AWS SG) is separate and must be opened in the provider console.
+          await s.exec(`command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi active && { ufw allow 80/tcp; ufw allow 443/tcp; } || true`, { timeoutMs: 30_000 });
+        }
+        sections.push(`## Config\nIssuer ${issuer} · admin ${adminEmail} · embedded PGlite (volume authdata) · stable signing key${a.domain ? ` · Caddy TLS front door (Let's Encrypt, auto-renew) for ${a.domain}` : ""}. Wire this issuer as AUTH_ISSUER in Tag Manager + Analytics.`);
 
         const AC = `cd ${shq(dir)} && docker compose -p adpix-account -f deploy/docker-compose.auth.yml --env-file deploy/.env.account`;
         const build = await s.exec(`${AC} build 2>&1`, { timeoutMs: a.timeoutSeconds * 1000 });
@@ -367,10 +392,23 @@ export const tagmanagerTools: ToolDef[] = [
           const logs = await s.exec(`${AC} logs --no-color --tail 60 auth 2>&1`, { timeoutMs: 30_000 });
           return sections.join("\n\n") + `\n\n## Account NOT healthy — auth container logs (last 60)\n${redactSecrets(lastLines(logs.stdout || logs.stderr, 60))}\n\nFix the cause and re-run account_install (idempotent).`;
         }
+        if (a.domain) {
+          // Caddy provisions the Let's Encrypt cert on first use; confirm :443 now serves the domain.
+          // --resolve pins the domain to the local Caddy so we test THIS box's cert, not DNS routing.
+          const tls = await s.exec(
+            `for i in $(seq 1 12); do code=$(curl -fsS -o /dev/null -m 8 --resolve ${shq(a.domain + ":443:127.0.0.1")} -w '%{http_code}' https://${a.domain}/healthz 2>/dev/null || echo 000); case "$code" in 2*|3*) echo "ready (HTTPS $code)"; exit 0;; esac; sleep 5; done; echo "not ready yet (last $code)"`,
+            { timeoutMs: 90_000 }
+          );
+          const ok = /ready \(HTTPS/.test(tls.stdout);
+          sections.push(
+            `## HTTPS (Caddy + Let's Encrypt)\n${tls.stdout.trim()} on :443 for ${a.domain} (auto-renewed).` +
+              (ok ? "" : `\n⚠ Cert not provisioned yet. Let's Encrypt validates over :80 from the internet — open **80 AND 443** at your CLOUD firewall (Hetzner/AWS security group), not just the host. Caddy retries automatically; re-check with: curl -I https://${a.domain}/healthz`)
+          );
+        }
         sections.push(
           `## Done\nAccount/IdP up at ${issuer} (/.well-known/openid-configuration). ` +
             `Admin: ${adminEmail} — password in ${dir}/deploy/.env.account (kept off this transcript). ` +
-            `${a.domain ? `Point ${a.domain} at ${srv.host} + front with TLS. ` : `Open port ${a.port} in the firewall. `}` +
+            `${a.domain ? `Caddy serves ${a.domain} on :443 (Let's Encrypt). Direct: http://${srv.host}:${a.port}. ` : `Open port ${a.port} in the firewall (no domain set → HTTP only). `}` +
             `Set AUTH_ISSUER=${issuer} when installing Tag Manager.`
         );
         return sections.join("\n\n");

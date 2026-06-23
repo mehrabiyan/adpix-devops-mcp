@@ -120,6 +120,23 @@ describe("B. account_install embeds a stable OIDC key so the IdP can boot under 
     expect(composeYaml(calls)).toContain("OIDC_PRIVATE_KEY_PEM");
   });
 
+  it("with a domain, fronts the IdP with Caddy (auto Let's Encrypt on :443) + opens the firewall", async () => {
+    const { deps, calls } = accountDeps([
+      [/cat .*oidc_key\.pem/, { stdout: PEM }],
+      [/9696\/healthz/, { code: 0, stdout: "healthy after ~10s" }],
+      [/auth\.adpix\.io:443:127\.0\.0\.1/, { code: 0, stdout: "ready (HTTPS 200)" }],
+    ]);
+    const out = await tool("account_install").handler(deps, { ...ACCOUNT_ARGS, domain: "auth.adpix.io" });
+    const yaml = composeYaml(calls);
+    expect(yaml).toContain("caddy:");
+    expect(yaml).toContain('"443:443"');
+    expect(yaml).toContain("caddy_data");
+    expect(calls.some((c) => /Caddyfile\.account/.test(c))).toBe(true);          // Caddyfile written
+    expect(calls.some((c) => /ufw allow 443/.test(c))).toBe(true);               // host firewall opened (best-effort)
+    expect(out).toMatch(/Let's Encrypt/);
+    expect(out).toMatch(/ready \(HTTPS 200\)/);
+  });
+
   it("on a health-gate failure, surfaces the auth container logs (not a bare 'NOT healthy')", async () => {
     const { deps } = accountDeps([
       [/cat .*oidc_key\.pem/, { stdout: PEM }],
