@@ -2,7 +2,9 @@
 
 An [MCP](https://modelcontextprotocol.io) server that acts as a **DevOps / SysAdmin / Site-Reliability engineer** for [AdPix Analytics](https://github.com/mehrabiyan/adpix). Connect it to Claude (Code / Desktop / any MCP client) and ask it to:
 
-- **Install** AdPix on a fresh server — preflight checks, then AdPix's idempotent one-command deploy (Docker, secrets, build, migrations, automatic HTTPS via Caddy/Let's Encrypt)
+- **Install** AdPix on a fresh server — preflight checks, then AdPix's idempotent one-command deploy (Docker, secrets, build, migrations, automatic HTTPS via Caddy/Let's Encrypt). Three products: **Analytics**, **Tag Manager**, and the **Account/IdP** (a self-contained OIDC provider — embedded DB, auto Let's Encrypt front door)
+- **Deploy the whole stack guided** — a 9-step **setup wizard** + a web **control panel** (AdPix Cloud) drive servers → GitHub keys → settings → preflight → deploy → verify → greenlight, over an SSH tunnel
+- **Relocate live** — `service_relocate` moves a running service to another server: stateless blue-green (health-gate the target before draining the source, zero-downtime), stateful via replication (never a data-losing container move)
 - **Maintain** it — safe updates (backup → pull → redeploy → health-gate → **auto-rollback** on failure), restarts, logs, backups, restores
 - **Continuously deploy** the latest GitHub version — a pull-based CI/CD timer on the server ships every new commit through the same backup → deploy → health-gate → rollback pipeline, with webhook alerts and a deploy history
 - **Monitor** security, uptime and loading speed — container + front-door health, system metrics, TTFB/TLS timing reports, certificate expiry, security audits
@@ -41,6 +43,8 @@ Then just talk to it:
 > *"Add my server 203.0.113.7 (root, key ~/.ssh/id_ed25519) as `prod`, install AdPix on it with the domain analytics.example.com, harden the box, and set up the watchdog with alerts to my Slack webhook."*
 
 …which walks through `server_add` → `adpix_install` → `harden_server` → `watchdog_install`.
+
+> Connecting a client (Claude Code / Desktop / Cursor / hosted HTTP)? See the **[MCP client setup guide](docs/mcp-client-setup.md)**.
 
 ## Tools
 
@@ -196,6 +200,19 @@ Lifecycle management of the AdPix Tag Manager delivery core (`deploy/docker-comp
 | `tm_update` | git pull → rebuild → `up -d` → health-gate, with **auto-rollback** to the previous commit (no data backup needed — artifacts are recomputable, control DB is external) |
 | `pop_add` | Provision a delivery PoP (§8.1): edge + varnish + purge-bridge + a Redis **replica** of the core (pointer + purge replication); edge reads artifacts from the central object store. Verifies the replication link, health-gates, prints the DNS/CDN behavior to add. Additive + safe — cold-fills from the object store, never mutates truth |
 
+**Account / IdP (OIDC identity provider)**
+
+| Tool | What it does |
+| --- | --- |
+| `account_install` | Deploy the Account center (`apps/auth` from the Tag Manager repo) as a **self-contained** container on `:9696` with an **embedded PGlite DB** (no external DB), a stable RSA signing key (generated + reused — so it boots under `NODE_ENV=production` and tokens survive restarts), and a bootstrap admin. With a **domain** it adds a **Caddy front door** (automatic Let's Encrypt on :80/:443, auto-renew) and probes `https://<domain>`. Its issuer URL is what Tag Manager + Analytics use as `AUTH_ISSUER` |
+| `oidc_health` | Probe the IdP — discovery, issuer match, JWKS, TLS (see Cross-product) |
+
+**Relocation**
+
+| Tool | What it does |
+| --- | --- |
+| `service_relocate` | Live-move ONE service to another server with the safe strategy for its type. **Stateless** (ingest/api/edge/web/…): stand up on the target + **health-gate it before draining the source** (zero-downtime abort on failure), source kept until you fence it. **Stateful** (postgres/clickhouse/redis/minio, or the IdP's embedded DB): **refused** — returns the replicate→verify→promote→fence plan instead. Refuses a stateless move whose backends are docker-internal to the source. `apply:false` is a read-only preview with a downtime estimate |
+
 **Observability**
 
 | Tool | What it does |
@@ -346,15 +363,15 @@ Servers normally come from the registry (`server_add`). For a single-server setu
 
 ```bash
 npm install
-npm test        # vitest — 288 tests, no network
+npm test        # vitest — 605 tests, no network
 npm run build
 npm run dev     # run from source over stdio
 ```
 
 **Testing** (vitest, all hermetic — the `Deps` seam swaps in a fake SSH/registry/local layer, so nothing touches a network):
 
-- **Unit** (per-handler): every one of the **68 tools** has a direct `tool("…").handler(fakeDeps, args)` test that drives its logic against mocked command output (regexes match the real shell/SQL strings). Destructive paths assert their guards (refuse-without-confirm, impact previews, verify-before-swap, disk/merge preflights, downtime warnings).
-- **Integration** (`test/integration.test.ts`): drives the **real MCP server** end to end — a SDK `Client` talks to `buildServer(fakeDeps)` over an in-memory transport. Asserts the `tools/list` contract (all tools, well-formed JSON Schemas, preserved annotations), JSON-Schema **input validation** (bad-typed args are rejected), the call dispatch, and the handler-throw → `isError` mapping. An **exhaustive every-tool smoke** calls all 68 tools through the protocol with minimal valid args and asserts each returns content (no schema rejection, no crash).
+- **Unit** (per-handler): every one of the **85 tools** has a direct `tool("…").handler(fakeDeps, args)` test that drives its logic against mocked command output (regexes match the real shell/SQL strings). Destructive paths assert their guards (refuse-without-confirm, impact previews, verify-before-swap, disk/merge preflights, downtime warnings).
+- **Integration** (`test/integration.test.ts`): drives the **real MCP server** end to end — a SDK `Client` talks to `buildServer(fakeDeps)` over an in-memory transport. Asserts the `tools/list` contract (all tools, well-formed JSON Schemas, preserved annotations), JSON-Schema **input validation** (bad-typed args are rejected), the call dispatch, and the handler-throw → `isError` mapping. An **exhaustive every-tool smoke** calls all 85 tools through the protocol with minimal valid args and asserts each returns content (no schema rejection, no crash).
 - **Transport** (`test/http.test.ts`): the hosted HTTP mode — `/healthz`, Bearer auth (constant-time), 404s, and a real `initialize` + `tools/list` round-trip.
 - Plus the pure layers: guard patterns, registry round-trip + permissions, parsers, the watchdog/autodeploy/AI-fixer bash templates (incl. `bash -n`).
 
