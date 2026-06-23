@@ -980,11 +980,14 @@ async function setupWizard() {
       args.server = srv; args.branch = "main"; if (a.id === "analytics") args.deployKey = true;
       if (a.id === "tagmanager" && !args.authIssuer) { const iss = accIssuer(); if (iss) args.authIssuer = iss; } // auto-wire from the Account app
       W.deploy[a.id] = { starting: true };
+      let outbuf = "";
       startJob(a.installTool, args).then((r) => {
         W.deploy[a.id] = { jobId: r.job.id }; log.style.display = "block"; stat.innerHTML = pill("running", "warn");
         return streamJob(r.job.id, (ev) => {
-          if (ev.type === "log") { log.appendChild(el(`<div style="color:${/ERROR|FAIL|REFUSED/i.test(ev.line) ? "var(--c-neg)" : "var(--c-text)"}">${esc(ev.line.replace(/^\$ \[[^\]]*\]\s*/, ""))}</div>`)); log.scrollTop = log.scrollHeight; }
-          if (ev.type === "done") { const ok = ev.status === "succeeded"; W.deploy[a.id] = { done: true, ok }; stat.innerHTML = pill(ok ? "done" : "failed", ok ? "pos" : "neg"); }
+          if (ev.type === "log") { outbuf += ev.line + "\n"; log.appendChild(el(`<div style="color:${/ERROR|FAIL|REFUSED/i.test(ev.line) ? "var(--c-neg)" : "var(--c-text)"}">${esc(ev.line.replace(/^\$ \[[^\]]*\]\s*/, ""))}</div>`)); log.scrollTop = log.scrollHeight; }
+          // The install tools return text (job succeeds) even on a soft failure — a failed checkout,
+          // an unauthorized key, or an unhealthy container. Catch those so the pill says "failed".
+          if (ev.type === "done") { const bad = /Checkout FAILED|Deploy FAILED|Permission denied|Nothing installed|NOT healthy|add the key above|could not read Username/i.test(outbuf); const ok = ev.status === "succeeded" && !bad; W.deploy[a.id] = { done: true, ok }; stat.innerHTML = pill(ok ? "done" : "failed", ok ? "pos" : "neg"); }
         });
       }).catch((e) => { W.deploy[a.id] = { done: true, ok: false }; stat.innerHTML = pill("error", "neg"); log.style.display = "block"; log.textContent = e.message; });
     });

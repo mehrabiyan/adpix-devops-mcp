@@ -11,10 +11,14 @@ import { shq } from "./util.js";
  */
 export const ADPIX_DEPLOY_KEY_PATH = "/root/.ssh/adpix_deploy_ed25519";
 
-/** ssh options used for every deploy-key git operation (no prompts, pinned key). */
+/** ssh options used for every deploy-key git operation (no prompts, pinned key).
+ *  `-F /dev/null` + `IdentityAgent=none` isolate the pinned key: without them, the operator's
+ *  ~/.ssh/config (a `Host github.com IdentityFile …` personal key) or ssh-agent would authenticate
+ *  the ls-remote probe even when the DEPLOY key isn't on the repo — a false "authorized" that then
+ *  fails on the clean server. So the probe tests the deploy key and nothing else. */
 function sshOpts(keyPath: string, batch = false): string {
   return (
-    `ssh -i ${keyPath} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new` +
+    `ssh -i ${keyPath} -o IdentitiesOnly=yes -o IdentityAgent=none -F /dev/null -o StrictHostKeyChecking=accept-new` +
     (batch ? " -o BatchMode=yes" : "")
   );
 }

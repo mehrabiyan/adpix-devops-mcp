@@ -49,7 +49,7 @@ describe("github url helpers", () => {
   it("builds matching env prefix and core.sshCommand", () => {
     expect(gitSshEnv("/k")).toContain("GIT_SSH_COMMAND=");
     expect(gitSshEnv("/k")).toContain("ssh -i /k");
-    expect(coreSshCommand("/k")).toBe("ssh -i /k -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new");
+    expect(coreSshCommand("/k")).toBe("ssh -i /k -o IdentitiesOnly=yes -o IdentityAgent=none -F /dev/null -o StrictHostKeyChecking=accept-new");
   });
 });
 
