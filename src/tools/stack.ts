@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { withSession } from "../deps.js";
 import type { Session } from "../ssh.js";
-import { ADPIX_REPO_URL, composeCmd, waitHealthyCmd } from "../adpix.js";
+import { ADPIX_REPO_URL, composeCmd, requireStack, stackState, waitHealthyCmd } from "../adpix.js";
 import { tmCompose, tmHealthGate } from "./tagmanager.js";
 import { shq, lastLines } from "../util.js";
 import type { ToolDef } from "./types.js";
@@ -28,6 +28,7 @@ interface Args {
 interface StackCfg {
   repoUrl: string;
   defaultDir?: string;
+  project: (a: Args) => string; // compose project name (to detect running containers)
   compose: (dir: string, a: Args) => string;
   stateless: (a: Args) => string[];
   stateful: string[];
@@ -38,6 +39,7 @@ interface StackCfg {
 const STACKS: Record<string, StackCfg> = {
   analytics: {
     repoUrl: ADPIX_REPO_URL,
+    project: () => "adanalytics",
     compose: (dir) => composeCmd(dir),
     stateless: () => ["ingest", "api", "worker", "identity-job", "mmm-job", "integrity-job", "lift-job", "web", "caddy"],
     stateful: ["postgres", "clickhouse", "redis"],
@@ -48,6 +50,7 @@ const STACKS: Record<string, StackCfg> = {
   tagmanager: {
     repoUrl: TM_REPO_URL,
     defaultDir: "/opt/adpix-tagmanager",
+    project: () => "adpix-tm",
     compose: (dir) => tmCompose(dir),
     stateless: () => ["api", "edge", "varnish", "purge-bridge"],
     stateful: ["redis", "minio"],
@@ -56,6 +59,7 @@ const STACKS: Record<string, StackCfg> = {
   idp: {
     repoUrl: TM_REPO_URL,
     defaultDir: "/opt/adpix-auth",
+    project: (a) => a.project || "adpix-auth",
     // No compose ships in the repo for apps/auth — operator supplies the file/project/service.
     compose: (dir, a) => `cd ${shq(dir)} && docker compose -p ${shq(a.project || "adpix-auth")} -f ${shq(a.composeFile || "deploy/docker-compose.yml")}`,
     stateless: (a) => [a.service || "auth"],
@@ -65,25 +69,26 @@ const STACKS: Record<string, StackCfg> = {
   },
 };
 
-/** Public meta (repo + default checkout dir) per stack — shared with the panel's /api/stacks aggregator. */
-export const STACK_META: Record<string, { repoUrl: string; defaultDir?: string }> =
-  Object.fromEntries(Object.entries(STACKS).map(([k, v]) => [k, { repoUrl: v.repoUrl, defaultDir: v.defaultDir }]));
+/** Public meta (repo + default checkout dir + compose project) per stack — shared with the panel. */
+export const STACK_META: Record<string, { repoUrl: string; defaultDir?: string; project: string }> =
+  Object.fromEntries(Object.entries(STACKS).map(([k, v]) => [k, { repoUrl: v.repoUrl, defaultDir: v.defaultDir, project: v.project({} as Args) }]));
 
 export function stackDir(srv: { adpixDir?: string }, stack: string, dir?: string): string {
   return dir || STACKS[stack].defaultDir || srv.adpixDir || "/opt/adpix";
 }
 
-export interface StackProbe { installed: boolean; commit: string; branch: string; behind: string; subject: string; dir: string }
-/** One read-only exec: is the checkout a git repo, its HEAD, branch, commits-behind origin, and last subject. */
-export async function probeStack(s: Session, dir: string): Promise<StackProbe> {
+export interface StackProbe { installed: boolean; commit: string; branch: string; behind: string; subject: string; dir: string; running: number; total: number; up: boolean }
+/** Read-only: git state (HEAD/branch/commits-behind) AND running-container count (cloned vs up). */
+export async function probeStack(s: Session, dir: string, project?: string): Promise<StackProbe> {
   const r = await s.exec(
     `cd ${shq(dir)} 2>/dev/null && test -d .git && { git fetch -q origin 2>/dev/null; b=$(git rev-parse --abbrev-ref HEAD); printf '%s\\t%s\\t%s\\t%s' "$(git rev-parse --short HEAD)" "$b" "$(git rev-list --count HEAD..origin/$b 2>/dev/null || echo '?')" "$(git log -1 --format=%s)"; } || printf 'NOGIT'`,
     { timeoutMs: 40_000 }
   );
   const out = r.stdout.trim();
-  if (!out || out === "NOGIT") return { installed: false, commit: "", branch: "", behind: "?", subject: "", dir };
+  if (!out || out === "NOGIT") return { installed: false, commit: "", branch: "", behind: "?", subject: "", dir, running: 0, total: 0, up: false };
   const [commit = "", branch = "", behind = "?", subject = ""] = out.split("\t");
-  return { installed: true, commit, branch, behind, subject, dir };
+  const st = project ? await stackState(s, dir, project) : { running: 0, total: 0, up: false };
+  return { installed: true, commit, branch, behind, subject, dir, running: st.running, total: st.total, up: st.up };
 }
 
 export const stackTools: ToolDef[] = [
@@ -125,8 +130,10 @@ export const stackTools: ToolDef[] = [
         const at = (cmd: string, ms = big) => s.exec(`cd ${shq(dir)} && ${cmd}`, { timeoutMs: ms });
         const git = (cmd: string, ms = 120_000) => at(`git ${cmd}`, ms);
 
-        if ((await s.exec(`test -d ${shq(dir + "/.git")} && echo yes || echo no`)).stdout.trim() !== "yes")
-          return `No ${a.stack} checkout at ${dir} — install it first, or pass dir:.`;
+        // update-only: the stack must already be RUNNING (this recreates live services). A fresh/
+        // cloned-but-down stack must be brought up by Install first, not updated.
+        const ni = await requireStack(s, dir, srv.name, { needRunning: true, project: cfg.project(a), product: a.stack });
+        if (ni) return ni;
         const branch = a.branch || (await git("rev-parse --abbrev-ref HEAD")).stdout.trim() || "main";
         const before = (await git("rev-parse --short HEAD")).stdout.trim();
         const pull = await git(`fetch origin ${shq(branch)} 2>&1 && git checkout ${shq(branch)} 2>&1 && git pull --ff-only origin ${shq(branch)} 2>&1`);
@@ -198,10 +205,12 @@ export const stackTools: ToolDef[] = [
       return withSession(deps, a.server, async (s, srv) => {
         const rows: string[] = [];
         for (const st of stacks) {
-          const p = await probeStack(s, stackDir(srv, st, a.stack ? a.dir : undefined));
-          rows.push(p.installed
-            ? `${st}: ${p.commit} (${p.branch}) — ${p.behind === "0" ? "up to date" : `${p.behind} behind origin`}  ·  ${p.subject}`
-            : `${st}: not installed at ${p.dir}`);
+          const p = await probeStack(s, stackDir(srv, st, a.stack ? a.dir : undefined), STACK_META[st]?.project);
+          rows.push(!p.installed
+            ? `${st}: not installed at ${p.dir}`
+            : !p.up
+              ? `${st}: ${p.commit} (${p.branch}) — INSTALLED BUT NOT RUNNING (0/${p.total} up) — run Install to bring it up`
+              : `${st}: ${p.commit} (${p.branch}) · ${p.running}/${p.total} up — ${p.behind === "0" ? "up to date" : `${p.behind} behind origin`}  ·  ${p.subject}`);
         }
         return rows.join("\n");
       });

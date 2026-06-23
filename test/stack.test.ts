@@ -18,6 +18,7 @@ function stackDeps(opts: { before?: string; after?: string; fail?: RegExp } = {}
       if (/test -d .*\.git/.test(cmd)) return { code: 0, stdout: "yes", stderr: "" };
       if (/rev-parse --abbrev-ref HEAD/.test(cmd)) return { code: 0, stdout: "main", stderr: "" };
       if (/rev-parse --short HEAD/.test(cmd)) return { code: 0, stdout: (shortHead++ === 0 ? (opts.before ?? "aaa1111") : (opts.after ?? "bbb2222")), stderr: "" };
+      if (/com\.docker\.compose\.project=.* -q/.test(cmd)) return { code: 0, stdout: "1 1", stderr: "" };
       return { code: fail ? 1 : 0, stdout: fail ? "boom" : "ok", stderr: "" };
     },
   };
@@ -116,7 +117,7 @@ describe("stack_status", () => {
   function statusDeps(probe: (cmd: string) => string) {
     const session: Session = {
       server: SRV, authMethod: "publickey", close: () => {},
-      exec: async (cmd): Promise<ExecResult> => ({ code: 0, stdout: probe(cmd), stderr: "" }),
+      exec: async (cmd): Promise<ExecResult> => ({ code: 0, stdout: /&& echo yes \|\| echo no/.test(cmd) ? "yes" : /com\.docker\.compose\.project=.* -q/.test(cmd) ? "1 1" : probe(cmd), stderr: "" }),
     };
     return { resolve: () => SRV, connect: async () => session, local: async () => ({ code: 0, stdout: "", stderr: "" }) } as Deps;
   }
@@ -124,7 +125,7 @@ describe("stack_status", () => {
   it("reports commit / branch / behind per stack", async () => {
     const deps = statusDeps((c) => /adpix-tagmanager/.test(c) ? "NOGIT" : "abc1234\tmain\t2\tship it");
     const out = await tool("stack_status").handler(deps, { stack: "analytics" });
-    expect(out).toMatch(/analytics: abc1234 \(main\) — 2 behind origin/);
+    expect(out).toMatch(/analytics: abc1234 \(main\) · 1\/1 up — 2 behind origin/);
   });
 
   it("marks an absent checkout as not installed", async () => {

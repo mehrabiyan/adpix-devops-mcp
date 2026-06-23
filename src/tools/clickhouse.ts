@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { withSession } from "../deps.js";
 import type { Session } from "../ssh.js";
-import { COMPOSE_PROJECT, readEnvVar, waitHealthyCmd, uploadFile } from "../adpix.js";
+import { COMPOSE_PROJECT, readEnvVar, requireStack, waitHealthyCmd, uploadFile } from "../adpix.js";
 import { shq, lastLines, table, redactSecrets } from "../util.js";
 import {
   recommendSettings,
@@ -60,9 +60,8 @@ function tsv(out: string): string[][] {
   return t ? t.split("\n").map((l) => l.split("\t")) : [];
 }
 
-async function ensureInstalled(s: Session, dir: string): Promise<string | null> {
-  const r = await s.exec(`test -d ${shq(dir + "/.git")} && echo yes || echo no`);
-  return r.stdout.trim() === "yes" ? null : `No AdPix checkout at ${dir} — install it first (adpix_install).`;
+async function ensureInstalled(s: Session, dir: string, server = "this server"): Promise<string | null> {
+  return requireStack(s, dir, server, { needRunning: true });
 }
 
 /** The durable ClickHouse tables backup.sh/restore.sh cover. raw_events_jsonl is the analytical rebuild source. */
@@ -99,7 +98,7 @@ export const clickhouseTools: ToolDef[] = [
       const a = args as { server?: string };
       return withSession(deps, a.server, async (s, srv) => {
         const dir = srv.adpixDir;
-        const notInstalled = await ensureInstalled(s, dir);
+        const notInstalled = await ensureInstalled(s, dir, srv.name);
         if (notInstalled) return notInstalled;
         const c = await chCtx(s, dir);
 
@@ -206,7 +205,7 @@ export const clickhouseTools: ToolDef[] = [
       const a = args as { server?: string; memoryBudgetMB?: number; diskType: "ssd" | "hdd"; coLocated: boolean; apply: boolean };
       return withSession(deps, a.server, async (s, srv) => {
         const dir = srv.adpixDir;
-        const notInstalled = await ensureInstalled(s, dir);
+        const notInstalled = await ensureInstalled(s, dir, srv.name);
         if (notInstalled) return notInstalled;
         const c = await chCtx(s, dir);
 
@@ -301,7 +300,7 @@ export const clickhouseTools: ToolDef[] = [
       const a = args as { server?: string; apply: boolean; maxOptimizeGB: number };
       return withSession(deps, a.server, async (s, srv) => {
         const dir = srv.adpixDir;
-        const notInstalled = await ensureInstalled(s, dir);
+        const notInstalled = await ensureInstalled(s, dir, srv.name);
         if (notInstalled) return notInstalled;
         const c = await chCtx(s, dir);
 
@@ -378,7 +377,7 @@ export const clickhouseTools: ToolDef[] = [
       const a = args as { server?: string };
       return withSession(deps, a.server, async (s, srv) => {
         const dir = srv.adpixDir;
-        const notInstalled = await ensureInstalled(s, dir);
+        const notInstalled = await ensureInstalled(s, dir, srv.name);
         if (notInstalled) return notInstalled;
         const c = await chCtx(s, dir);
 
@@ -443,7 +442,7 @@ export const clickhouseTools: ToolDef[] = [
       const a = args as { server?: string; tables?: string[] };
       return withSession(deps, a.server, async (s, srv) => {
         const dir = srv.adpixDir;
-        const notInstalled = await ensureInstalled(s, dir);
+        const notInstalled = await ensureInstalled(s, dir, srv.name);
         if (notInstalled) return notInstalled;
         const c = await chCtx(s, dir);
         const tables = (a.tables?.length ? a.tables : DURABLE_TABLES).filter((t) => /^[a-zA-Z0-9_]+$/.test(t));
@@ -492,7 +491,7 @@ export const clickhouseTools: ToolDef[] = [
       if (!a.confirm) return "REFUSED: restore swaps live ClickHouse tables for the backup (live data preserved in <table>__prev, but still a production data swap). Re-run with confirm:true after double-checking backupDir.";
       return withSession(deps, a.server, async (s, srv) => {
         const dir = srv.adpixDir;
-        const notInstalled = await ensureInstalled(s, dir);
+        const notInstalled = await ensureInstalled(s, dir, srv.name);
         if (notInstalled) return notInstalled;
         const c = await chCtx(s, dir);
 
@@ -586,7 +585,7 @@ export const clickhouseTools: ToolDef[] = [
       const a = args as { server?: string; mode: string; confirm: boolean };
       return withSession(deps, a.server, async (s, srv) => {
         const dir = srv.adpixDir;
-        const notInstalled = await ensureInstalled(s, dir);
+        const notInstalled = await ensureInstalled(s, dir, srv.name);
         if (notInstalled) return notInstalled;
         const c = await chCtx(s, dir);
 
@@ -699,7 +698,7 @@ export const clickhouseTools: ToolDef[] = [
       const a = args as { server?: string; mode: string; table?: string; interval?: number; unit: "DAY" | "MONTH"; partition?: string; timeExpr?: string; confirm: boolean };
       return withSession(deps, a.server, async (s, srv) => {
         const dir = srv.adpixDir;
-        const notInstalled = await ensureInstalled(s, dir);
+        const notInstalled = await ensureInstalled(s, dir, srv.name);
         if (notInstalled) return notInstalled;
         const c = await chCtx(s, dir);
         const validTable = (t?: string): t is string => !!t && /^[a-zA-Z0-9_]+$/.test(t);
@@ -801,7 +800,7 @@ export const clickhouseTools: ToolDef[] = [
       const a = args as { server?: string; action: string; skipBackup: boolean };
       return withSession(deps, a.server, async (s, srv) => {
         const dir = srv.adpixDir;
-        const notInstalled = await ensureInstalled(s, dir);
+        const notInstalled = await ensureInstalled(s, dir, srv.name);
         if (notInstalled) return notInstalled;
         const c = await chCtx(s, dir);
 

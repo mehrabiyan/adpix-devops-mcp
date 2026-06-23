@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { withSession } from "../deps.js";
-import { uploadFile } from "../adpix.js";
+import { uploadFile, requireStack } from "../adpix.js";
 import {
   WATCHDOG_LOG_DIR,
   WATCHDOG_SCRIPT_PATH,
@@ -82,15 +82,21 @@ export const watchdogTools: ToolDef[] = [
         .default(false)
         .describe("Escalate to Claude Code when an outage survives auto-restarts (requires ai_setup; costs API tokens)"),
       escalateAfter: z.number().int().min(2).max(1440).default(5).describe("Escalate after N consecutive failed checks"),
+      force: z.boolean().default(false).describe("Install even if the stack isn't running yet (the watchdog would alert immediately)"),
     },
     annotations: { idempotentHint: true },
     handler: async (deps, args) => {
       const a = args as {
         server?: string; intervalSeconds: number; autoRestart: boolean;
         webhookUrl?: string; httpPath: string; realertEvery: number;
-        aiEscalate: boolean; escalateAfter: number;
+        aiEscalate: boolean; escalateAfter: number; force: boolean;
       };
       return withSession(deps, a.server, async (s, srv) => {
+        // The watchdog monitors a RUNNING stack — on a cloned-but-down or undeployed server its first
+        // check fails immediately (docker-daemon / no containers) and it alerts on a problem that's
+        // really "not deployed yet". Refuse with clear guidance unless forced.
+        const ni = await requireStack(s, srv.adpixDir, srv.name, { needRunning: true });
+        if (ni && !a.force) return `${ni}\n\n(The watchdog monitors a running stack — install/bring it up first. Pass force:true to install the watchdog anyway.)`;
         const webhook = a.webhookUrl ?? srv.webhookUrl;
         if (a.aiEscalate) {
           const ready = await s.exec(

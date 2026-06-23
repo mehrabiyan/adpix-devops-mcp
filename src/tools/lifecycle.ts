@@ -4,7 +4,8 @@ import type { Session } from "../ssh.js";
 import {
   ADPIX_REPO_URL,
   composeCmd,
-  notInstalledMsg,
+  requireStack,
+  stackState,
   readEnvVar,
   readSiteAddress,
   waitHealthyCmd,
@@ -182,19 +183,43 @@ export const lifecycleTools: ToolDef[] = [
         }
         sections.push(`## Checkout\n${cloneUrl} @ ${a.branch} → ${dir}`);
 
+        // Docker may be installed but the daemon stopped (e.g. after a reboot) — deploy.sh's
+        // `docker info` check would then abort. Start it first (best-effort; deploy.sh installs
+        // Docker itself if it's entirely absent).
+        await s.exec(
+          "command -v docker >/dev/null 2>&1 && (docker info >/dev/null 2>&1 || sudo -n systemctl start docker 2>/dev/null || systemctl start docker 2>/dev/null || service docker start 2>/dev/null) || true",
+          { timeoutMs: 60_000 }
+        );
+
         // deploy.sh: non-interactive (no TTY over exec). DOMAIN= empty selects HTTP-on-IP mode.
         const env = `DOMAIN=${shq(a.domain ?? "")}${a.adminEmail ? ` ADMIN_EMAIL=${shq(a.adminEmail)}` : ""}`;
         const dep = await s.exec(`cd ${shq(dir)} && ${env} ./scripts/deploy.sh 2>&1`, {
           timeoutMs: a.timeoutSeconds * 1000,
         });
-        sections.push(`## deploy.sh (exit ${dep.code})\n${redactSecrets(lastLines(dep.stdout, 60))}`);
+        sections.push(`## deploy.sh (exit ${dep.code})\n${redactSecrets(lastLines(dep.stdout, 80))}`);
         if (dep.code !== 0) {
-          return sections.join("\n\n") + "\n\nDeploy FAILED — see output above. adpix_logs / run_command can dig further.";
+          return sections.join("\n\n") +
+            "\n\n## Deploy FAILED\ndeploy.sh exited non-zero — the stack is NOT up. The script is idempotent: fix the cause and re-run adpix_install to resume. " +
+            "Common causes: Docker daemon not running, out of disk on /var/lib/docker, OOM during the image build (need ~4GB RAM), or a migration error (Postgres/ClickHouse not healthy within 120s). " +
+            "Dig in with adpix_logs / run_command. (The error is usually in the last lines above.)";
         }
 
+        // deploy.sh exit 0 does NOT guarantee a running stack — verify the containers actually came up.
+        const st = await stackState(s, dir);
+        if (!st.up) {
+          return sections.join("\n\n") +
+            `\n\n## Deploy INCOMPLETE\ndeploy.sh finished but only ${st.running}/${st.total} containers are running — the stack is not up.\n${await composePsTable(s, dir)}\n` +
+            `Re-run adpix_install (idempotent) after checking adpix_logs.`;
+        }
+        sections.push(`## Containers\n${st.running}/${st.total} running.`);
+
         const gate = await s.exec(waitHealthyCmd(150), { timeoutMs: 180_000 });
-        const site = await readSiteAddress(s, dir);
         sections.push(`## Health gate\n${gate.stdout.trim()}`);
+        if (gate.code !== 0) {
+          return sections.join("\n\n") +
+            `\n\n## Front door not healthy yet\nContainers are up but the front door isn't answering 2xx/3xx. Give it a minute, then check adpix_status / adpix_logs — a service may still be starting or crash-looping.`;
+        }
+        const site = await readSiteAddress(s, dir);
         sections.push(
           `## Done\n` +
             `URL: ${site.publicBaseUrl}\n` +
@@ -353,7 +378,7 @@ export const lifecycleTools: ToolDef[] = [
       const a = args as { server?: string; service?: (typeof SERVICES)[number] };
       return withSession(deps, a.server, async (s, srv) => {
         const dir = srv.adpixDir;
-        const ni = await notInstalledMsg(s, dir, srv.name);
+        const ni = await requireStack(s, dir, srv.name, { needRunning: true });
         if (ni) return ni;
         const target = a.service ?? "";
         const r = await s.exec(`${composeCmd(dir)} restart ${target} 2>&1`, { timeoutMs: 300_000 });
@@ -383,7 +408,7 @@ export const lifecycleTools: ToolDef[] = [
       const a = args as { server?: string; service?: string; lines: number; since?: string; grep?: string };
       return withSession(deps, a.server, async (s, srv) => {
         const dir = srv.adpixDir;
-        const ni = await notInstalledMsg(s, dir, srv.name);
+        const ni = await requireStack(s, dir, srv.name, { needRunning: true });
         if (ni) return ni;
         let cmd = `${composeCmd(dir)} logs --no-color --tail=${a.lines}`;
         if (a.since) cmd += ` --since=${shq(a.since)}`;
@@ -409,6 +434,9 @@ export const lifecycleTools: ToolDef[] = [
       const a = args as { server?: string };
       return withSession(deps, a.server, async (s, srv) => {
         const dir = srv.adpixDir;
+        // backup.sh pg_dumps the live postgres/clickhouse CONTAINERS — they must be running.
+        const ni = await requireStack(s, dir, srv.name, { needRunning: true });
+        if (ni) return ni;
         const r = await s.exec(`cd ${shq(dir)} && ./scripts/backup.sh 2>&1`, { timeoutMs: 900_000 });
         if (r.code !== 0) {
           return `Backup FAILED (exit ${r.code}):\n${lastLines(r.stdout + r.stderr, 30)}`;
@@ -440,6 +468,8 @@ export const lifecycleTools: ToolDef[] = [
       }
       return withSession(deps, a.server, async (s, srv) => {
         const dir = srv.adpixDir;
+        const ni = await requireStack(s, dir, srv.name, { needRunning: true });
+        if (ni) return ni;
         const exists = await s.exec(`test -d ${shq(dir)}/${shq(a.backupDir)} && echo yes || echo no`);
         if (exists.stdout.trim() !== "yes") {
           const avail = await s.exec(`ls -1dt ${shq(dir)}/backups/*/ 2>/dev/null | head -10`);

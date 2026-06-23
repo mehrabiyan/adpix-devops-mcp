@@ -11,14 +11,14 @@ function deps(responses: [RegExp, Partial<ExecResult>][]) {
   const calls: string[] = [];
   const session: Session = {
     server: SRV, authMethod: "publickey", close: () => {},
-    exec: async (cmd) => { calls.push(cmd); for (const [re, r] of responses) if (re.test(cmd)) return { code: 0, stdout: "", stderr: "", ...r }; return { code: 0, stdout: /test -d .*\.git/.test(cmd) ? "yes" : "", stderr: "" }; },
+    exec: async (cmd) => { calls.push(cmd); for (const [re, r] of responses) if (re.test(cmd)) return { code: 0, stdout: "", stderr: "", ...r }; return { code: 0, stdout: /com\.docker\.compose\.project=.* -q/.test(cmd) ? "1 1" : /test -d .*\.git/.test(cmd) ? "yes" : "", stderr: "" }; },
   };
   return { deps: { resolve: () => SRV, connect: async () => session, local: async () => ({ code: 0, stdout: "", stderr: "" }) } as Deps, calls };
 }
 
 describe("container_control", () => {
   it("status reads compose ps (read path)", async () => {
-    const { deps: d, calls } = deps([[/ps /, { stdout: "api running" }]]);
+    const { deps: d, calls } = deps([[/ps 'api'/, { stdout: "api running" }]]);
     const out = await tool("container_control").handler(d, { service: "api", action: "status", confirm: false });
     expect(out).toMatch(/api running/);
     expect(calls.some((c) => /ps 'api'/.test(c))).toBe(true);

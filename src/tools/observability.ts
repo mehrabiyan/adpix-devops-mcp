@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { withSession } from "../deps.js";
 import type { Session } from "../ssh.js";
-import { composeCmd } from "../adpix.js";
+import { composeCmd, requireStack } from "../adpix.js";
 import { shq, lastLines, table } from "../util.js";
 import type { ToolDef } from "./types.js";
 
@@ -10,9 +10,8 @@ const serverParam = z.string().optional().describe("Registered server name (the 
 /** The Analytics observability stack ships in compose under `profiles: ["extras"]` (DEPLOYMENT_SRE §4/§12). */
 const OBS_SERVICES = ["prometheus", "alertmanager", "grafana"] as const;
 
-async function ensureInstalled(s: Session, dir: string): Promise<string | null> {
-  const r = await s.exec(`test -d ${shq(dir + "/.git")} && echo yes || echo no`);
-  return r.stdout.trim() === "yes" ? null : `No AdPix checkout at ${dir} — the observability stack ships in its compose. Install it first (adpix_install) or point server at the witness's AdPix checkout.`;
+async function ensureInstalled(s: Session, dir: string, server = "this server"): Promise<string | null> {
+  return requireStack(s, dir, server, { needRunning: false });
 }
 
 export const observabilityTools: ToolDef[] = [
@@ -30,7 +29,7 @@ export const observabilityTools: ToolDef[] = [
       const a = args as { server?: string };
       return withSession(deps, a.server, async (s, srv) => {
         const dir = srv.adpixDir;
-        const notInstalled = await ensureInstalled(s, dir);
+        const notInstalled = await ensureInstalled(s, dir, srv.name);
         if (notInstalled) return notInstalled;
         const r = await s.exec(`${composeCmd(dir)} --profile extras up -d ${OBS_SERVICES.join(" ")} 2>&1`, { timeoutMs: 600_000 });
         if (r.code !== 0) return `obs_deploy FAILED (exit ${r.code}):\n${lastLines(r.stdout, 30)}`;
@@ -57,7 +56,7 @@ export const observabilityTools: ToolDef[] = [
       const a = args as { server?: string };
       return withSession(deps, a.server, async (s, srv) => {
         const dir = srv.adpixDir;
-        const notInstalled = await ensureInstalled(s, dir);
+        const notInstalled = await ensureInstalled(s, dir, srv.name);
         if (notInstalled) return notInstalled;
         const problems: string[] = [];
 

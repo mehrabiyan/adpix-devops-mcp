@@ -364,7 +364,7 @@ SCREENS.deploys = (c) => {
   cur.querySelector('[data-act="rb"]').onclick = () => verifyAction({ name: "adpix_update", title: "Rollback (redeploy the previous build)", destructive: false }, {});
   const cicd = el(`<div style="${cardOpen}"><div style="${cardHead};display:flex;align-items:center;justify-content:space-between">CI / CD pipeline<button class="btn btn-sm refresh">${t("refresh")}</button></div><div class="ccbody"><div class="card-pad"><div class="skel" style="width:60%"></div></div></div></div>`);
   const stacks = el(`<div style="${cardOpen}"><div style="${cardHead};display:flex;align-items:center;justify-content:space-between">Deploy from GitHub<button class="btn btn-sm refresh">${t("refresh")}</button></div><div class="card-pad"><div class="muted" style="font-size:12.5px;margin-bottom:12px;line-height:1.5">Fresh server? <b>Install</b> provisions the full stack (clone + .env + Docker + compose up + migrate). Already installed? <b>Update</b> recreates <b>only stateless</b> services + runs migrations — datastores (postgres / clickhouse / redis / minio) and their volumes are never touched.</div><div class="rows"><div class="skel" style="width:70%"></div></div><label style="display:flex;align-items:center;gap:7px;font-size:12px;margin-top:12px;color:var(--c-muted);cursor:pointer"><input type="checkbox" id="bkf"> Back up Analytics before migrating (updates only)</label></div></div>`);
-  const stackPill = (x) => !x.installed ? pill("not installed", "idle") : x.behind === 0 ? pill("up to date", "pos") : x.behind === "?" ? pill("origin unreachable", "idle") : pill(`${x.behind} behind`, "warn");
+  const stackPill = (x) => !x.installed ? pill("not installed", "idle") : !x.up ? pill(`installed · down (0/${x.total})`, "neg") : x.behind === 0 ? pill(`${x.running}/${x.total} up`, "pos") : x.behind === "?" ? pill("origin unreachable", "idle") : pill(`${x.behind} behind`, "warn");
   const loadStacks = async () => {
     try {
       const arr = await api("/api/stacks"); STACKS_STATUS = arr;
@@ -372,9 +372,11 @@ SCREENS.deploys = (c) => {
       rows.innerHTML = arr.map((x) => {
         const act = x.stack === "idp"
           ? `<button class="btn btn-sm" data-idp="1">Update IdP…</button>`
-          : x.installed
-            ? `<button class="btn btn-sm" data-up="${esc(x.stack)}">${ic("deploys", 13)} Update${typeof x.behind === "number" && x.behind > 0 ? ` · ${x.behind}` : ""}</button>`
-            : `<button class="btn btn-sm btn-primary" data-inst="${esc(x.stack)}">${ic("deploys", 13)} Install</button>`;
+          : !x.installed
+            ? `<button class="btn btn-sm btn-primary" data-inst="${esc(x.stack)}">${ic("deploys", 13)} Install</button>`
+            : !x.up
+              ? `<button class="btn btn-sm btn-danger" data-inst="${esc(x.stack)}">${ic("deploys", 13)} Bring up</button>`
+              : `<button class="btn btn-sm" data-up="${esc(x.stack)}">${ic("deploys", 13)} Update${typeof x.behind === "number" && x.behind > 0 ? ` · ${x.behind}` : ""}</button>`;
         return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--c-divider)"><div style="min-width:0"><b style="text-transform:capitalize">${esc(x.stack)}</b>${x.installed ? ` <span class="mono muted" style="font-size:11.5px">${esc(x.commit)}${x.branch ? " · " + esc(x.branch) : ""}</span>` : ""}</div><div style="display:flex;align-items:center;gap:10px;flex:none">${stackPill(x)}${act}</div></div>`;
       }).join("");
       rows.querySelectorAll("[data-up]").forEach((b) => (b.onclick = () => verifyAction({ name: "stack_update", title: `Update the ${b.dataset.up} stack — stateless-only + migrations (datastores preserved)`, destructive: true }, { stack: b.dataset.up, statelessOnly: true, ...(b.dataset.up === "analytics" && stacks.querySelector("#bkf").checked ? { backupFirst: true } : {}) })));

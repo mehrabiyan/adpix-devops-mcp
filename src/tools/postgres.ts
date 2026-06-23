@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { withSession } from "../deps.js";
 import type { Session } from "../ssh.js";
-import { composeCmd, readEnvVar, waitHealthyCmd } from "../adpix.js";
+import { composeCmd, readEnvVar, requireStack, waitHealthyCmd } from "../adpix.js";
 import { shq, lastLines, table, redactSecrets } from "../util.js";
 import { recommendSettings, defaultBudgetMB, mbToPg, type Recommendation } from "../postgres/tune.js";
 import type { ToolDef } from "./types.js";
@@ -44,9 +44,8 @@ function rows(out: string): string[][] {
   return t ? t.split("\n").map((l) => l.split(SEP)) : [];
 }
 
-async function ensureInstalled(s: Session, dir: string): Promise<string | null> {
-  const r = await s.exec(`test -d ${shq(dir + "/.git")} && echo yes || echo no`);
-  return r.stdout.trim() === "yes" ? null : `No AdPix checkout at ${dir} — install it first (adpix_install).`;
+async function ensureInstalled(s: Session, dir: string, server = "this server"): Promise<string | null> {
+  return requireStack(s, dir, server, { needRunning: true });
 }
 
 export const postgresTools: ToolDef[] = [
@@ -63,7 +62,7 @@ export const postgresTools: ToolDef[] = [
       const a = args as { server?: string };
       return withSession(deps, a.server, async (s, srv) => {
         const dir = srv.adpixDir;
-        const notInstalled = await ensureInstalled(s, dir);
+        const notInstalled = await ensureInstalled(s, dir, srv.name);
         if (notInstalled) return notInstalled;
         const c = await pgCtx(s, dir);
 
@@ -161,7 +160,7 @@ export const postgresTools: ToolDef[] = [
       const a = args as { server?: string; memoryBudgetMB?: number; maxConnections: number; diskType: "ssd" | "hdd"; coLocated: boolean; apply: boolean };
       return withSession(deps, a.server, async (s, srv) => {
         const dir = srv.adpixDir;
-        const notInstalled = await ensureInstalled(s, dir);
+        const notInstalled = await ensureInstalled(s, dir, srv.name);
         if (notInstalled) return notInstalled;
         const c = await pgCtx(s, dir);
 
@@ -230,7 +229,7 @@ export const postgresTools: ToolDef[] = [
       const a = args as { server?: string; apply: boolean };
       return withSession(deps, a.server, async (s, srv) => {
         const dir = srv.adpixDir;
-        const notInstalled = await ensureInstalled(s, dir);
+        const notInstalled = await ensureInstalled(s, dir, srv.name);
         if (notInstalled) return notInstalled;
         const c = await pgCtx(s, dir);
 
@@ -298,7 +297,7 @@ export const postgresTools: ToolDef[] = [
       const a = args as { server?: string; apply: boolean };
       return withSession(deps, a.server, async (s, srv) => {
         const dir = srv.adpixDir;
-        const notInstalled = await ensureInstalled(s, dir);
+        const notInstalled = await ensureInstalled(s, dir, srv.name);
         if (notInstalled) return notInstalled;
         const c = await pgCtx(s, dir);
 
@@ -363,7 +362,7 @@ export const postgresTools: ToolDef[] = [
       const a = args as { server?: string };
       return withSession(deps, a.server, async (s, srv) => {
         const dir = srv.adpixDir;
-        const notInstalled = await ensureInstalled(s, dir);
+        const notInstalled = await ensureInstalled(s, dir, srv.name);
         if (notInstalled) return notInstalled;
         const c = await pgCtx(s, dir);
         const ce = composeCmd(dir);
@@ -399,7 +398,7 @@ export const postgresTools: ToolDef[] = [
       if (!a.confirm) return "REFUSED: restore overwrites the live database. Re-run with confirm:true after double-checking dumpPath.";
       return withSession(deps, a.server, async (s, srv) => {
         const dir = srv.adpixDir;
-        const notInstalled = await ensureInstalled(s, dir);
+        const notInstalled = await ensureInstalled(s, dir, srv.name);
         if (notInstalled) return notInstalled;
         const c = await pgCtx(s, dir);
         const exists = await s.exec(`test -f ${shq(dir)}/${shq(a.dumpPath)} && echo yes || echo no`);
@@ -442,7 +441,7 @@ export const postgresTools: ToolDef[] = [
       const a = args as { server?: string; mode: string; replicaCIDR: string; slotName: string; apply: boolean; confirm: boolean };
       return withSession(deps, a.server, async (s, srv) => {
         const dir = srv.adpixDir;
-        const notInstalled = await ensureInstalled(s, dir);
+        const notInstalled = await ensureInstalled(s, dir, srv.name);
         if (notInstalled) return notInstalled;
         const c = await pgCtx(s, dir);
         const inRec = (await psql(s, dir, c, "SELECT pg_is_in_recovery()")).stdout.trim() === "t";
@@ -542,7 +541,7 @@ export const postgresTools: ToolDef[] = [
       const a = args as { server?: string; action: string; skipBackup: boolean };
       return withSession(deps, a.server, async (s, srv) => {
         const dir = srv.adpixDir;
-        const notInstalled = await ensureInstalled(s, dir);
+        const notInstalled = await ensureInstalled(s, dir, srv.name);
         if (notInstalled) return notInstalled;
         const c = await pgCtx(s, dir);
         const ce = composeCmd(dir);

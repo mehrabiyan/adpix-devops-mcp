@@ -28,7 +28,7 @@ function fakeDeps(responses: Responder[], srvOverrides: Partial<ServerConfig> = 
           return { code: 0, stdout: "", stderr: "", ...r };
         }
       }
-      return { code: 0, stdout: "", stderr: "" };
+      return { code: 0, stdout: /com\.docker\.compose\.project=.* -q/.test(cmd) ? "1 1" : /test -d .*\.git/.test(cmd) ? "yes" : "", stderr: "" };
     },
   };
   const deps: Deps = {

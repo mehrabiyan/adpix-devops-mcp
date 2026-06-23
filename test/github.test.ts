@@ -17,7 +17,7 @@ type Responder = [RegExp, Partial<ExecResult> | ((cmd: string) => Partial<ExecRe
 
 function match(responses: Responder[], cmd: string): ExecResult {
   for (const [re, res] of responses) if (re.test(cmd)) return { code: 0, stdout: "", stderr: "", ...(typeof res === "function" ? res(cmd) : res) };
-  return { code: 0, stdout: "", stderr: "" };
+  return { code: 0, stdout: /com\.docker\.compose\.project=.* -q/.test(cmd) ? "1 1" : /&& echo yes \|\| echo no/.test(cmd) ? "yes" : "", stderr: "" };
 }
 
 // `responses` answer the prod SESSION; `localResponses` answer the MCP (deps.local) — where the

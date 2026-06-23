@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { withSession } from "../deps.js";
-import { composeCmd, notInstalledMsg, waitHealthyCmd, uploadFile } from "../adpix.js";
+import { composeCmd, requireStack, waitHealthyCmd, uploadFile } from "../adpix.js";
 import { shq, lastLines } from "../util.js";
 import type { ToolDef } from "./types.js";
 
@@ -36,7 +36,9 @@ export const opsTools: ToolDef[] = [
         if ((a.action === "stop" || a.action === "restart") && !a.confirm) {
           return `REFUSED: ${a.action} ${a.service} on ${srv.name} interrupts live traffic for that container. Re-run with confirm:true.`;
         }
-        const ni = await notInstalledMsg(s, dir, srv.name);
+        // `start` only needs the stack cloned/created (it brings stopped containers up); status/stop/
+        // restart act on live containers, so require the stack running for a clear message.
+        const ni = await requireStack(s, dir, srv.name, { needRunning: a.action !== "start" });
         if (ni) return ni;
         if (a.action === "status") {
           const r = await s.exec(`${composeCmd(dir)} ps ${svc} 2>&1`, { timeoutMs: 60_000 });

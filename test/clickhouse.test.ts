@@ -32,7 +32,7 @@ function fakeDeps(responses: Responder[]) {
       for (const [re, res] of responses) {
         if (re.test(cmd)) return { code: 0, stdout: "", stderr: "", ...(typeof res === "function" ? res(cmd) : res) };
       }
-      return { code: 0, stdout: "", stderr: "" };
+      return { code: 0, stdout: /com\.docker\.compose\.project=.* -q/.test(cmd) ? "1 1" : /test -d .*\.git/.test(cmd) ? "yes" : "", stderr: "" };
     },
   };
   return { deps: { resolve: () => server, connect: async () => session, local: async () => ({ code: 0, stdout: "", stderr: "" }) } as Deps, calls };
@@ -100,7 +100,7 @@ describe("clickhouse tools registered", () => {
 describe("ch_health", () => {
   it("explains when AdPix isn't installed", async () => {
     const { deps } = fakeDeps([[/test -d .*\.git.* && echo yes/, { stdout: "no" }]]);
-    expect(await tool("ch_health").handler(deps, {})).toContain("install it first");
+    expect(await tool("ch_health").handler(deps, {})).toContain("not installed");
   });
 
   it("renders a healthy single-node snapshot", async () => {

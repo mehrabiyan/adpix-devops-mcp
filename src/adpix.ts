@@ -14,14 +14,48 @@ export const HEALTH_ROUTES: { path: string; service: string }[] = [
 ];
 
 /**
- * Guard for ops that cd into the AdPix checkout (logs/restart/container control). Returns a clear
- * "not installed" message when the checkout is absent — instead of the raw `cd: No such file or
- * directory` that confuses operators on a freshly-added-but-not-yet-provisioned server. null = ok.
+ * The deployment state of a stack on a server, in three tiers: cloned (repo present) →
+ * running (≥1 compose container up) → (callers add health on top). This is THE distinction the
+ * day-2 tools need: a failed/partial deploy leaves the repo cloned but NO containers, so a `.git`
+ * check alone passes while `backup`/`restart`/db-queries then fail with cryptic "No such container".
  */
+export interface StackState { cloned: boolean; running: number; total: number; up: boolean }
+
+export async function stackState(s: Session, dir: string, project: string = COMPOSE_PROJECT): Promise<StackState> {
+  if ((await s.exec(`test -d ${shq(dir + "/.git")} && echo yes || echo no`)).stdout.trim() !== "yes")
+    return { cloned: false, running: 0, total: 0, up: false };
+  // count this compose project's containers (running vs total) — independent of the checkout dir
+  const r = await s.exec(
+    `R=$(docker ps --filter label=com.docker.compose.project=${shq(project)} -q 2>/dev/null | wc -l | tr -d ' '); ` +
+      `T=$(docker ps -a --filter label=com.docker.compose.project=${shq(project)} -q 2>/dev/null | wc -l | tr -d ' '); printf '%s %s' "$R" "$T"`,
+    { timeoutMs: 30_000 }
+  );
+  const [run = 0, tot = 0] = r.stdout.trim().split(/\s+/).map((n) => parseInt(n, 10) || 0);
+  return { cloned: true, running: run, total: tot, up: run > 0 };
+}
+
+/**
+ * Guard for tools that operate on a stack. `needRunning:false` (default) only requires the repo to
+ * be cloned (update/status/install-ish); `needRunning:true` requires live containers (backup,
+ * restart, logs, db queries, container control). Returns a clear remediation message, or null when ok.
+ */
+export async function requireStack(
+  s: Session,
+  dir: string,
+  server: string,
+  opts: { project?: string; needRunning?: boolean; product?: string } = {}
+): Promise<string | null> {
+  const product = opts.product ?? "AdPix";
+  const st = await stackState(s, dir, opts.project ?? COMPOSE_PROJECT);
+  if (!st.cloned) return `${product} is not installed at ${dir} on ${server}. Provision it first — Deploys → Install (or run adpix_install / tm_install) — then retry.`;
+  if (opts.needRunning && !st.up)
+    return `${product} is installed at ${dir} on ${server} but NOT running (0 of ${st.total} containers are up). A failed or partial deploy leaves the repo cloned with no containers. Bring it up by re-running Install (idempotent — Deploys → Install / adpix_install), or start it with container_control. Then retry.`;
+  return null;
+}
+
+/** Back-compat thin wrapper: cloned-only guard (no running requirement). */
 export async function notInstalledMsg(s: Session, dir: string, server: string): Promise<string | null> {
-  const r = await s.exec(`test -d ${shq(dir + "/.git")} && echo yes || echo no`);
-  if (r.stdout.trim() === "yes") return null;
-  return `AdPix is not installed at ${dir} on ${server}. Provision it first — Deploys → Install (or run adpix_install) — then retry.`;
+  return requireStack(s, dir, server, { needRunning: false });
 }
 
 /** The production compose invocation, run from the AdPix checkout dir. */
