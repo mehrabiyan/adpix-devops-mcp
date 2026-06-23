@@ -83,6 +83,11 @@ function authComposeYaml(pem: string, opts: { domain?: string; dir?: string } = 
     `      DB_DIR: /data\n` +
     `      NODE_ENV: production\n` +
     `      TRUST_PROXY: "1"\n` +
+    // Redirect origins for the pre-registered OIDC clients (tm-console, analytics-console). Without
+    // these the IdP falls back to localhost/defaults → "Invalid redirect_uri" for real deployments.
+    `      CONSOLE_ORIGIN: \${CONSOLE_ORIGIN:-}\n` +
+    `      ANALYTICS_ORIGIN: \${ANALYTICS_ORIGIN:-}\n` +
+    `      ANALYTICS_API_ORIGIN: \${ANALYTICS_API_ORIGIN:-}\n` +
     `      BOOTSTRAP_ADMIN_EMAIL: \${BOOTSTRAP_ADMIN_EMAIL:-}\n` +
     `      BOOTSTRAP_ADMIN_PASSWORD: \${BOOTSTRAP_ADMIN_PASSWORD:-}\n` +
     `      OIDC_PRIVATE_KEY_PEM: |\n${body}\n` +
@@ -167,14 +172,17 @@ export function tmCompose(dir: string): string {
   return `cd ${shq(dir)} && docker compose -p ${TM_PROJECT} -f deploy/docker-compose.yml --env-file deploy/.env`;
 }
 
-/** Single remote loop that waits for both the api (8686) and edge (8585) /healthz to answer 200. */
+/** Single remote loop that waits for the api (8686, host-published) and edge to be healthy. The edge
+ *  (8585) is intentionally NOT host-published — it sits behind varnish — so a host-direct curl is a
+ *  false negative; we accept a host probe if it answers, else confirm the edge CONTAINER is running. */
 export function tmHealthGate(timeoutSec = 150): string {
   const tries = Math.max(1, Math.floor(timeoutSec / 5));
   return (
-    `a=000; e=000; for i in $(seq 1 ${tries}); do ` +
+    `a=000; e=down; for i in $(seq 1 ${tries}); do ` +
     `a=$(curl -fsS -o /dev/null -m 5 -w '%{http_code}' http://localhost:8686/healthz 2>/dev/null || echo 000); ` +
-    `e=$(curl -fsS -o /dev/null -m 5 -w '%{http_code}' http://localhost:8585/healthz 2>/dev/null || echo 000); ` +
-    `if [ "$a" = 200 ] && [ "$e" = 200 ]; then echo "healthy after ~$((i*5))s (api+edge 200)"; exit 0; fi; sleep 5; done; ` +
+    `ec=$(curl -fsS -o /dev/null -m 5 -w '%{http_code}' http://localhost:8585/healthz 2>/dev/null || echo 000); ` +
+    `case "$ec" in 2*) e=up ;; *) docker inspect -f '{{.State.Running}}' ${TM_PROJECT}-edge-1 2>/dev/null | grep -qi true && e=up || e=down ;; esac; ` +
+    `if [ "$a" = 200 ] && [ "$e" = up ]; then echo "healthy after ~$((i*5))s (api 200, edge up behind varnish)"; exit 0; fi; sleep 5; done; ` +
     `echo "NOT healthy after ${timeoutSec}s (api=$a edge=$e)"; exit 1`
   );
 }
@@ -332,12 +340,15 @@ export const tagmanagerTools: ToolDef[] = [
       branch: z.string().default("main"),
       domain: z.string().optional().describe("Public domain for the account center (HTTPS). Omit → http on the server IP:port."),
       adminEmail: z.string().optional().describe("Bootstrap platform-admin email (default admin@<domain or host>)"),
+      consoleOrigin: z.string().optional().describe("Tag Manager console origin, e.g. https://tag.adpix.io — so the IdP registers tm-console's redirect URIs (else Invalid redirect_uri)"),
+      analyticsOrigin: z.string().optional().describe("Analytics console origin, e.g. https://app.adpix.io — registers analytics-console's redirect URIs"),
+      analyticsApiOrigin: z.string().optional().describe("Analytics BFF/api origin (often same as analyticsOrigin) — registers the api callback redirect"),
       port: z.number().int().min(1).max(65535).default(9696),
       timeoutSeconds: z.number().int().min(60).max(7200).default(2400),
     },
     annotations: { idempotentHint: true, openWorldHint: true },
     handler: async (deps, args) => {
-      const a = args as { server?: string; dir: string; repoUrl: string; branch: string; domain?: string; adminEmail?: string; port: number; timeoutSeconds: number };
+      const a = args as { server?: string; dir: string; repoUrl: string; branch: string; domain?: string; adminEmail?: string; consoleOrigin?: string; analyticsOrigin?: string; analyticsApiOrigin?: string; port: number; timeoutSeconds: number };
       return withSession(deps, a.server, async (s, srv) => {
         const dir = a.dir;
         const sections: string[] = [];
@@ -366,7 +377,12 @@ export const tagmanagerTools: ToolDef[] = [
 
         await uploadFile(s, `${dir}/deploy/Dockerfile.auth`, TM_AUTH_DOCKERFILE, "644");
         await uploadFile(s, `${dir}/deploy/docker-compose.auth.yml`, authComposeYaml(pem, { domain: a.domain, dir }), "600");
-        await uploadFile(s, `${dir}/deploy/.env.account`, `AUTH_ISSUER=${issuer}\nAUTH_PORT=${a.port}\nBOOTSTRAP_ADMIN_EMAIL=${adminEmail}\nBOOTSTRAP_ADMIN_PASSWORD=${adminPw}\n`, "600");
+        const origins = [
+          a.consoleOrigin ? `CONSOLE_ORIGIN=${a.consoleOrigin}` : "",
+          a.analyticsOrigin ? `ANALYTICS_ORIGIN=${a.analyticsOrigin}` : "",
+          a.analyticsApiOrigin ? `ANALYTICS_API_ORIGIN=${a.analyticsApiOrigin}` : "",
+        ].filter(Boolean).join("\n");
+        await uploadFile(s, `${dir}/deploy/.env.account`, `AUTH_ISSUER=${issuer}\nAUTH_PORT=${a.port}\n${origins ? origins + "\n" : ""}BOOTSTRAP_ADMIN_EMAIL=${adminEmail}\nBOOTSTRAP_ADMIN_PASSWORD=${adminPw}\n`, "600");
         // With a domain, front the IdP with Caddy: automatic Let's Encrypt (HTTP-01/TLS-ALPN) + renew.
         if (a.domain) {
           await uploadFile(s, `${dir}/deploy/Caddyfile.account`, `${a.domain} {\n\treverse_proxy auth:9696\n}\n`, "644");
@@ -462,17 +478,21 @@ export const tagmanagerTools: ToolDef[] = [
         });
         if (!rows.length) problems.push("no containers running");
 
+        // api (8686) + varnish (8080) are host-published; the edge (8585) is NOT — it sits behind
+        // varnish — so a host-direct probe there is a false negative. For edge, accept the host probe
+        // if it answers, else fall back to "is the edge container running". Varnish 404 at / is fine.
         const probe = await s.exec(
           `for p in 8686:/healthz 8585:/healthz 8080:/; do ` +
             `port=\${p%%:*}; path=\${p#*:}; ` +
             `code=$(curl -fsS -o /dev/null -m 5 -w '%{http_code}' http://localhost:$port$path 2>/dev/null || echo 000); ` +
+            `if [ "$port" = 8585 ] && ! echo "$code" | grep -q '^[23]'; then docker inspect -f '{{.State.Running}}' ${TM_PROJECT}-edge-1 2>/dev/null | grep -qi true && code=running; fi; ` +
             `echo "$port $code"; done`,
           { timeoutMs: 60_000 }
         );
         const probeRows = probe.stdout.trim().split("\n").map((l) => {
           const [port = "?", code = "000"] = l.trim().split(/\s+/);
           const svc = port === "8686" ? "api" : port === "8585" ? "edge" : "varnish";
-          const ok = /^[23]/.test(code);
+          const ok = /^[23]/.test(code) || code === "running" || (port === "8080" && code === "404");
           if (!ok) problems.push(`${svc} (:${port}) → HTTP ${code}`);
           return [svc, port, code, ok ? "ok" : "PROBLEM"];
         });

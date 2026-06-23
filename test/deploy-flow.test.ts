@@ -137,6 +137,17 @@ describe("B. account_install embeds a stable OIDC key so the IdP can boot under 
     expect(out).toMatch(/ready \(HTTPS 200\)/);
   });
 
+  it("registers the OIDC redirect origins so RPs don't get Invalid redirect_uri", async () => {
+    const { deps, calls } = accountDeps([[/cat .*oidc_key\.pem/, { stdout: PEM }], [/9696\/healthz/, { code: 0, stdout: "healthy" }]]);
+    await tool("account_install").handler(deps, { ...ACCOUNT_ARGS, consoleOrigin: "https://tag.adpix.io", analyticsOrigin: "https://app.adpix.io", analyticsApiOrigin: "https://app.adpix.io" });
+    expect(composeYaml(calls)).toContain("CONSOLE_ORIGIN");   // the compose passes it through to apps/auth
+    const envCall = calls.find((c) => c.includes(".env.account") && c.includes("base64 -d"));
+    const env = Buffer.from(envCall?.match(/echo '([A-Za-z0-9+/=]+)'/)?.[1] ?? "", "base64").toString("utf8");
+    expect(env).toContain("CONSOLE_ORIGIN=https://tag.adpix.io");
+    expect(env).toContain("ANALYTICS_ORIGIN=https://app.adpix.io");
+    expect(env).toContain("ANALYTICS_API_ORIGIN=https://app.adpix.io");
+  });
+
   it("on a health-gate failure, surfaces the auth container logs (not a bare 'NOT healthy')", async () => {
     const { deps } = accountDeps([
       [/cat .*oidc_key\.pem/, { stdout: PEM }],
@@ -172,6 +183,23 @@ describe("C. a broken existing checkout is normalized, then re-cloned if it stil
     expect(calls.some((c) => /rm -rf '\/opt\/adpix'/.test(c))).toBe(true);             // stale checkout wiped
     expect(out).toContain("Repo reset");
     expect(out).toContain("http://10.0.0.3");                  // ...and the deploy completed
+  });
+
+  it("adpix_install REFUSES to wipe a checkout of a DIFFERENT repo (cross-product data-loss guard)", async () => {
+    let n = 0;
+    const { deps, calls } = fakeDeps(
+      [
+        [/command -v git/, { code: 0 }],
+        [/git (clone|fetch)/, () => { n++; return n === 1 ? { code: 128, stderr: "could not read Username for 'https://github.com'" } : { code: 1, stderr: "git@github.com: Permission denied (publickey)." }; }],
+        [/test -d.*\.git.* && echo yes/, { stdout: "yes" }],
+        [/git -C .* remote get-url origin/, { stdout: "git@github.com:mehrabiyan/AdpixTagManager.git" }],  // a DIFFERENT product's checkout
+      ],
+      KEY_AUTHORIZED,
+    );
+    const out = await tool("adpix_install").handler(deps, { dir: "/opt/adpix-tagmanager", branch: "main", repoUrl: "https://github.com/mehrabiyan/adpix.git", skipPreflight: true, timeoutSeconds: 600, deployKey: false });
+    expect(out).toMatch(/REFUSED — wrong checkout/);
+    expect(out).toMatch(/AdpixTagManager, not mehrabiyan\/adpix/);
+    expect(calls.some((c) => /rm -rf '\/opt\/adpix-tagmanager'/.test(c))).toBe(false);   // never wiped it
   });
 
   it("adpix_install update path re-points origin at the SSH url before fetching", async () => {

@@ -3,6 +3,17 @@ import type { Deps } from "../src/deps.js";
 import type { ServerConfig } from "../src/registry.js";
 import type { ExecResult, Session } from "../src/ssh.js";
 import { allTools } from "../src/tools/index.js";
+import { tmHealthGate } from "../src/tools/tagmanager.js";
+
+describe("tmHealthGate (edge is behind varnish, not host-published)", () => {
+  it("accepts the edge when its container is running even if the host probe fails", () => {
+    const g = tmHealthGate(60);
+    expect(g).toContain("localhost:8686/healthz");                          // api stays a host probe
+    expect(g).toContain("docker inspect -f '{{.State.Running}}' adpix-tm-edge-1");  // edge fallback
+    expect(g).toContain("edge up behind varnish");
+    expect(g).not.toMatch(/\[ "\$a" = 200 \] && \[ "\$e" = 200 \]/);        // no longer requires a host 200 on edge
+  });
+});
 
 const tool = (name: string) => {
   const t = allTools.find((t) => t.name === name);

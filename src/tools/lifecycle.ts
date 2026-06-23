@@ -105,6 +105,7 @@ export const lifecycleTools: ToolDef[] = [
       "First run builds images — expect 10–25 minutes.",
     schema: {
       server: serverParam,
+      dir: z.string().optional().describe("Checkout dir on the server (default: the server's registered adpixDir). Keep ONE product per directory — /opt/adpix for Analytics."),
       domain: z
         .string()
         .optional()
@@ -125,11 +126,11 @@ export const lifecycleTools: ToolDef[] = [
     annotations: { idempotentHint: true, openWorldHint: true },
     handler: async (deps, args) => {
       const a = args as {
-        server?: string; domain?: string; adminEmail?: string; branch: string;
+        server?: string; dir?: string; domain?: string; adminEmail?: string; branch: string;
         repoUrl: string; deployKey: boolean; skipPreflight: boolean; timeoutSeconds: number;
       };
       return withSession(deps, a.server, async (s, srv) => {
-        const dir = srv.adpixDir;
+        const dir = a.dir || srv.adpixDir;
         const sections: string[] = [];
 
         if (!a.skipPreflight) {
@@ -190,6 +191,14 @@ export const lifecycleTools: ToolDef[] = [
         if (clone.code !== 0 && keyEnv) {
           const had = await s.exec(`test -d ${shq(dir + "/.git")} && echo yes || echo no`);
           if (/yes/.test(had.stdout)) {
+            // Data-loss guard: only wipe a checkout of THIS repo. If adpixDir was (mis)pointed at another
+            // product's checkout (e.g. /opt/adpix-tagmanager), refuse — never rm -rf an arbitrary dir.
+            const origin = (await s.exec(`git -C ${shq(dir)} remote get-url origin 2>/dev/null`)).stdout.trim();
+            const want = parseGithubRemote(a.repoUrl);
+            const have = parseGithubRemote(origin);
+            if (want && have && (want.owner !== have.owner || want.repo !== have.repo)) {
+              return sections.join("\n\n") + `\n\n## REFUSED — wrong checkout at ${dir}\nThat directory is a checkout of ${have.owner}/${have.repo}, not ${want.owner}/${want.repo}. Refusing to wipe it (one product per directory). Pass a clean dir= (e.g. /opt/adpix) or fix the server's adpixDir.`;
+            }
             await s.exec(`[ -f ${shq(dir + "/.env")} ] && cp ${shq(dir + "/.env")} /tmp/adpix-reclone.env 2>/dev/null; rm -rf ${shq(dir)}`, { timeoutMs: 60_000 });
             clone = await s.exec(cloneCmd(cloneUrl, keyEnv, postCloneCfg), { timeoutMs: 300_000 });
             await s.exec(`[ -f /tmp/adpix-reclone.env ] && mv /tmp/adpix-reclone.env ${shq(dir + "/.env")} 2>/dev/null; true`, { timeoutMs: 30_000 });
