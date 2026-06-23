@@ -477,6 +477,24 @@ function mcpUpdateCard() {
   };
   card.querySelector(".refresh").onclick = load; load(); return card;
 }
+function aiKeyCard() {
+  const card = el(`<div style="${cardOpen}"><div style="${cardHead}">AI assistant · Anthropic key</div><div class="card-pad body"><div class="skel" style="width:50%"></div></div></div>`);
+  const body = card.querySelector(".body");
+  const load = async () => {
+    try {
+      const st = await api("/api/settings/anthropic"); const owner = S.me.role === "owner";
+      const status = st.configured ? pill(st.source === "env" ? "set via host env" : "configured", "pos") : pill("not configured", "idle");
+      body.innerHTML = `<div class="muted" style="font-size:12px;line-height:1.5;margin-bottom:12px">Powers the <b>Assistant</b> chat. Stored mode-600 on the MCP host and never shown again; a key set here overrides the host environment. Chat costs API tokens — use a key with a spend limit.</div>
+        <div style="margin-bottom:12px">${status}</div>
+        ${owner ? `<div style="display:flex;gap:8px"><input class="input k" type="password" placeholder="sk-ant-..." style="flex:1"><button class="btn btn-primary save">Save</button>${st.source === "panel" ? `<button class="btn rm">Remove</button>` : ""}</div>` : `<div class="muted" style="font-size:12px">Owner-only to change.</div>`}`;
+      if (owner) {
+        body.querySelector(".save").onclick = async () => { const k = body.querySelector(".k").value.trim(); if (!k) return toast("Paste a key", true); try { await api("/api/settings/anthropic", { method: "POST", body: JSON.stringify({ key: k }) }); toast("Saved — the Assistant is ready"); load(); } catch (e) { toast(e.message, true); } };
+        const rm = body.querySelector(".rm"); if (rm) rm.onclick = async () => { try { await api("/api/settings/anthropic", { method: "DELETE" }); toast("Removed"); load(); } catch (e) { toast(e.message, true); } };
+      }
+    } catch (e) { body.innerHTML = `<pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre>`; }
+  };
+  load(); return card;
+}
 function smtpCard() {
   const servers = (S.fleet?.nodes || []).map((n) => n.name);
   const srvField = servers.length ? selField("server", servers, "(default server)") : `<input class="input" data-k="server" placeholder="(default server)">`;
@@ -510,7 +528,8 @@ SCREENS.settings = (c) => {
   c.appendChild(mcpUpdateCard());
   const grid = el(`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px;align-items:start"></div>`); c.appendChild(grid);
   const a = el(`<div style="display:flex;flex-direction:column;gap:16px"></div>`), b = el(`<div style="display:flex;flex-direction:column;gap:16px"></div>`); grid.append(a, b);
-  a.appendChild(smtpCard());
+  a.appendChild(aiKeyCard());
+  b.appendChild(smtpCard());
   if (S.me.role === "owner") { a.append(adminUsers(), adminSessions()); b.append(adminAudit(), adminKill()); }
   else a.appendChild(el(`<div style="${cardOpen};padding:16px" class="muted">Signed in as <b>${esc(S.me.username)}</b> · role <b>${esc(S.me.role)}</b>. Admin controls are owner-only.</div>`));
 };

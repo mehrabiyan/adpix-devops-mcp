@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, afterAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, afterAll, describe, expect, it, vi } from "vitest";
 import * as os from "node:os";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -8,8 +8,11 @@ import type { Deps } from "../src/deps.js";
 const ACTOR = { role: "owner" as const, scopes: ["*"], username: "admin" };
 
 let home: string;
-beforeAll(() => { home = fs.mkdtempSync(path.join(os.tmpdir(), "adpix-chat-")); process.env.ADPIX_DEVOPS_HOME = home; });
-afterAll(() => { delete process.env.ADPIX_DEVOPS_HOME; fs.rmSync(home, { recursive: true, force: true }); });
+beforeAll(() => { home = fs.mkdtempSync(path.join(os.tmpdir(), "adpix-chat-")); });
+afterAll(() => { fs.rmSync(home, { recursive: true, force: true }); });
+// pin a fresh empty registry home (no stored secret) + no env key, before every test (other test files
+// mutate the shared process.env) — so the no-key path is deterministic.
+beforeEach(() => { process.env.ADPIX_DEVOPS_HOME = home; delete process.env.ANTHROPIC_API_KEY; });
 afterEach(() => { vi.unstubAllGlobals(); delete process.env.ANTHROPIC_API_KEY; });
 
 function fakeDeps() {
@@ -30,7 +33,7 @@ describe("runChat", () => {
     const { deps } = fakeDeps();
     const r = await runChat(deps, { messages: [{ role: "user", content: "hi" }], actor: ACTOR });
     expect(r.error).toBe("no-api-key");
-    expect(r.reply).toMatch(/ANTHROPIC_API_KEY/);
+    expect(r.reply).toMatch(/Settings|Anthropic API key/);
   });
 
   it("runs a read-only tool then returns the model's reply", async () => {

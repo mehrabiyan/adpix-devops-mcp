@@ -26,6 +26,7 @@ import { buildDeployView } from "./aggregate/deploy.js";
 import { buildMcpStatus } from "./aggregate/mcp.js";
 import { buildStacksStatus } from "./aggregate/stacks.js";
 import { runChat } from "./chat.js";
+import { anthropicKeyStatus, setAnthropicKey, clearAnthropicKey } from "./secrets.js";
 import { classifyError } from "./errors.js";
 import { loadRegistry, saveRegistry, findServerByHost } from "../registry.js";
 import { panelMcpKeyPath, ensureMcpKey, saveUploadedKey } from "./keys.js";
@@ -269,6 +270,17 @@ export function createPanelServer(opts: PanelOpts): Server {
         return await handleAdmin(req, res, path, method, { sessions, audit: (t, tg, o) => audit(actor, t, tg, {}, o), getKilled: () => killed, setKilled: (v) => { killed = v; if (v) sessions.revokeAll(); } });
       }
 
+      // ---- Anthropic API key for the Assistant (status visible to all; set/clear owner-only) ----
+      if (path === "/api/settings/anthropic" && method === "GET") { sendJson(res, 200, anthropicKeyStatus()); return; }
+      if (path === "/api/settings/anthropic" && (method === "POST" || method === "DELETE")) {
+        if (actor.role !== "owner") { sendJson(res, 403, { error: "owner only" }); return; }
+        if (method === "DELETE") { clearAnthropicKey(); audit(actor, "settings.anthropic", "", {}, "cleared"); sendJson(res, 200, { ok: true, ...anthropicKeyStatus() }); return; }
+        const b = await readBody(req); const key = String(b.key ?? "").trim();
+        if (!/^sk-ant-/.test(key)) { sendJson(res, 400, { error: "That doesn't look like an Anthropic API key (it should start with sk-ant-)." }); return; }
+        setAnthropicKey(key); audit(actor, "settings.anthropic", "", {}, "set");
+        sendJson(res, 200, { ok: true, ...anthropicKeyStatus() });
+        return;
+      }
       // ---- chat assistant: server-side tool-use loop over READ-ONLY tools ----
       if (path === "/api/chat" && method === "POST") {
         const b = await readBody(req);

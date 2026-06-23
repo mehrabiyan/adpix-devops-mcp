@@ -4,6 +4,7 @@ import { allTools } from "../tools/index.js";
 import { buildCatalog, type CatalogEntry } from "./catalog.js";
 import type { Role } from "./admins.js";
 import { authorize } from "./rbac.js";
+import { getAnthropicKey } from "./secrets.js";
 
 /**
  * Chat gateway. A server-side tool-use loop on the Anthropic Messages API (raw fetch — no SDK
@@ -53,8 +54,8 @@ async function callAnthropic(key: string, body: unknown): Promise<{ content?: an
 }
 
 export async function runChat(deps: Deps, opts: { messages: InMsg[]; actor: ChatActor; audit?: (tool: string, input: unknown) => void }): Promise<{ reply: string; steps: ChatStep[]; error?: string }> {
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) return { reply: "Chat is unavailable — set ANTHROPIC_API_KEY in the MCP server's environment (use a key with a spend limit; chat costs API tokens).", steps: [], error: "no-api-key" };
+  const key = getAnthropicKey();
+  if (!key) return { reply: "Chat is unavailable — set the Anthropic API key in Settings → AI assistant (use a key with a spend limit; chat costs API tokens).", steps: [], error: "no-api-key" };
 
   const cat = buildCatalog();
   const roCat = new Map<string, CatalogEntry>(cat.filter((c) => c.readOnly).map((c) => [c.name, c]));
