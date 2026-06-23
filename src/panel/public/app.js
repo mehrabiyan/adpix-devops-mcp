@@ -143,6 +143,11 @@ SCREENS.dashboard = async (c) => {
   c.querySelector('[data-act="backup"]').onclick = () => action("adpix_backup");
   c.querySelector('[data-act="deploy"]').onclick = async () => { const an = (await ensureStacks()).find((x) => x.stack === "analytics"); if (an && !an.installed) return installForm("analytics"); action("adpix_update"); };
   c.querySelector('[data-act="add"]').onclick = addServerWizard;
+  // first-run CTA: no servers yet → guide to the setup wizard
+  if (!f.nodes.length) {
+    const cta = el(`<div style="${cardOpen};padding:22px 24px;margin-bottom:16px;display:flex;align-items:center;gap:18px;flex-wrap:wrap;border:1.5px solid var(--c-brand);background:var(--c-brand-tint)"><div style="flex:1;min-width:240px"><div style="font-size:16px;font-weight:600;display:flex;align-items:center;gap:9px">${ic("deploys", 18)} Get started — set up your first server</div><div class="muted" style="font-size:13px;margin-top:5px;line-height:1.5">The setup wizard walks you from an empty server to running apps: add a server, authorize the GitHub keys, configure, deploy, and verify — with live URLs at the end.</div></div><button class="btn btn-primary cta">Run setup wizard</button></div>`);
+    cta.querySelector(".cta").onclick = setupWizard; c.appendChild(cta);
+  }
   // KPI cards
   const kpi = [["HEALTHY", f.counts.healthy, "servers", "pos"], ["DEGRADED", f.counts.degraded, "need attention", "warn"], ["DOWN", f.counts.down, "critical", "neg"], ["ACTIVE JOBS", f.counts.activeJobs, "running", "brand"]];
   c.appendChild(el(`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:16px;margin-bottom:16px">${kpi.map(([l, v, s, k]) => `<div style="${cardOpen};padding:18px 18px 18px 20px;position:relative"><div style="position:absolute;inset-block:0;inset-inline-start:0;width:4px;background:var(--c-${k})"></div><div style="color:var(--c-muted);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.6px">${l}</div><div style="display:flex;align-items:baseline;gap:8px;margin-top:10px"><span style="font-size:32px;font-weight:400;letter-spacing:-.5px">${v}</span><span style="font-size:13px;color:var(--c-muted)">${s}</span></div></div>`).join("")}</div>`));
