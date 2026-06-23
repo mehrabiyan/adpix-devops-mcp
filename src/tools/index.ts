@@ -21,6 +21,7 @@ import { stackTools } from "./stack.js";
 import { smtpTools } from "./smtp.js";
 import { doctorTools } from "./doctor.js";
 import { readinessTools } from "./readiness.js";
+import { relocateTools } from "./relocate.js";
 
 export const allTools: ToolDef[] = [
   ...serverTools,
@@ -45,4 +46,5 @@ export const allTools: ToolDef[] = [
   ...smtpTools,
   ...doctorTools,
   ...readinessTools,
+  ...relocateTools,
 ];

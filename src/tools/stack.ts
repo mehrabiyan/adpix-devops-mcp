@@ -73,6 +73,21 @@ const STACKS: Record<string, StackCfg> = {
 export const STACK_META: Record<string, { repoUrl: string; defaultDir?: string; project: string }> =
   Object.fromEntries(Object.entries(STACKS).map(([k, v]) => [k, { repoUrl: v.repoUrl, defaultDir: v.defaultDir, project: v.project({} as Args) }]));
 
+export const STACK_NAMES = Object.keys(STACKS);
+/** Stateless vs stateful services for a stack — reused by service_relocate to pick a safe strategy. */
+export function stackServices(stack: string, a: Partial<Args> = {}): { stateless: string[]; stateful: string[] } {
+  const cfg = STACKS[stack]; if (!cfg) return { stateless: [], stateful: [] };
+  return { stateless: cfg.stateless(a as Args), stateful: cfg.stateful };
+}
+/** The `cd … && docker compose -p … -f …` prefix for a stack on a server, for one-off service ops. */
+export function stackComposeCmd(stack: string, dir: string, a: Partial<Args> = {}): string {
+  return STACKS[stack].compose(dir, a as Args);
+}
+/** The stack's health-gate command (front door / api+edge / auth) for a given checkout dir. */
+export function stackHealthCmd(stack: string, timeoutSec: number, dir: string, a: Partial<Args> = {}): string {
+  const cfg = STACKS[stack]; return cfg.health(timeoutSec, a as Args, cfg.compose(dir, a as Args));
+}
+
 export function stackDir(srv: { adpixDir?: string }, stack: string, dir?: string): string {
   return dir || STACKS[stack].defaultDir || srv.adpixDir || "/opt/adpix";
 }
