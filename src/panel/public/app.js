@@ -899,14 +899,20 @@ async function setupWizard() {
   }
   RENDER.settings = (c) => {
     const apps = deployable();
-    apps.forEach((a) => { W.settings[a.id] = W.settings[a.id] || {}; if (!W.settings[a.id].__server__) W.settings[a.id].__server__ = firstServer(); });
+    apps.forEach((a) => { W.settings[a.id] = W.settings[a.id] || {}; if (!W.settings[a.id].__server__) W.settings[a.id].__server__ = firstServer(); if (a.id === "tagmanager" && W.settings[a.id].dbContainer === undefined) W.settings[a.id].dbContainer = true; });
     const hiddenOf = (a) => new Set(a.settings.filter((st) => st.type === "toggle" && W.settings[a.id][st.key] && st.hides).flatMap((st) => st.hides));
     c.innerHTML = h2("Settings", "Required configuration per app. Stored only for this deploy.") + apps.map((a) => { const hide = hiddenOf(a); return `<div style="border:1px solid var(--c-border);border-radius:11px;padding:14px;margin-bottom:12px"><div style="font-weight:600;font-size:14px;margin-bottom:10px">${esc(a.name)}</div><label class="fld"><span class="lab">deploy to server</span><select class="input" data-srv="${a.id}">${W.servers.map((s) => `<option ${W.settings[a.id].__server__ === s.name ? "selected" : ""}>${esc(s.name)}</option>`).join("")}</select></label>${a.settings.filter((st) => !hide.has(st.key)).map((st) => settingField(a, st)).join("")}</div>`; }).join("");
     c.querySelectorAll("[data-toggle]").forEach((i) => (i.onchange = () => { W.settings[i.dataset.app][i.dataset.k] = i.checked; RENDER.settings(c); }));
     c.querySelectorAll("[data-app][data-k]:not([data-toggle])").forEach((i) => (i.oninput = () => { W.settings[i.dataset.app][i.dataset.k] = i.value.trim(); }));
     c.querySelectorAll("[data-srv]").forEach((s) => (s.onchange = () => { W.settings[s.dataset.srv].__server__ = s.value; }));
   };
-  VALID.settings = () => { for (const a of deployable()) for (const st of a.settings) { if (st.type === "toggle") continue; const skip = st.requiredUnless && (W.settings[a.id] || {})[st.requiredUnless]; if (st.required && !skip && !(W.settings[a.id] || {})[st.key]) return `${a.name}: ${st.label} is required.`; } return true; };
+  const accountSelected = () => deployable().some((a) => a.id === "account");
+  VALID.settings = () => {
+    for (const a of deployable()) for (const st of a.settings) { if (st.type === "toggle") continue; const skip = st.requiredUnless && (W.settings[a.id] || {})[st.requiredUnless]; if (st.required && !skip && !(W.settings[a.id] || {})[st.key]) return `${a.name}: ${st.label} is required.`; }
+    // Tag Manager needs an OIDC issuer — either deploy the Account app (auto-wired) or set it.
+    if (deployable().some((a) => a.id === "tagmanager") && !(W.settings.tagmanager || {}).authIssuer && !accountSelected()) return "Tag Manager needs an account center: also deploy the Account (IdP) app, or set its OIDC issuer.";
+    return true;
+  };
 
   // 5. preflight
   function preItems() {
@@ -923,7 +929,9 @@ async function setupWizard() {
   RENDER.deploy = (c) => {
     c.innerHTML = h2("Deploy", "Installing — first build can take 10–25 min. You can watch the logs below.") + `<div class="dlist"></div>`;
     const dl = c.querySelector(".dlist");
-    deployable().forEach((a) => {
+    const order = { account: 0, analytics: 1, tagmanager: 2 };           // Account first → its issuer wires into TM
+    const accIssuer = () => { const acc = W.settings.account || {}; if (acc.domain) return `https://${acc.domain}`; const host = (W.servers.find((sv) => sv.name === (acc.__server__ || firstServer())) || {}).host; return host ? `http://${host}:9696` : ""; };
+    deployable().slice().sort((x, y) => (order[x.id] ?? 9) - (order[y.id] ?? 9)).forEach((a) => {
       const srv = (W.settings[a.id] || {}).__server__ || firstServer();
       const box = el(`<div style="border:1px solid var(--c-border);border-radius:11px;padding:13px;margin-bottom:10px"><div style="display:flex;align-items:center;gap:9px"><b>${esc(a.name)}</b><span class="mono muted" style="font-size:12px">${esc(srv)}</span><span style="flex:1"></span><span class="dstat">${pill("queued", "idle")}</span></div><div class="dlog" style="display:none;margin-top:10px;font-family:var(--font-mono);font-size:11px;background:var(--c-code-bg);border-radius:8px;padding:10px;max-height:200px;overflow:auto;white-space:pre-wrap"></div></div>`);
       dl.appendChild(box); const log = box.querySelector(".dlog"), stat = box.querySelector(".dstat");
@@ -932,6 +940,7 @@ async function setupWizard() {
       if (d && d.jobId) { stat.innerHTML = pill("running", "warn"); return; }
       const args = {}; const s = W.settings[a.id] || {}; for (const k in s) if (k !== "__server__" && s[k]) args[k] = s[k];
       args.server = srv; args.branch = "main"; if (a.id === "analytics") args.deployKey = true;
+      if (a.id === "tagmanager" && !args.authIssuer) { const iss = accIssuer(); if (iss) args.authIssuer = iss; } // auto-wire from the Account app
       W.deploy[a.id] = { starting: true };
       startJob(a.installTool, args).then((r) => {
         W.deploy[a.id] = { jobId: r.job.id }; log.style.display = "block"; stat.innerHTML = pill("running", "warn");

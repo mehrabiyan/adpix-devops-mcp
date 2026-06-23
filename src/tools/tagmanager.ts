@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { withSession } from "../deps.js";
+import type { Deps } from "../deps.js";
 import type { Session } from "../ssh.js";
 import { uploadFile } from "../adpix.js";
 import { shq, redactSecrets, lastLines, parseComposePs, table } from "../util.js";
@@ -39,6 +40,73 @@ const TM_DB_OVERRIDE_YAML =
   `        condition: service_healthy\n` +
   `volumes:\n` +
   `  tmdbdata: {}\n`;
+
+/** Account/IdP (apps/auth) as a self-contained container. Mirrors deploy/Dockerfile.api; uses embedded
+ *  PGlite (DB_DIR volume) so it needs no external DB, and auto-migrates on boot. Project: adpix-account. */
+const TM_AUTH_DOCKERFILE =
+  `FROM node:22-alpine\n` +
+  `RUN corepack enable\n` +
+  `WORKDIR /app\n` +
+  `COPY . .\n` +
+  `RUN pnpm install --prod=false\n` +
+  `EXPOSE 9696\n` +
+  `CMD ["node", "--experimental-strip-types", "apps/auth/src/server.ts"]\n`;
+const TM_AUTH_COMPOSE_YAML =
+  `services:\n` +
+  `  auth:\n` +
+  `    build:\n` +
+  `      context: ..\n` +
+  `      dockerfile: deploy/Dockerfile.auth\n` +
+  `    restart: unless-stopped\n` +
+  `    environment:\n` +
+  `      AUTH_PORT: "9696"\n` +
+  `      AUTH_ISSUER: \${AUTH_ISSUER:?set AUTH_ISSUER in deploy/.env.account}\n` +
+  `      DB_DIR: /data\n` +
+  `      NODE_ENV: production\n` +
+  `      BOOTSTRAP_ADMIN_EMAIL: \${BOOTSTRAP_ADMIN_EMAIL:-}\n` +
+  `      BOOTSTRAP_ADMIN_PASSWORD: \${BOOTSTRAP_ADMIN_PASSWORD:-}\n` +
+  `    ports:\n` +
+  `      - "\${AUTH_PORT:-9696}:9696"\n` +
+  `    volumes:\n` +
+  `      - authdata:/data\n` +
+  `    healthcheck:\n` +
+  `      test: ["CMD-SHELL", "wget -q -O- http://localhost:9696/healthz >/dev/null 2>&1 || exit 1"]\n` +
+  `      interval: 5s\n` +
+  `      timeout: 3s\n` +
+  `      retries: 24\n` +
+  `volumes:\n` +
+  `  authdata: {}\n`;
+
+/**
+ * Clone (or fast-forward) the AdpixTagManager repo, using the ONE shared MCP deploy key — the
+ * same checkout serves the delivery core (tm_install) AND the Account/IdP (account_install).
+ * Pushes a "## Checkout" section on success; returns null, or a halt message to return verbatim.
+ */
+async function checkoutTmRepo(deps: Deps, s: Session, dir: string, repoUrl: string, branch: string, srvName: string, sections: string[], toolName: string): Promise<string | null> {
+  await s.exec("command -v git >/dev/null || (apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git ca-certificates)", { timeoutMs: 300_000 });
+  const cloneCmd = (url: string, kEnv: string, postCfg: string) =>
+    `if [ -d ${shq(dir + "/.git")} ]; then cd ${shq(dir)} && ${kEnv}git fetch origin ${shq(branch)} && git checkout ${shq(branch)} && ${kEnv}git pull --ff-only origin ${shq(branch)}; ` +
+    `else mkdir -p $(dirname ${shq(dir)}) && ${kEnv}git clone -b ${shq(branch)} ${shq(url)} ${shq(dir)}${postCfg}; fi`;
+  const useKey = /^(git@|ssh:\/\/)/.test(repoUrl);
+  let cloneUrl = repoUrl, keyEnv = "", postCfg = "";
+  const halt = `\n\n(Nothing installed yet — add the key above to the repo's Deploy keys ONCE, then re-run ${toolName}. Every future server reuses it.)`;
+  const applyKey = async (): Promise<boolean> => {
+    const k = await ensureSharedDeployKey(deps, s, toSshUrl(repoUrl) ?? repoUrl, "adpix_tm");
+    if (!k.authorized) { sections.push(`## Repo is private — add ONE deploy key (reused for every server)\n${sharedKeyInstructions(k)}`); return false; }
+    cloneUrl = k.sshUrl; keyEnv = gitSshEnv(k.prodKeyPath); postCfg = ` && git -C ${shq(dir)} config core.sshCommand ${shq(coreSshCommand(k.prodKeyPath))}`;
+    sections.push(`## Repo access\nShared read-only deploy key (managed on the MCP) authorized for ${k.owner}/${k.repo}; distributed to ${srvName} and cloning over SSH.`);
+    return true;
+  };
+  if (useKey && !(await applyKey())) return sections.join("\n\n") + halt;
+  let clone = await s.exec(cloneCmd(cloneUrl, keyEnv, postCfg), { timeoutMs: 300_000 });
+  if (clone.code !== 0 && !useKey) {
+    const authish = /could not read Username|Authentication failed|terminal prompts disabled|repository not found|Permission denied|fatal: Could not read/i.test(clone.stderr + clone.stdout);
+    if (authish) { if (!(await applyKey())) return sections.join("\n\n") + halt; clone = await s.exec(cloneCmd(cloneUrl, keyEnv, postCfg), { timeoutMs: 300_000 }); }
+  }
+  if (clone.code !== 0) return (sections.length ? sections.join("\n\n") + "\n\n" : "") + `## Checkout FAILED (exit ${clone.code})\n${lastLines(clone.stderr || clone.stdout, 30)}`;
+  sections.push(`## Checkout\n${cloneUrl} @ ${branch} → ${dir}`);
+  return null;
+}
 const TM_PROJECT = "adpix-tm";
 
 /** The Tag Manager delivery core (deploy/docker-compose.yml). api+edge+varnish are the serving services. */
@@ -133,33 +201,8 @@ export const tagmanagerTools: ToolDef[] = [
           return `Docker (with the compose plugin) isn't available on ${srv.name}. Install Docker first (adpix_install sets it up on an AdPix host), then re-run tm_install.`;
         }
 
-        await s.exec("command -v git >/dev/null || (apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git ca-certificates)", { timeoutMs: 300_000 });
-
-        // Private repo: the ONE shared deploy key managed on the MCP (added to GitHub once, distributed
-        // to each server). keyName "adpix_tm" → /root/.ssh/adpix_tm_deploy_ed25519 (distinct from AdPix's).
-        const cloneCmd = (url: string, kEnv: string, postCfg: string) =>
-          `if [ -d ${shq(dir + "/.git")} ]; then cd ${shq(dir)} && ${kEnv}git fetch origin ${shq(a.branch)} && git checkout ${shq(a.branch)} && ${kEnv}git pull --ff-only origin ${shq(a.branch)}; ` +
-          `else mkdir -p $(dirname ${shq(dir)}) && ${kEnv}git clone -b ${shq(a.branch)} ${shq(url)} ${shq(dir)}${postCfg}; fi`;
-        const useKey = /^(git@|ssh:\/\/)/.test(a.repoUrl);
-        let cloneUrl = a.repoUrl, keyEnv = "", postCfg = "";
-        const applyKey = async (): Promise<boolean> => {
-          const k = await ensureSharedDeployKey(deps, s, toSshUrl(a.repoUrl) ?? a.repoUrl, "adpix_tm");
-          if (!k.authorized) { sections.push(`## Repo is private — add ONE deploy key (reused for every server)\n${sharedKeyInstructions(k)}`); return false; }
-          cloneUrl = k.sshUrl; keyEnv = gitSshEnv(k.prodKeyPath); postCfg = ` && git -C ${shq(dir)} config core.sshCommand ${shq(coreSshCommand(k.prodKeyPath))}`;
-          sections.push(`## Repo access\nShared read-only deploy key (managed on the MCP) authorized for ${k.owner}/${k.repo}; distributed to ${srv.name} and cloning over SSH.`);
-          return true;
-        };
-        if (useKey && !(await applyKey())) return sections.join("\n\n") + "\n\n(Nothing installed yet — add the key above to the repo's Deploy keys ONCE, then re-run tm_install. Every future server reuses it.)";
-        let clone = await s.exec(cloneCmd(cloneUrl, keyEnv, postCfg), { timeoutMs: 300_000 });
-        if (clone.code !== 0 && !useKey) {
-          const authish = /could not read Username|Authentication failed|terminal prompts disabled|repository not found|Permission denied|fatal: Could not read/i.test(clone.stderr + clone.stdout);
-          if (authish) {
-            if (!(await applyKey())) return sections.join("\n\n") + "\n\n(Nothing installed yet — add the key above to the repo's Deploy keys ONCE, then re-run tm_install. Every future server reuses it.)";
-            clone = await s.exec(cloneCmd(cloneUrl, keyEnv, postCfg), { timeoutMs: 300_000 });
-          }
-        }
-        if (clone.code !== 0) return (sections.length ? sections.join("\n\n") + "\n\n" : "") + `## Checkout FAILED (exit ${clone.code})\n${lastLines(clone.stderr || clone.stdout, 30)}`;
-        sections.push(`## Checkout\n${cloneUrl} @ ${a.branch} → ${dir}`);
+        const halt = await checkoutTmRepo(deps, s, dir, a.repoUrl, a.branch, srv.name, sections, "tm_install");
+        if (halt) return halt;
 
         // Optional: provision the control DB as a Postgres container ON THIS server (no external DB).
         let dbPw = "", composeFiles = `-f deploy/docker-compose.yml`;
@@ -220,7 +263,72 @@ export const tagmanagerTools: ToolDef[] = [
         sections.push(
           `## Done\nDelivery core up: api :8686 · edge :8585 · varnish :8080 (PoP cache). ` +
             `Front it with TLS (deploy/nginx.conf) for cdn.adpix.net and route /a/* + /c/* to it. ` +
-            `apps/auth (IdP) is separate — check it with oidc_health.`
+            `The Account/IdP (apps/auth) deploys separately with account_install (or the Setup wizard).`
+        );
+        return sections.join("\n\n");
+      });
+    },
+  },
+
+  {
+    name: "account_install",
+    title: "Install AdPix Account / IdP",
+    description:
+      "Deploy the AdPix Account center (the OIDC identity provider, apps/auth from the Tag Manager repo) as a " +
+      "self-contained container on a server: clone (shared deploy key), write a Dockerfile + compose for apps/auth, " +
+      "build, and bring it up on :9696 with an EMBEDDED database (PGlite — no external DB needed), bootstrapping the " +
+      "first admin and health-gating /healthz. Its issuer URL is what Tag Manager + Analytics use as AUTH_ISSUER.",
+    schema: {
+      server: serverParam,
+      dir: dirParam,
+      repoUrl: z.string().default(TM_REPO_URL),
+      branch: z.string().default("main"),
+      domain: z.string().optional().describe("Public domain for the account center (HTTPS). Omit → http on the server IP:port."),
+      adminEmail: z.string().optional().describe("Bootstrap platform-admin email (default admin@<domain or host>)"),
+      port: z.number().int().min(1).max(65535).default(9696),
+      timeoutSeconds: z.number().int().min(60).max(7200).default(2400),
+    },
+    annotations: { idempotentHint: true, openWorldHint: true },
+    handler: async (deps, args) => {
+      const a = args as { server?: string; dir: string; repoUrl: string; branch: string; domain?: string; adminEmail?: string; port: number; timeoutSeconds: number };
+      return withSession(deps, a.server, async (s, srv) => {
+        const dir = a.dir;
+        const sections: string[] = [];
+        const docker = await s.exec("command -v docker >/dev/null && docker compose version >/dev/null 2>&1 && echo ok || echo no");
+        if (docker.stdout.trim() !== "ok") return `Docker (with the compose plugin) isn't available on ${srv.name}. Install Docker first (adpix_install sets it up), then re-run account_install.`;
+
+        const halt = await checkoutTmRepo(deps, s, dir, a.repoUrl, a.branch, srv.name, sections, "account_install");
+        if (halt) return halt;
+
+        // self-contained IdP: embedded PGlite (DB_DIR volume), stable bootstrap admin, issuer URL.
+        const issuer = a.domain ? `https://${a.domain}` : `http://${srv.host}:${a.port}`;
+        const adminEmail = a.adminEmail || `admin@${a.domain || srv.host}`;
+        const reuse = async (envKey: string) => (await s.exec(`grep -h '^${envKey}=' ${shq(dir + "/deploy/.env.account")} 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\\n'`)).stdout.trim();
+        let adminPw = await reuse("BOOTSTRAP_ADMIN_PASSWORD");
+        if (!adminPw) adminPw = (await s.exec(`openssl rand -hex 18 2>/dev/null || head -c14 /dev/urandom | od -An -tx1 | tr -d ' \\n'`)).stdout.trim();
+
+        await uploadFile(s, `${dir}/deploy/Dockerfile.auth`, TM_AUTH_DOCKERFILE, "644");
+        await uploadFile(s, `${dir}/deploy/docker-compose.auth.yml`, TM_AUTH_COMPOSE_YAML, "644");
+        await uploadFile(s, `${dir}/deploy/.env.account`, `AUTH_ISSUER=${issuer}\nAUTH_PORT=${a.port}\nBOOTSTRAP_ADMIN_EMAIL=${adminEmail}\nBOOTSTRAP_ADMIN_PASSWORD=${adminPw}\n`, "600");
+        sections.push(`## Config\nIssuer ${issuer} · admin ${adminEmail} · embedded PGlite (volume authdata). Wire this issuer as AUTH_ISSUER in Tag Manager + Analytics.`);
+
+        const AC = `cd ${shq(dir)} && docker compose -p adpix-account -f deploy/docker-compose.auth.yml --env-file deploy/.env.account`;
+        const build = await s.exec(`${AC} build 2>&1`, { timeoutMs: a.timeoutSeconds * 1000 });
+        if (build.code !== 0) return sections.join("\n\n") + `\n\n## build FAILED (exit ${build.code})\n${redactSecrets(lastLines(build.stdout, 40))}`;
+        const up = await s.exec(`${AC} up -d 2>&1`, { timeoutMs: 600_000 });
+        sections.push(`## compose up (exit ${up.code})\n${redactSecrets(lastLines(up.stdout, 20))}`);
+        if (up.code !== 0) return sections.join("\n\n") + `\n\nBring-up FAILED — see above.`;
+
+        const gate = await s.exec(
+          `code=000; for i in $(seq 1 30); do code=$(curl -fsS -o /dev/null -m 5 -w '%{http_code}' http://localhost:${a.port}/healthz 2>/dev/null || echo 000); case "$code" in 2*) echo "healthy after ~$((i*5))s"; exit 0;; esac; sleep 5; done; echo "NOT healthy after 150s (last $code)"; exit 1`,
+          { timeoutMs: 180_000 }
+        );
+        sections.push(`## Health gate\n${gate.stdout.trim()}`);
+        sections.push(
+          `## Done\nAccount/IdP up at ${issuer} (/.well-known/openid-configuration). ` +
+            `Admin: ${adminEmail} — password in ${dir}/deploy/.env.account (kept off this transcript). ` +
+            `${a.domain ? `Point ${a.domain} at ${srv.host} + front with TLS. ` : `Open port ${a.port} in the firewall. `}` +
+            `Set AUTH_ISSUER=${issuer} when installing Tag Manager.`
         );
         return sections.join("\n\n");
       });

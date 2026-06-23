@@ -245,13 +245,18 @@ export function createPanelServer(opts: PanelOpts): Server {
         if (!app) { sendJson(res, 404, { error: "unknown app" }); return; }
         try {
           const r = await withSession(deps, b.server ? String(b.server) : undefined, async (s, srv) => {
-            const dir = app.id === "tagmanager" ? (app.defaultDir || srv.adpixDir) : srv.adpixDir;
+            const dir = (app.id === "tagmanager" || app.id === "account") ? (app.defaultDir || srv.adpixDir) : srv.adpixDir;
             const st = await stackState(s, dir, app.project);
             let healthy = false, url = "";
             if (st.up) {
+              const port = app.id === "account" ? 9696 : 8686;
               if (app.id === "analytics") { const g = await s.exec(waitHealthyCmd(20), { timeoutMs: 30_000 }); healthy = g.code === 0; }
-              else { const g = await s.exec(`curl -fsS -o /dev/null -m 5 -w '%{http_code}' http://localhost:8686/healthz 2>/dev/null || echo 000`, { timeoutMs: 20_000 }); healthy = /^[23]/.test(g.stdout.trim()); }
-              if (app.urlEnv) url = await readEnvVar(s, dir, app.urlEnv);
+              else { const g = await s.exec(`curl -fsS -o /dev/null -m 5 -w '%{http_code}' http://localhost:${port}/healthz 2>/dev/null || echo 000`, { timeoutMs: 20_000 }); healthy = /^[23]/.test(g.stdout.trim()); }
+              if (app.urlEnv) {
+                // account writes deploy/.env.account; analytics/TM use the checkout .env
+                if (app.id === "account") url = (await s.exec(`grep -h '^${app.urlEnv}=' ${dir.replace(/'/g, "")}/deploy/.env.account 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\\n'`)).stdout.trim();
+                else url = await readEnvVar(s, dir, app.urlEnv);
+              }
             }
             return { installed: st.cloned, up: st.up, running: st.running, total: st.total, healthy, url };
           });

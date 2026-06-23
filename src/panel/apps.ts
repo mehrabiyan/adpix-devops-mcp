@@ -55,7 +55,7 @@ export const APPS: AppDef[] = [
     settings: [
       { key: "dbContainer", label: "Create the control DB as a Postgres container on this server (no external DB needed)", required: false, type: "toggle", hides: ["databaseUrl"] },
       { key: "databaseUrl", label: "Control DB URL", required: true, requiredUnless: "dbContainer", placeholder: "postgres://user:pass@host:5432/db" },
-      { key: "authIssuer", label: "OIDC issuer (external account center)", required: true, placeholder: "https://account.adpix.io" },
+      { key: "authIssuer", label: "Account center (OIDC issuer) — blank = use the Account app you deploy here", required: false, placeholder: "auto-wired from the Account app, or https://account.adpix.io" },
       { key: "s3AccessKey", label: "Object store — MinIO access key (runs as a container here; blank = auto-generate)", required: false, placeholder: "auto-generated" },
       { key: "s3SecretKey", label: "Object store — MinIO secret key (blank = auto-generate)", required: false, secret: true, placeholder: "auto-generated" },
       { key: "purgeToken", label: "Purge token, shared with Varnish (blank = auto-generate)", required: false, secret: true, placeholder: "auto-generated" },
@@ -64,12 +64,18 @@ export const APPS: AppDef[] = [
   {
     id: "account",
     name: "AdPix Account (IdP)",
-    blurb: "Central identity / OIDC account center. Ships in the Tag Manager repo (apps/auth), so it shares that deploy key.",
+    blurb: "Central identity / OIDC account center (apps/auth). Self-contained container with an embedded DB; shares the Tag Manager repo + deploy key.",
     repoUrl: TM_REPO_URL,
     keyName: "adpix_tm",
-    project: "adpix-auth",
-    deployable: false, // apps/auth has no compose in the repo — deployed separately (configurable)
-    settings: [],
+    project: "adpix-account",
+    deployable: true,
+    installTool: "account_install",
+    defaultDir: "/opt/adpix-tagmanager",
+    urlEnv: "AUTH_ISSUER",
+    settings: [
+      { key: "domain", label: "Domain (HTTPS) — blank = http on the server IP:9696", required: false, placeholder: "account.example.com" },
+      { key: "adminEmail", label: "Bootstrap admin email", required: false, placeholder: "admin@example.com" },
+    ],
   },
 ];
 

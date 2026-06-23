@@ -205,6 +205,7 @@ const FIXTURES: Record<string, Record<string, unknown>> = {
   mcp_status: {},
   stack_status: {},
   smtp_test: { host: "smtp.example.com", from: "a@b.c" },
+  account_install: {},
   stack_doctor: {},
   launch_readiness: {},
   scale_ingest: { confirm: false },

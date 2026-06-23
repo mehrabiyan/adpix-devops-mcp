@@ -133,6 +133,25 @@ describe("tm_install", () => {
     expect(out).toMatch(/databaseUrl/);
   });
 
+  it("account_install: deploys apps/auth as a self-contained container (PGlite, :9696)", async () => {
+    const { deps, calls } = fakeDeps([
+      [/docker compose version/, { stdout: "ok" }],
+      [/command -v git/, { code: 0 }],
+      [/git clone -b/, { code: 0 }],
+      [/BOOTSTRAP_ADMIN_PASSWORD=/, { stdout: "" }],
+      [/openssl rand/, { stdout: "adminpw" }],
+      [/base64 -d/, { code: 0 }],
+      [/-p adpix-account .*build/, { code: 0 }],
+      [/-p adpix-account .*up -d/, { code: 0 }],
+      [/9696\/healthz/, { code: 0, stdout: "healthy after ~5s" }],
+    ]);
+    const out = await tool("account_install").handler(deps, { dir: "/opt/adpix-tagmanager", repoUrl: "https://github.com/mehrabiyan/AdpixTagManager.git", branch: "main", port: 9696, timeoutSeconds: 2400 });
+    expect(out).toContain("embedded PGlite");
+    expect(out).toMatch(/Account\/IdP up at http:\/\/10\.0\.0\.3:9696/);
+    expect(calls.some((c) => /Dockerfile\.auth/.test(c))).toBe(true);              // wrote the Dockerfile
+    expect(calls.some((c) => /-p adpix-account .*up -d/.test(c))).toBe(true);      // own compose project
+  });
+
   it("asks for secrets when .env is missing and none provided", async () => {
     const { deps } = fakeDeps([
       [/docker compose version/, { stdout: "ok" }],

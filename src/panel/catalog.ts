@@ -30,7 +30,7 @@ const GROUP: Record<string, string> = {
   cluster_define: "servers", cluster_list: "servers", cluster_status: "servers",
   // containers (lifecycle)
   adpix_status: "containers", adpix_restart: "containers", adpix_logs: "containers", adpix_install: "containers", stack_doctor: "containers",
-  tm_install: "containers", tm_status: "containers", tm_health: "containers", tm_logs: "containers",
+  tm_install: "containers", account_install: "containers", tm_status: "containers", tm_health: "containers", tm_logs: "containers",
   tm_restart: "containers", tm_update: "containers", pop_add: "containers",
   // backups
   adpix_backup: "backups", adpix_restore: "backups", pg_backup: "backups", pg_restore_db: "backups",

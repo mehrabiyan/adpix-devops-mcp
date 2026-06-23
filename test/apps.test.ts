@@ -6,7 +6,8 @@ describe("apps registry", () => {
     expect(APPS.map((a) => a.id).sort()).toEqual(["account", "analytics", "tagmanager"]);
     expect(appById("analytics")?.installTool).toBe("adpix_install");
     expect(appById("tagmanager")?.installTool).toBe("tm_install");
-    expect(appById("account")?.deployable).toBe(false); // IdP deploy is configured separately
+    expect(appById("account")?.deployable).toBe(true);          // IdP now deploys as a container
+    expect(appById("account")?.installTool).toBe("account_install");
   });
 
   it("dedupes repos: tagmanager + account share ONE deploy key/repo, analytics is separate", () => {
