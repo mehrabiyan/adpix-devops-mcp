@@ -45,7 +45,7 @@ export const APPS: AppDef[] = [
   {
     id: "tagmanager",
     name: "AdPix Tag Manager",
-    blurb: "Tag delivery — edge + Varnish + CDN (api:8686, edge:8585).",
+    blurb: "Tag delivery — edge + Varnish + CDN (api:8686, edge:8585). Bundles its object store (MinIO) and, optionally, its control DB as containers.",
     repoUrl: TM_REPO_URL,
     keyName: "adpix_tm",
     project: "adpix-tm",
@@ -55,10 +55,10 @@ export const APPS: AppDef[] = [
     settings: [
       { key: "dbContainer", label: "Create the control DB as a Postgres container on this server (no external DB needed)", required: false, type: "toggle", hides: ["databaseUrl"] },
       { key: "databaseUrl", label: "Control DB URL", required: true, requiredUnless: "dbContainer", placeholder: "postgres://user:pass@host:5432/db" },
-      { key: "authIssuer", label: "OIDC issuer", required: true, placeholder: "https://account.adpix.io" },
-      { key: "s3AccessKey", label: "Object-store access key", required: true },
-      { key: "s3SecretKey", label: "Object-store secret key", required: true, secret: true },
-      { key: "purgeToken", label: "Purge token", required: true, secret: true },
+      { key: "authIssuer", label: "OIDC issuer (external account center)", required: true, placeholder: "https://account.adpix.io" },
+      { key: "s3AccessKey", label: "Object store — MinIO access key (runs as a container here; blank = auto-generate)", required: false, placeholder: "auto-generated" },
+      { key: "s3SecretKey", label: "Object store — MinIO secret key (blank = auto-generate)", required: false, secret: true, placeholder: "auto-generated" },
+      { key: "purgeToken", label: "Purge token, shared with Varnish (blank = auto-generate)", required: false, secret: true, placeholder: "auto-generated" },
     ],
   },
   {

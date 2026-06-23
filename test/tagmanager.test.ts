@@ -130,7 +130,7 @@ describe("tm_install", () => {
   it("dbContainer:false still requires databaseUrl", async () => {
     const { deps } = fakeDeps([[/docker compose version/, { stdout: "ok" }], [/command -v git/, { code: 0 }], [/git clone/, { code: 0 }], [/deploy\/\.env.* && echo yes/, { stdout: "no" }]]);
     const out = await tool("tm_install").handler(deps, { dir: "/opt/adpix-tagmanager", repoUrl: "https://github.com/mehrabiyan/AdpixTagManager.git", branch: "main", dbContainer: false, authIssuer: "https://a", s3AccessKey: "k", s3SecretKey: "s", purgeToken: "p", s3Bucket: "adpix-tags", timeoutSeconds: 1800 });
-    expect(out).toMatch(/missing DATABASE_URL/i);
+    expect(out).toMatch(/databaseUrl/);
   });
 
   it("asks for secrets when .env is missing and none provided", async () => {
@@ -141,7 +141,7 @@ describe("tm_install", () => {
       [/deploy\/\.env.* && echo yes/, { stdout: "no" }],
     ]);
     const out = await tool("tm_install").handler(deps, { dir: "/opt/adpix-tagmanager", repoUrl: "x", branch: "main", s3Bucket: "adpix-tags", timeoutSeconds: 1800 });
-    expect(out).toContain("deploy/.env is missing");
+    expect(out).toMatch(/action needed/); expect(out).toMatch(/authIssuer/);
   });
 });
 

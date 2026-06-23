@@ -174,28 +174,39 @@ export const tagmanagerTools: ToolDef[] = [
         }
         const TMC = `cd ${shq(dir)} && docker compose -p ${TM_PROJECT} ${composeFiles} --env-file deploy/.env`;
 
-        // Secrets: (re)write deploy/.env only when secret params are supplied; require all on first write.
+        // The object store is the BUNDLED MinIO container (S3_ENDPOINT=http://minio:9000) — NOT
+        // ClickHouse (that's Analytics). S3_ACCESS_KEY/S3_SECRET_KEY are MinIO's root credentials and
+        // PURGE_TOKEN is shared with Varnish, all SELF-DEFINED — so auto-generate any not supplied
+        // (reusing existing .env on re-install). Only AUTH_ISSUER is external; DATABASE_URL is needed
+        // unless dbContainer provided it.
         const envExists = (await s.exec(`test -f ${shq(dir + "/deploy/.env")} && echo yes || echo no`)).stdout.trim() === "yes";
-        const reqKeys = a.dbContainer ? ["authIssuer", "s3AccessKey", "s3SecretKey", "purgeToken"] : TM_REQUIRED;
-        const reqVals = a.dbContainer ? [a.authIssuer, a.s3AccessKey, a.s3SecretKey, a.purgeToken] : [a.databaseUrl, a.authIssuer, a.s3AccessKey, a.s3SecretKey, a.purgeToken];
-        const anyProvided = reqVals.some((v) => v !== undefined) || a.dbContainer;
-        if (anyProvided) {
-          const missing = reqKeys.filter((_k, i) => !reqVals[i]);
-          if (missing.length) return sections.join("\n\n") + `\n\ntm_install: when providing secrets, provide all required: missing ${missing.join(", ")}.`;
+        const reuseOrGen = async (provided: string | undefined, envKey: string): Promise<string> => {
+          if (provided) return provided;
+          const ex = (await s.exec(`grep -h '^${envKey}=' ${shq(dir + "/deploy/.env")} 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\\n'`)).stdout.trim();
+          if (ex) return ex;
+          return (await s.exec(`openssl rand -hex 24 2>/dev/null || head -c18 /dev/urandom | od -An -tx1 | tr -d ' \\n'`)).stdout.trim();
+        };
+        const missing: string[] = [];
+        if (!a.authIssuer) missing.push("authIssuer (the external OIDC account center)");
+        if (!a.dbContainer && !a.databaseUrl) missing.push("databaseUrl (or set dbContainer:true to run Postgres here)");
+        if (missing.length) {
+          if (!envExists) return sections.join("\n\n") + `\n\n## Secrets — action needed\nProvide: ${missing.join("; ")}. (The MinIO object-store creds + the purge token auto-generate — only the OIDC issuer is external.) Nothing was deployed.`;
+          sections.push(`## Secrets\nReusing existing deploy/.env (${missing.map((m) => m.split(" ")[0]).join(", ")} not re-supplied).`);
+        } else {
+          a.s3AccessKey = await reuseOrGen(a.s3AccessKey, "S3_ACCESS_KEY");
+          a.s3SecretKey = await reuseOrGen(a.s3SecretKey, "S3_SECRET_KEY");
+          a.purgeToken = await reuseOrGen(a.purgeToken, "PURGE_TOKEN");
           const envBody =
             `DATABASE_URL=${a.databaseUrl}\n` +
             (a.dbContainer ? `TM_DB_PASSWORD=${dbPw}\n` : "") +
             `AUTH_ISSUER=${a.authIssuer}\n` +
+            `S3_ENDPOINT=http://minio:9000\n` +
             `S3_ACCESS_KEY=${a.s3AccessKey}\n` +
             `S3_SECRET_KEY=${a.s3SecretKey}\n` +
             `PURGE_TOKEN=${a.purgeToken}\n` +
             `S3_BUCKET=${a.s3Bucket}\n`;
           await uploadFile(s, `${dir}/deploy/.env`, envBody, "600");
-          sections.push(`## Secrets\nWrote deploy/.env (mode 600${a.dbContainer ? ", incl. the generated DB password" : ""}) — values kept off this transcript.`);
-        } else if (!envExists) {
-          return sections.join("\n\n") + `\n\n## Secrets — action needed\ndeploy/.env is missing and no secrets were provided. Re-run tm_install with authIssuer, s3AccessKey, s3SecretKey, purgeToken (all required) plus either databaseUrl OR dbContainer:true. Nothing was deployed.`;
-        } else {
-          sections.push(`## Secrets\nReusing existing deploy/.env.`);
+          sections.push(`## Secrets\nWrote deploy/.env (mode 600). Object store = bundled MinIO container (auto-generated root creds)${a.dbContainer ? "; control DB = local Postgres container" : ""}. Values kept off this transcript.`);
         }
 
         const build = await s.exec(`${TMC} build 2>&1`, { timeoutMs: a.timeoutSeconds * 1000 });
