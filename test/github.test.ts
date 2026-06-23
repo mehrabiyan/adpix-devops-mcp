@@ -170,7 +170,7 @@ describe("adpix_install with the shared MCP deploy key", () => {
 
   it("auto-switches to the shared key when a public clone hits an auth wall (unauthorized → prints key)", async () => {
     const { deps, calls } = fakeSession(
-      [[/command -v git/, { code: 0 }], [/git clone -b 'main' 'https:/, { code: 128, stderr: "fatal: could not read Username for 'https://github.com': No such device or address" }]],
+      [[/command -v git/, { code: 0 }], [/git clone 'https:/, { code: 128, stderr: "fatal: could not read Username for 'https://github.com': No such device or address" }]],
       [[/adpix_deploy_ed25519\.pub/, { stdout: "ssh-ed25519 AUTOKEY mcp" }], [/git ls-remote/, { stdout: "NO" }]]
     );
     const out = await tool("adpix_install").handler(deps, { ...baseArgs, deployKey: false });
@@ -183,8 +183,8 @@ describe("adpix_install with the shared MCP deploy key", () => {
     const { deps, calls } = fakeSession(
       [
         [/command -v git/, { code: 0 }],
-        [/git clone -b 'main' 'https:/, { code: 128, stderr: "could not read Username for 'https://github.com'" }],
-        [/git clone -b 'main' 'git@github/, { code: 0 }],
+        [/git clone 'https:/, { code: 128, stderr: "could not read Username for 'https://github.com'" }],
+        [/git clone 'git@github/, { code: 0 }],
         [/deploy\.sh/, { code: 0, stdout: "AdPix Analytics is running." }],
         [/for i in \$\(seq/, { code: 0, stdout: "healthy after ~5s (HTTP 200)" }],
         [/SITE_ADDRESS/, { stdout: "" }],
@@ -195,7 +195,7 @@ describe("adpix_install with the shared MCP deploy key", () => {
     );
     const out = await tool("adpix_install").handler(deps, { ...baseArgs, deployKey: false });
     expect(out).toContain("authorized for mehrabiyan/adpix");
-    expect(calls.some((c) => /git clone -b 'main' 'git@github\.com:mehrabiyan\/adpix\.git'/.test(c))).toBe(true);
+    expect(calls.some((c) => /git clone 'git@github\.com:mehrabiyan\/adpix\.git'/.test(c))).toBe(true);
     expect(out).toContain("http://203.0.113.7");
   });
 });

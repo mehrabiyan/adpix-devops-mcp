@@ -149,9 +149,11 @@ export const lifecycleTools: ToolDef[] = [
         // Private repo: use the ONE shared deploy key managed on the MCP (added to GitHub once,
         // distributed to each server) — no per-server key. The on-server path is shared with
         // cicd_enable, so enabling CD later needs no re-auth.
+        // Branch-agnostic: clone the repo's DEFAULT branch, then check out the requested branch only if
+        // it exists (repos whose default isn't "main" would otherwise fail `-b main` with "not found").
         const cloneCmd = (url: string, kEnv: string, postCfg: string) =>
-          `if [ -d ${shq(dir + "/.git")} ]; then cd ${shq(dir)} && ${kEnv}git fetch origin ${shq(a.branch)} && git checkout ${shq(a.branch)} && ${kEnv}git pull --ff-only origin ${shq(a.branch)}; ` +
-          `else mkdir -p $(dirname ${shq(dir)}) && ${kEnv}git clone -b ${shq(a.branch)} ${shq(url)} ${shq(dir)}${postCfg}; fi`;
+          `if [ -d ${shq(dir + "/.git")} ]; then cd ${shq(dir)} && ${kEnv}git fetch origin && (git checkout ${shq(a.branch)} 2>/dev/null || true) && ${kEnv}git pull --ff-only; ` +
+          `else mkdir -p $(dirname ${shq(dir)}) && ${kEnv}git clone ${shq(url)} ${shq(dir)}${postCfg} && cd ${shq(dir)} && (git checkout ${shq(a.branch)} 2>/dev/null || true); fi`;
         const useKey = a.deployKey || /^(git@|ssh:\/\/)/.test(a.repoUrl);
         let cloneUrl = a.repoUrl, keyEnv = "", postCloneCfg = "";
         // Switch to the shared key: returns false (and pushes a "## Repo is private" section) when

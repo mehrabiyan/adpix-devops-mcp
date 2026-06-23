@@ -84,9 +84,11 @@ const TM_AUTH_COMPOSE_YAML =
  */
 async function checkoutTmRepo(deps: Deps, s: Session, dir: string, repoUrl: string, branch: string, srvName: string, sections: string[], toolName: string): Promise<string | null> {
   await s.exec("command -v git >/dev/null || (apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git ca-certificates)", { timeoutMs: 300_000 });
+  // Branch-agnostic: clone the repo's DEFAULT branch, then check out the requested branch only if it
+  // exists (the AdpixTagManager default isn't "main", so `-b main` would fail with "Remote branch not found").
   const cloneCmd = (url: string, kEnv: string, postCfg: string) =>
-    `if [ -d ${shq(dir + "/.git")} ]; then cd ${shq(dir)} && ${kEnv}git fetch origin ${shq(branch)} && git checkout ${shq(branch)} && ${kEnv}git pull --ff-only origin ${shq(branch)}; ` +
-    `else mkdir -p $(dirname ${shq(dir)}) && ${kEnv}git clone -b ${shq(branch)} ${shq(url)} ${shq(dir)}${postCfg}; fi`;
+    `if [ -d ${shq(dir + "/.git")} ]; then cd ${shq(dir)} && ${kEnv}git fetch origin && (git checkout ${shq(branch)} 2>/dev/null || true) && ${kEnv}git pull --ff-only; ` +
+    `else mkdir -p $(dirname ${shq(dir)}) && ${kEnv}git clone ${shq(url)} ${shq(dir)}${postCfg} && cd ${shq(dir)} && (git checkout ${shq(branch)} 2>/dev/null || true); fi`;
   const useKey = /^(git@|ssh:\/\/)/.test(repoUrl);
   let cloneUrl = repoUrl, keyEnv = "", postCfg = "";
   const halt = `\n\n(Nothing installed yet — add the key above to the repo's Deploy keys ONCE, then re-run ${toolName}. Every future server reuses it.)`;

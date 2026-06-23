@@ -49,7 +49,7 @@ describe("tm_install", () => {
     const { deps, calls } = fakeDeps([
       [/docker compose version/, { stdout: "ok" }],
       [/command -v git/, { code: 0 }],
-      [/git clone -b/, { code: 0 }],
+      [/git clone /, { code: 0 }],
       [/deploy\/\.env.* && echo yes/, { stdout: "no" }],
       [/base64 -d/, { code: 0 }],
       [/--env-file deploy\/\.env build/, { code: 0 }],
@@ -72,7 +72,7 @@ describe("tm_install", () => {
       [
         [/docker compose version/, { stdout: "ok" }],
         [/command -v git/, { code: 0 }],
-        [/git clone -b 'main' 'https:/, { code: 128, stderr: "fatal: could not read Username for 'https://github.com': No such device or address" }],
+        [/git clone 'https:/, { code: 128, stderr: "fatal: could not read Username for 'https://github.com': No such device or address" }],
       ],
       [[/adpix_tm_deploy_ed25519\.pub/, { stdout: "ssh-ed25519 AAAAKEY mcp" }], [/git ls-remote/, { stdout: "NO" }]]
     );
@@ -87,8 +87,8 @@ describe("tm_install", () => {
       [
         [/docker compose version/, { stdout: "ok" }],
         [/command -v git/, { code: 0 }],
-        [/git clone -b 'main' 'https:/, { code: 128, stderr: "could not read Username for 'https://github.com'" }],
-        [/git clone -b 'main' 'git@github/, { code: 0 }], // SSH clone succeeds
+        [/git clone 'https:/, { code: 128, stderr: "could not read Username for 'https://github.com'" }],
+        [/git clone 'git@github/, { code: 0 }], // SSH clone succeeds
         [/deploy\/\.env.* && echo yes/, { stdout: "no" }],
         [/base64 -d/, { code: 0 }],
         [/--env-file deploy\/\.env build/, { code: 0 }],
@@ -100,7 +100,7 @@ describe("tm_install", () => {
     const out = await tool("tm_install").handler(deps, { dir: "/opt/adpix-tagmanager", repoUrl: "https://github.com/mehrabiyan/AdpixTagManager.git", branch: "main", databaseUrl: "postgres://x", authIssuer: "https://account.adpix.io", s3AccessKey: "k", s3SecretKey: "s", purgeToken: "p", s3Bucket: "adpix-tags", timeoutSeconds: 1800 });
     expect(out).toContain("Done");
     expect(calls.some((c) => /base64 -d > '\/root\/\.ssh\/adpix_tm_deploy_ed25519'/.test(c))).toBe(true); // key pushed to the server
-    expect(calls.some((c) => /git clone -b 'main' 'git@github\.com:mehrabiyan\/AdpixTagManager\.git'/.test(c))).toBe(true);
+    expect(calls.some((c) => /git clone 'git@github\.com:mehrabiyan\/AdpixTagManager\.git'/.test(c))).toBe(true);
   });
 
   it("dbContainer: provisions a Postgres container + auto DATABASE_URL (no external DB required)", async () => {
@@ -137,7 +137,7 @@ describe("tm_install", () => {
     const { deps, calls } = fakeDeps([
       [/docker compose version/, { stdout: "ok" }],
       [/command -v git/, { code: 0 }],
-      [/git clone -b/, { code: 0 }],
+      [/git clone /, { code: 0 }],
       [/BOOTSTRAP_ADMIN_PASSWORD=/, { stdout: "" }],
       [/openssl rand/, { stdout: "adminpw" }],
       [/base64 -d/, { code: 0 }],
@@ -156,7 +156,7 @@ describe("tm_install", () => {
     const { deps } = fakeDeps([
       [/docker compose version/, { stdout: "ok" }],
       [/command -v git/, { code: 0 }],
-      [/git clone -b/, { code: 0 }],
+      [/git clone /, { code: 0 }],
       [/deploy\/\.env.* && echo yes/, { stdout: "no" }],
     ]);
     const out = await tool("tm_install").handler(deps, { dir: "/opt/adpix-tagmanager", repoUrl: "x", branch: "main", s3Bucket: "adpix-tags", timeoutSeconds: 1800 });
@@ -215,7 +215,7 @@ describe("pop_add", () => {
     const { deps, calls } = fakeDeps([
       [/docker compose version/, { stdout: "ok" }],
       [/command -v git/, { code: 0 }],
-      [/git clone -b/, { code: 0 }],
+      [/git clone /, { code: 0 }],
       [/base64 -d/, { code: 0 }],
       [/up -d redis edge varnish/, { code: 0, stdout: "Started" }],
       [/redis-cli info replication/, { stdout: "role:slave\nmaster_link_status:up\nmaster_host:10.0.0.2\n" }],
@@ -236,7 +236,7 @@ describe("pop_add", () => {
     const { deps } = fakeDeps([
       [/docker compose version/, { stdout: "ok" }],
       [/command -v git/, { code: 0 }],
-      [/git clone -b/, { code: 0 }],
+      [/git clone /, { code: 0 }],
       [/base64 -d/, { code: 0 }],
       [/up -d redis edge varnish/, { code: 0 }],
       [/redis-cli info replication/, { stdout: "role:slave\nmaster_link_status:down\n" }],
