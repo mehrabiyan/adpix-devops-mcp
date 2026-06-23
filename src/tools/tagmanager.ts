@@ -10,6 +10,35 @@ const serverParam = z.string().optional().describe("Registered server name. Omit
 const dirParam = z.string().default("/opt/adpix-tagmanager").describe("Tag Manager checkout dir on the server");
 
 const TM_REPO_URL = "https://github.com/mehrabiyan/AdpixTagManager.git";
+
+/**
+ * Optional control-DB-as-a-container override (dbContainer:true). The TM repo's compose ships NO
+ * Postgres (it expects an external/managed DB); this layers a dedicated Postgres in the same compose
+ * project so the api reaches it as `postgres:5432`. The api auto-migrates the schema on connect
+ * (packages/db applyMigrations). Password comes from TM_DB_PASSWORD in deploy/.env.
+ */
+const TM_DB_OVERRIDE_YAML =
+  `services:\n` +
+  `  postgres:\n` +
+  `    image: postgres:17-alpine\n` +
+  `    restart: unless-stopped\n` +
+  `    environment:\n` +
+  `      POSTGRES_USER: adpix_tm\n` +
+  `      POSTGRES_PASSWORD: \${TM_DB_PASSWORD:?set TM_DB_PASSWORD in deploy/.env}\n` +
+  `      POSTGRES_DB: adpix_tm\n` +
+  `    volumes:\n` +
+  `      - tmdbdata:/var/lib/postgresql/data\n` +
+  `    healthcheck:\n` +
+  `      test: ["CMD-SHELL", "pg_isready -U adpix_tm"]\n` +
+  `      interval: 5s\n` +
+  `      timeout: 3s\n` +
+  `      retries: 20\n` +
+  `  api:\n` +
+  `    depends_on:\n` +
+  `      postgres:\n` +
+  `        condition: service_healthy\n` +
+  `volumes:\n` +
+  `  tmdbdata: {}\n`;
 const TM_PROJECT = "adpix-tm";
 
 /** The Tag Manager delivery core (deploy/docker-compose.yml). api+edge+varnish are the serving services. */
@@ -78,7 +107,8 @@ export const tagmanagerTools: ToolDef[] = [
       dir: dirParam,
       repoUrl: z.string().default(TM_REPO_URL),
       branch: z.string().default("main"),
-      databaseUrl: z.string().optional().describe("Postgres URL for the authoring/control DB (required on first install)"),
+      databaseUrl: z.string().optional().describe("Postgres URL for the authoring/control DB (required on first install, unless dbContainer:true)"),
+      dbContainer: z.boolean().default(false).describe("Provision the control DB as a Postgres container ON THIS server (auto-generates DATABASE_URL). The TM api auto-migrates the schema on connect. No external managed DB needed."),
       authIssuer: z.string().optional().describe("OIDC issuer, e.g. https://account.adpix.io (required on first install)"),
       s3AccessKey: z.string().optional().describe("Object-store access key (required on first install)"),
       s3SecretKey: z.string().optional().describe("Object-store secret key (required on first install)"),
@@ -90,7 +120,7 @@ export const tagmanagerTools: ToolDef[] = [
     handler: async (deps, args) => {
       const a = args as {
         server?: string; dir: string; repoUrl: string; branch: string;
-        databaseUrl?: string; authIssuer?: string; s3AccessKey?: string; s3SecretKey?: string; purgeToken?: string;
+        databaseUrl?: string; dbContainer: boolean; authIssuer?: string; s3AccessKey?: string; s3SecretKey?: string; purgeToken?: string;
         s3Bucket: string; timeoutSeconds: number;
       };
       return withSession(deps, a.server, async (s, srv) => {
@@ -131,31 +161,46 @@ export const tagmanagerTools: ToolDef[] = [
         if (clone.code !== 0) return (sections.length ? sections.join("\n\n") + "\n\n" : "") + `## Checkout FAILED (exit ${clone.code})\n${lastLines(clone.stderr || clone.stdout, 30)}`;
         sections.push(`## Checkout\n${cloneUrl} @ ${a.branch} → ${dir}`);
 
+        // Optional: provision the control DB as a Postgres container ON THIS server (no external DB).
+        let dbPw = "", composeFiles = `-f deploy/docker-compose.yml`;
+        if (a.dbContainer) {
+          // reuse a previously-generated password (idempotent), else mint one
+          dbPw = (await s.exec(`grep -h '^TM_DB_PASSWORD=' ${shq(dir + "/deploy/.env")} 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\\n'`)).stdout.trim();
+          if (!dbPw) dbPw = (await s.exec(`openssl rand -hex 24 2>/dev/null || head -c18 /dev/urandom | od -An -tx1 | tr -d ' \\n'`)).stdout.trim();
+          await uploadFile(s, `${dir}/deploy/docker-compose.db.yml`, TM_DB_OVERRIDE_YAML, "644");
+          composeFiles = `-f deploy/docker-compose.yml -f deploy/docker-compose.db.yml`;
+          a.databaseUrl = `postgres://adpix_tm:${dbPw}@postgres:5432/adpix_tm`;
+          sections.push(`## Control DB\nProvisioning a Postgres container on ${srv.name} (service "postgres", volume tmdbdata). The TM api migrates the schema on first connect — no external DB needed.`);
+        }
+        const TMC = `cd ${shq(dir)} && docker compose -p ${TM_PROJECT} ${composeFiles} --env-file deploy/.env`;
+
         // Secrets: (re)write deploy/.env only when secret params are supplied; require all on first write.
         const envExists = (await s.exec(`test -f ${shq(dir + "/deploy/.env")} && echo yes || echo no`)).stdout.trim() === "yes";
-        const provided = [a.databaseUrl, a.authIssuer, a.s3AccessKey, a.s3SecretKey, a.purgeToken];
-        const anyProvided = provided.some((v) => v !== undefined);
+        const reqKeys = a.dbContainer ? ["authIssuer", "s3AccessKey", "s3SecretKey", "purgeToken"] : TM_REQUIRED;
+        const reqVals = a.dbContainer ? [a.authIssuer, a.s3AccessKey, a.s3SecretKey, a.purgeToken] : [a.databaseUrl, a.authIssuer, a.s3AccessKey, a.s3SecretKey, a.purgeToken];
+        const anyProvided = reqVals.some((v) => v !== undefined) || a.dbContainer;
         if (anyProvided) {
-          const missing = TM_REQUIRED.filter((_k, i) => !provided[i]);
-          if (missing.length) return `tm_install: when providing secrets, provide all required: missing ${missing.join(", ")}.`;
+          const missing = reqKeys.filter((_k, i) => !reqVals[i]);
+          if (missing.length) return sections.join("\n\n") + `\n\ntm_install: when providing secrets, provide all required: missing ${missing.join(", ")}.`;
           const envBody =
             `DATABASE_URL=${a.databaseUrl}\n` +
+            (a.dbContainer ? `TM_DB_PASSWORD=${dbPw}\n` : "") +
             `AUTH_ISSUER=${a.authIssuer}\n` +
             `S3_ACCESS_KEY=${a.s3AccessKey}\n` +
             `S3_SECRET_KEY=${a.s3SecretKey}\n` +
             `PURGE_TOKEN=${a.purgeToken}\n` +
             `S3_BUCKET=${a.s3Bucket}\n`;
           await uploadFile(s, `${dir}/deploy/.env`, envBody, "600");
-          sections.push(`## Secrets\nWrote deploy/.env (mode 600, ${TM_REQUIRED.length} required keys + S3_BUCKET) — values kept off this transcript.`);
+          sections.push(`## Secrets\nWrote deploy/.env (mode 600${a.dbContainer ? ", incl. the generated DB password" : ""}) — values kept off this transcript.`);
         } else if (!envExists) {
-          return sections.join("\n\n") + `\n\n## Secrets — action needed\ndeploy/.env is missing and no secrets were provided. Re-run tm_install with databaseUrl, authIssuer, s3AccessKey, s3SecretKey, purgeToken (all required). Nothing was deployed.`;
+          return sections.join("\n\n") + `\n\n## Secrets — action needed\ndeploy/.env is missing and no secrets were provided. Re-run tm_install with authIssuer, s3AccessKey, s3SecretKey, purgeToken (all required) plus either databaseUrl OR dbContainer:true. Nothing was deployed.`;
         } else {
           sections.push(`## Secrets\nReusing existing deploy/.env.`);
         }
 
-        const build = await s.exec(`${tmCompose(dir)} build 2>&1`, { timeoutMs: a.timeoutSeconds * 1000 });
+        const build = await s.exec(`${TMC} build 2>&1`, { timeoutMs: a.timeoutSeconds * 1000 });
         if (build.code !== 0) return sections.join("\n\n") + `\n\n## build FAILED (exit ${build.code})\n${redactSecrets(lastLines(build.stdout, 40))}`;
-        const up = await s.exec(`${tmCompose(dir)} up -d 2>&1`, { timeoutMs: 600_000 });
+        const up = await s.exec(`${TMC} up -d 2>&1`, { timeoutMs: 600_000 });
         sections.push(`## compose up (exit ${up.code})\n${redactSecrets(lastLines(up.stdout, 25))}`);
         if (up.code !== 0) return sections.join("\n\n") + `\n\nBring-up FAILED — see above (tm_logs to dig in).`;
 

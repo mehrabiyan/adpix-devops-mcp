@@ -11,7 +11,7 @@ import { parseGithubRemote } from "../github.js";
  */
 const TM_REPO_URL = "https://github.com/mehrabiyan/AdpixTagManager.git";
 
-export interface AppSetting { key: string; label: string; required: boolean; secret?: boolean; placeholder?: string }
+export interface AppSetting { key: string; label: string; required: boolean; secret?: boolean; placeholder?: string; type?: "toggle"; hides?: string[]; requiredUnless?: string }
 export interface AppDef {
   id: string;
   name: string;
@@ -53,7 +53,8 @@ export const APPS: AppDef[] = [
     installTool: "tm_install",
     defaultDir: "/opt/adpix-tagmanager",
     settings: [
-      { key: "databaseUrl", label: "Control DB URL", required: true, placeholder: "postgres://user:pass@host:5432/db" },
+      { key: "dbContainer", label: "Create the control DB as a Postgres container on this server (no external DB needed)", required: false, type: "toggle", hides: ["databaseUrl"] },
+      { key: "databaseUrl", label: "Control DB URL", required: true, requiredUnless: "dbContainer", placeholder: "postgres://user:pass@host:5432/db" },
       { key: "authIssuer", label: "OIDC issuer", required: true, placeholder: "https://account.adpix.io" },
       { key: "s3AccessKey", label: "Object-store access key", required: true },
       { key: "s3SecretKey", label: "Object-store secret key", required: true, secret: true },

@@ -103,6 +103,36 @@ describe("tm_install", () => {
     expect(calls.some((c) => /git clone -b 'main' 'git@github\.com:mehrabiyan\/AdpixTagManager\.git'/.test(c))).toBe(true);
   });
 
+  it("dbContainer: provisions a Postgres container + auto DATABASE_URL (no external DB required)", async () => {
+    const { deps, calls } = fakeDeps([
+      [/docker compose version/, { stdout: "ok" }],
+      [/command -v git/, { code: 0 }],
+      [/git clone/, { code: 0 }],
+      [/grep -h '\^TM_DB_PASSWORD='/, { stdout: "" }],     // no existing password
+      [/openssl rand/, { stdout: "deadbeefcafe" }],         // mint one
+      [/deploy\/\.env.* && echo yes/, { stdout: "no" }],
+      [/base64 -d/, { code: 0 }],                            // db.yml + .env writes
+      [/docker-compose\.db\.yml --env-file deploy\/\.env build/, { code: 0 }],
+      [/up -d/, { code: 0 }],
+      [/8686\/healthz/, { code: 0, stdout: "healthy after ~5s (api+edge 200)" }],
+    ]);
+    const out = await tool("tm_install").handler(deps, {
+      dir: "/opt/adpix-tagmanager", repoUrl: "https://github.com/mehrabiyan/AdpixTagManager.git", branch: "main",
+      dbContainer: true, authIssuer: "https://account.adpix.io", s3AccessKey: "k", s3SecretKey: "s", purgeToken: "p",
+      s3Bucket: "adpix-tags", timeoutSeconds: 1800,
+    });
+    expect(out).toContain("Provisioning a Postgres container");
+    expect(out).toContain("Done");
+    expect(calls.some((c) => /docker-compose\.db\.yml/.test(c))).toBe(true);      // override uploaded
+    expect(calls.some((c) => /-f deploy\/docker-compose\.db\.yml --env-file deploy\/\.env build/.test(c))).toBe(true); // build uses it
+  });
+
+  it("dbContainer:false still requires databaseUrl", async () => {
+    const { deps } = fakeDeps([[/docker compose version/, { stdout: "ok" }], [/command -v git/, { code: 0 }], [/git clone/, { code: 0 }], [/deploy\/\.env.* && echo yes/, { stdout: "no" }]]);
+    const out = await tool("tm_install").handler(deps, { dir: "/opt/adpix-tagmanager", repoUrl: "https://github.com/mehrabiyan/AdpixTagManager.git", branch: "main", dbContainer: false, authIssuer: "https://a", s3AccessKey: "k", s3SecretKey: "s", purgeToken: "p", s3Bucket: "adpix-tags", timeoutSeconds: 1800 });
+    expect(out).toMatch(/missing DATABASE_URL/i);
+  });
+
   it("asks for secrets when .env is missing and none provided", async () => {
     const { deps } = fakeDeps([
       [/docker compose version/, { stdout: "ok" }],

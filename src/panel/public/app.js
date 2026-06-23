@@ -892,14 +892,21 @@ async function setupWizard() {
   VALID.repos = () => (W.repos.length && W.repos.every((r) => r.authorized) ? true : "Add the deploy key to each repo, then Verify.");
 
   // 4. settings
+  function settingField(a, st) {
+    const v = (W.settings[a.id] || {})[st.key];
+    if (st.type === "toggle") return `<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;margin:4px 0 10px;cursor:pointer;color:var(--c-text)"><input type="checkbox" data-app="${a.id}" data-k="${st.key}" data-toggle="1" ${v ? "checked" : ""}> ${esc(st.label)}</label>`;
+    return `<label class="fld"><span class="lab">${esc(st.label)}${st.required ? " *" : ""}</span><input class="input" data-app="${a.id}" data-k="${st.key}" ${st.secret ? 'type="password"' : ""} placeholder="${esc(st.placeholder || "")}" value="${esc(v || "")}"></label>`;
+  }
   RENDER.settings = (c) => {
     const apps = deployable();
     apps.forEach((a) => { W.settings[a.id] = W.settings[a.id] || {}; if (!W.settings[a.id].__server__) W.settings[a.id].__server__ = firstServer(); });
-    c.innerHTML = h2("Settings", "Required configuration per app. Stored only for this deploy.") + apps.map((a) => `<div style="border:1px solid var(--c-border);border-radius:11px;padding:14px;margin-bottom:12px"><div style="font-weight:600;font-size:14px;margin-bottom:10px">${esc(a.name)}</div><label class="fld"><span class="lab">deploy to server</span><select class="input" data-srv="${a.id}">${W.servers.map((s) => `<option ${W.settings[a.id].__server__ === s.name ? "selected" : ""}>${esc(s.name)}</option>`).join("")}</select></label>${a.settings.map((st) => `<label class="fld"><span class="lab">${esc(st.label)}${st.required ? " *" : ""}</span><input class="input" data-app="${a.id}" data-k="${st.key}" ${st.secret ? 'type="password"' : ""} placeholder="${esc(st.placeholder || "")}" value="${esc(W.settings[a.id][st.key] || "")}"></label>`).join("")}</div>`).join("");
-    c.querySelectorAll("[data-app][data-k]").forEach((i) => (i.oninput = () => { W.settings[i.dataset.app][i.dataset.k] = i.value.trim(); }));
+    const hiddenOf = (a) => new Set(a.settings.filter((st) => st.type === "toggle" && W.settings[a.id][st.key] && st.hides).flatMap((st) => st.hides));
+    c.innerHTML = h2("Settings", "Required configuration per app. Stored only for this deploy.") + apps.map((a) => { const hide = hiddenOf(a); return `<div style="border:1px solid var(--c-border);border-radius:11px;padding:14px;margin-bottom:12px"><div style="font-weight:600;font-size:14px;margin-bottom:10px">${esc(a.name)}</div><label class="fld"><span class="lab">deploy to server</span><select class="input" data-srv="${a.id}">${W.servers.map((s) => `<option ${W.settings[a.id].__server__ === s.name ? "selected" : ""}>${esc(s.name)}</option>`).join("")}</select></label>${a.settings.filter((st) => !hide.has(st.key)).map((st) => settingField(a, st)).join("")}</div>`; }).join("");
+    c.querySelectorAll("[data-toggle]").forEach((i) => (i.onchange = () => { W.settings[i.dataset.app][i.dataset.k] = i.checked; RENDER.settings(c); }));
+    c.querySelectorAll("[data-app][data-k]:not([data-toggle])").forEach((i) => (i.oninput = () => { W.settings[i.dataset.app][i.dataset.k] = i.value.trim(); }));
     c.querySelectorAll("[data-srv]").forEach((s) => (s.onchange = () => { W.settings[s.dataset.srv].__server__ = s.value; }));
   };
-  VALID.settings = () => { for (const a of deployable()) for (const st of a.settings) if (st.required && !(W.settings[a.id] || {})[st.key]) return `${a.name}: ${st.label} is required.`; return true; };
+  VALID.settings = () => { for (const a of deployable()) for (const st of a.settings) { if (st.type === "toggle") continue; const skip = st.requiredUnless && (W.settings[a.id] || {})[st.requiredUnless]; if (st.required && !skip && !(W.settings[a.id] || {})[st.key]) return `${a.name}: ${st.label} is required.`; } return true; };
 
   // 5. preflight
   function preItems() {
