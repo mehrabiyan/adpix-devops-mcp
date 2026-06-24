@@ -76,6 +76,28 @@ adpix_status  server=prod            # containers, version, URL
 health_check  server=prod            # front door through the real TLS path
 ```
 
+## Intranet-only / air-gapped targets (only the MCP has internet)
+
+`net_probe server=<box>` first → verdict **online / filtered / offline**.
+
+1. **Tunnel (primary).** The MCP shares its internet:
+   ```
+   net_bridge  server=<box>  action=up      # points the target's apt/docker/git at the MCP, verifies github+docker
+   account_install / tm_install / adpix_install …          # normal install, through the MCP's internet
+   net_bridge  server=<box>  action=down    # restore direct egress
+   ```
+   Needs: the MCP host has internet; the target's sshd allows `AllowTcpForwarding` (default yes).
+2. **Offline bundle (deep fallback, when the tunnel can't open).** The MCP builds + ships everything:
+   ```
+   offline_bundle   app=tagmanager  buildImages=true        # on the MCP: clone + docker save images → a tarball
+   offline_install  server=<box>  app=tagmanager  bundlePath=/tmp/adpix-offline-tagmanager.tar.gz
+   ```
+   The MCP needs Docker matching the target's arch (default `linux/amd64`). A truly bare target (no
+   Docker) needs Docker delivered first via the tunnel.
+3. **TLS without Let's Encrypt.** Upload a key + cert (+ chain) in **Settings → Certificate Manager**
+   (a `*.adpix.io` wildcard covers every sub-domain); `account_install`/`console_install` auto-serve it
+   via Caddy `tls`. Internet-connected servers still get DV Let's Encrypt by default.
+
 ## Gotchas (memorize)
 
 - **`NEXT_PUBLIC_*` is build-time** (console + analytics web) → rebuild per environment; a restart does nothing.
