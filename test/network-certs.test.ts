@@ -6,7 +6,7 @@ import type { Deps } from "../src/deps.js";
 import type { ExecResult, Session } from "../src/ssh.js";
 import type { ServerConfig } from "../src/registry.js";
 import { allTools } from "../src/tools/index.js";
-import { summarizeProbe } from "../src/tools/network.js";
+import { summarizeProbe, proxyConfigScript, proxyTeardownScript } from "../src/tools/network.js";
 import { saveCert, getCert, listCerts, deleteCert, resolveCert, dnsMatch } from "../src/certstore.js";
 
 describe("FQDN ↔ cert matching", () => {
@@ -45,6 +45,33 @@ describe("net_probe", () => {
     const out = await tool("net_probe").handler(deps("internet OK\ndns OK\ndockerhub OK\nghcr NO\napt OK\nnpm OK\ndocker yes\ngit yes"), { server: "prod", timeoutSeconds: 6 });
     expect(out).toMatch(/ONLINE/);
     expect(out).toMatch(/✓ docker installed/);
+  });
+});
+
+// ── net_bridge (proxy config + the no-tunnel paths; the socket layer needs live validation) ────────
+describe("net_bridge", () => {
+  it("proxyConfigScript points apt + docker daemon + git + env at the proxy port", () => {
+    const s = proxyConfigScript(40123);
+    expect(s).toContain('Acquire::http::Proxy "http://127.0.0.1:40123"');
+    expect(s).toContain('HTTP_PROXY=http://127.0.0.1:40123');
+    expect(s).toContain("docker.service.d/adpix-proxy.conf");
+    expect(s).toContain("git config --system http.proxy http://127.0.0.1:40123");
+    expect(s).toContain("systemctl restart docker");
+  });
+  it("proxyTeardownScript removes every hook + restarts docker direct", () => {
+    const s = proxyTeardownScript();
+    expect(s).toContain("rm -f /etc/apt/apt.conf.d/01adpix-proxy");
+    expect(s).toContain("git config --system --unset http.proxy");
+    expect(s).toContain("systemctl restart docker");
+  });
+  it("status reports no active bridge (no socket opened)", async () => {
+    const out = await tool("net_bridge").handler(deps(""), { server: "prod", action: "status" });
+    expect(out).toMatch(/No bridge active/);
+  });
+  it("down cleans the config even with no tunnel open", async () => {
+    const out = await tool("net_bridge").handler(deps("done"), { server: "prod", action: "down" });
+    expect(out).toMatch(/Bridge DOWN/);
+    expect(out).toMatch(/no tunnel was open/);
   });
 });
 

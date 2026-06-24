@@ -53,7 +53,9 @@ function diagnoseAppFailure(out: string): string {
     hits.push("A3 — migrate.sh exports an empty PGSSLMODE, so pg_isready never passes even though Postgres is up. Workaround: set `PGSSLMODE=disable` in .env; upstream: only export PGSSLMODE when set.");
   if (/Syntax error at position|UNKNOWN_IDENTIFIER 'ip'|UNKNOWN_IDENTIFIER|Cannot find column/i.test(out))
     hits.push("A4 — migrate.sh splits SQL on `;` inside comments, corrupting the ClickHouse schema (e.g. the missing `events_local.ip`). Workaround: apply migrations/clickhouse/*.sql via `clickhouse-client --multiquery`; upstream: pipe each file to --multiquery (delete the hand-rolled splitter).");
-  return hits.length ? `\n\n## Known upstream issue detected (docs/upstream-app-fixes.md)\n${hits.map((h) => `  - ${h}`).join("\n")}` : "";
+  if (/Could not resolve host|Temporary failure in name resolution|Connection timed out|Network is unreachable|Failed to connect to (github|registry|deb\.debian|archive\.ubuntu)|Cannot initiate the connection/i.test(out))
+    hits.push("NET — the target couldn't reach the internet (DNS / GitHub / a registry / the apt mirror). Run net_probe to confirm, then net_bridge action:up to tunnel its egress through the MCP host, install, and net_bridge action:down. (Fallback: an offline bundle.)");
+  return hits.length ? `\n\n## Known issue detected (docs/upstream-app-fixes.md)\n${hits.map((h) => `  - ${h}`).join("\n")}` : "";
 }
 
 async function composePsTable(s: Session, dir: string): Promise<string> {

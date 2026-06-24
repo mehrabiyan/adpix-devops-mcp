@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import * as net from "node:net";
 import { Client, type ConnectConfig } from "ssh2";
 import type { ServerConfig } from "./registry.js";
 import { shq } from "./util.js";
@@ -219,4 +220,69 @@ export async function connect(server: ServerConfig, opts: ConnectOpts = {}): Pro
   conn.on("close", () => { pooled.broken = true; if (POOL.get(key) === pooled) POOL.delete(key); });
   if (poolable) POOL.set(key, pooled);
   return makeSession(pooled);
+}
+
+// ─── reverse-proxy tunnel (give an intranet-only target the MCP host's internet) ──────────────────
+// The MCP holds a dedicated SSH connection to the target and remote-forwards a localhost port on the
+// TARGET back to an inline HTTP/CONNECT proxy here — so the target's apt/docker/git, pointed at
+// http://127.0.0.1:<port>, egress through the MCP host. net_bridge sets the proxy config + tears down.
+interface Tunnel { client: Client; proxyPort: number; server: ServerConfig; close: () => void }
+const TUNNELS = new Map<string, Tunnel>();
+export function activeTunnel(name: string): { proxyPort: number } | null { const t = TUNNELS.get(name); return t ? { proxyPort: t.proxyPort } : null; }
+export function closeTunnel(name: string): boolean { const t = TUNNELS.get(name); if (!t) return false; t.close(); return true; }
+
+/** Handle one forwarded connection from the target as an HTTP forward proxy (CONNECT for https, absolute-form for http). */
+function handleProxyChannel(ch: NodeJS.ReadWriteStream): void {
+  let buf = Buffer.alloc(0); let wired = false;
+  const fail = (code: string) => { try { ch.end(`HTTP/1.1 ${code}\r\n\r\n`); } catch { /* */ } };
+  const onData = (d: Buffer) => {
+    if (wired) return;
+    buf = Buffer.concat([buf, d]);
+    const i = buf.indexOf("\r\n\r\n");
+    if (i === -1) { if (buf.length > 32_768) fail("400 Bad Request"); return; }
+    (ch as NodeJS.EventEmitter).removeListener("data", onData);
+    const head = buf.slice(0, i).toString("utf8");
+    const [reqLine, ...headerLines] = head.split("\r\n");
+    const m = reqLine.match(/^(\S+)\s+(\S+)\s+HTTP/);
+    if (!m) return fail("400 Bad Request");
+    const [, method, target] = m;
+    if (method.toUpperCase() === "CONNECT") {
+      const [host, port] = target.split(":");
+      const sock = net.connect(parseInt(port || "443", 10), host, () => { ch.write("HTTP/1.1 200 Connection Established\r\n\r\n"); wired = true; (ch as NodeJS.ReadableStream).pipe(sock); sock.pipe(ch as NodeJS.WritableStream); });
+      sock.on("error", () => fail("502 Bad Gateway"));
+    } else {
+      let u: URL; try { u = new URL(target); } catch { return fail("400 Bad Request"); }
+      const sock = net.connect(parseInt(u.port || "80", 10), u.hostname, () => {
+        const origin = (u.pathname || "/") + (u.search || "");
+        sock.write(`${method} ${origin} HTTP/1.1\r\n${headerLines.join("\r\n")}\r\n\r\n`);
+        if (buf.length > i + 4) sock.write(buf.slice(i + 4));
+        wired = true; (ch as NodeJS.ReadableStream).pipe(sock); sock.pipe(ch as NodeJS.WritableStream);
+      });
+      sock.on("error", () => fail("502 Bad Gateway"));
+    }
+  };
+  (ch as NodeJS.EventEmitter).on("data", onData);
+  (ch as NodeJS.EventEmitter).on("error", () => { /* channel closed */ });
+}
+
+/** Open (or reuse) a reverse-proxy tunnel to `server`. Returns the target-localhost port apt/docker/git point at. */
+export async function openReverseProxy(server: ServerConfig, opts: ConnectOpts = {}): Promise<{ proxyPort: number }> {
+  const existing = TUNNELS.get(server.name);
+  if (existing) return { proxyPort: existing.proxyPort };
+  const auth = buildAuth(server, opts);
+  const conn = new Client();
+  const hk: { value?: HostKeyOutcome } = {};
+  await new Promise<void>((resolve, reject) => {
+    conn.once("ready", () => resolve())
+      .once("error", (err) => reject(new Error(`tunnel SSH connect to ${server.username}@${server.host}:${server.port} failed: ${err.message}`)))
+      .connect({ host: server.host, port: server.port, username: server.username, readyTimeout: 20_000, keepaliveInterval: 10_000, keepaliveCountMax: 12, hostVerifier: makeHostVerifier(server.host, server.port, opts.strictHostKey ? {} : { tofu: false }, hk), ...auth.config });
+  });
+  const proxyPort = await new Promise<number>((resolve, reject) => {
+    conn.forwardIn("127.0.0.1", 0, (err, port) => (err ? reject(new Error(`remote port-forward refused on ${server.name} (sshd AllowTcpForwarding?): ${err.message}`)) : resolve(port)));
+  });
+  conn.on("tcp connection", (_info, accept) => { try { handleProxyChannel(accept()); } catch { /* */ } });
+  const t: Tunnel = { client: conn, proxyPort, server, close: () => { TUNNELS.delete(server.name); try { conn.end(); } catch { /* */ } } };
+  conn.on("close", () => TUNNELS.delete(server.name));
+  TUNNELS.set(server.name, t);
+  return { proxyPort };
 }
