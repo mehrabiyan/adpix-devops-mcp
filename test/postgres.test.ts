@@ -81,12 +81,12 @@ describe("postgres tune model", () => {
 
 // ---------------------------------------------------------------- registration
 describe("postgres tools registered", () => {
-  it("exposes the full DBA surface and the suite total is 89", () => {
+  it("exposes the full DBA surface and the suite total is 91", () => {
     const names = allTools.map((t) => t.name);
     for (const n of ["pg_health", "pg_tune", "pg_optimize", "pg_harden", "pg_backup", "pg_restore_db", "pg_replication", "pg_redeploy"])
       expect(names).toContain(n);
     expect(new Set(names).size).toBe(names.length);
-    expect(allTools.length).toBe(89);
+    expect(allTools.length).toBe(91);
   });
 });
 

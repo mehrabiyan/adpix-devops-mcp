@@ -24,6 +24,9 @@ export interface Session {
   readonly server: ServerConfig;
   readonly authMethod: "publickey" | "agent" | "password";
   exec(cmd: string, opts?: ExecOpts): Promise<ExecResult>;
+  /** Stream a LOCAL file (on the MCP host) to the target over SFTP — for large artifacts (offline
+   *  bundles, image tarballs) that base64-in-exec can't carry. Creates the remote dir + chmods. */
+  putFile?(localPath: string, remotePath: string, mode?: string): Promise<void>;
   close(): void;
 }
 
@@ -170,7 +173,18 @@ function makeSession(pooled: Pooled): Session {
     });
   };
 
-  return { server, authMethod: pooled.authMethod, exec, close };
+  const putFile = async (localPath: string, remotePath: string, mode = "644"): Promise<void> => {
+    await exec(`mkdir -p $(dirname ${shq(remotePath)})`, { timeoutMs: 30_000 });
+    await new Promise<void>((resolve, reject) => {
+      pooled.client.sftp((err, sftp) => {
+        if (err) return reject(new Error(`sftp open failed on ${server.name}: ${err.message}`));
+        sftp.fastPut(localPath, remotePath, (e) => { sftp.end(); if (e) return reject(new Error(`upload to ${server.name}:${remotePath} failed: ${e.message}`)); resolve(); });
+      });
+    });
+    await exec(`chmod ${mode} ${shq(remotePath)}`, { timeoutMs: 30_000 });
+  };
+
+  return { server, authMethod: pooled.authMethod, exec, close, putFile };
 }
 
 export async function connect(server: ServerConfig, opts: ConnectOpts = {}): Promise<Session> {

@@ -133,6 +133,8 @@ describe("MCP tools/call dispatch", () => {
 const FIXTURES: Record<string, Record<string, unknown>> = {
   net_probe: { server: "prod" },
   net_bridge: { server: "prod", action: "status" },
+  offline_bundle: { app: "tagmanager", buildImages: false },
+  offline_install: { server: "prod", app: "tagmanager", bundlePath: "/tmp/b.tar.gz" },
   cert_install: { server: "prod", domain: "x.internal" },
   console_install: { server: "prod", authIssuer: "https://auth.adpix.io" },
   service_relocate: { stack: "analytics", service: "ingest", fromServer: "prod", toServer: "spare", apply: false },

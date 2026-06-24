@@ -24,6 +24,7 @@ import { readinessTools } from "./readiness.js";
 import { relocateTools } from "./relocate.js";
 import { networkTools } from "./network.js";
 import { certTools } from "./certs.js";
+import { offlineTools } from "./offline.js";
 
 export const allTools: ToolDef[] = [
   ...serverTools,
@@ -51,4 +52,5 @@ export const allTools: ToolDef[] = [
   ...relocateTools,
   ...networkTools,
   ...certTools,
+  ...offlineTools,
 ];
