@@ -7,7 +7,18 @@ import type { ExecResult, Session } from "../src/ssh.js";
 import type { ServerConfig } from "../src/registry.js";
 import { allTools } from "../src/tools/index.js";
 import { summarizeProbe } from "../src/tools/network.js";
-import { saveCert, getCert, listCerts, deleteCert } from "../src/certstore.js";
+import { saveCert, getCert, listCerts, deleteCert, resolveCert, dnsMatch } from "../src/certstore.js";
+
+describe("FQDN ↔ cert matching", () => {
+  it("dnsMatch: exact + one-level wildcard, not multi-level", () => {
+    expect(dnsMatch("auth.adpix.io", "auth.adpix.io")).toBe(true);
+    expect(dnsMatch("*.adpix.io", "auth.adpix.io")).toBe(true);
+    expect(dnsMatch("*.adpix.io", "tag.adpix.io")).toBe(true);
+    expect(dnsMatch("*.adpix.io", "a.b.adpix.io")).toBe(false);  // wildcard is one level
+    expect(dnsMatch("*.adpix.io", "adpix.io")).toBe(false);
+    expect(dnsMatch("auth.adpix.io", "tag.adpix.io")).toBe(false);
+  });
+});
 
 const tool = (n: string) => { const t = allTools.find((t) => t.name === n); if (!t) throw new Error(n); return t; };
 const SRV: ServerConfig = { name: "prod", host: "10.0.0.1", port: 22, username: "root", adpixDir: "/opt/adpix" };
@@ -62,9 +73,16 @@ describe("certificate store", () => {
     expect(() => saveCert("x", { key: FIXTURE_KEY, cert: "nope" })).toThrow(/certificate is not PEM/);
   });
 
-  it("cert_install reports nothing to push when the domain has no stored cert", async () => {
+  it("resolveCert matches an FQDN to a wildcard-keyed cert (one cert covers every sub-domain)", () => {
+    saveCert("*.adpix.io", { key: FIXTURE_KEY, cert: FIXTURE_CERT });
+    expect(resolveCert("auth.adpix.io")?.domain).toBe("*.adpix.io");
+    expect(resolveCert("tag.adpix.io")?.domain).toBe("*.adpix.io");
+    expect(resolveCert("nope.example.com")).toBeNull();
+  });
+
+  it("cert_install reports nothing to push when no stored cert covers the FQDN", async () => {
     const out = await tool("cert_install").handler(deps(""), { server: "prod", domain: "absent.internal", reload: false });
-    expect(out).toMatch(/No stored certificate/);
+    expect(out).toMatch(/No stored certificate covers/);
   });
 
   it("cert_install pushes the fullchain + key (mode 600) and returns the Caddy tls directive", async () => {

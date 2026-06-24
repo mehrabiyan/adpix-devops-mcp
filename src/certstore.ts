@@ -11,8 +11,16 @@ import { registryDir } from "./registry.js";
  *
  * Files live under $ADPIX_DEVOPS_HOME/certs/<domain>/ — key.pem mode 600, cert/chain mode 644.
  */
-export interface CertMeta { domain: string; subject?: string; issuer?: string; notAfter?: string; daysLeft?: number; hasChain: boolean }
+export interface CertMeta { domain: string; subject?: string; issuer?: string; notAfter?: string; daysLeft?: number; hasChain: boolean; sans: string[] }
 export interface CertBundle { key: string; cert: string; chain: string }
+
+/** Does a cert DNS name (possibly a one-level wildcard) cover an FQDN? `*.adpix.io` covers `auth.adpix.io`. */
+export function dnsMatch(pattern: string, fqdn: string): boolean {
+  const p = pattern.toLowerCase(), f = fqdn.toLowerCase();
+  if (p === f) return true;
+  if (p.startsWith("*.")) { const suf = p.slice(1); return f.endsWith(suf) && !f.slice(0, f.length - suf.length).includes("."); }
+  return false;
+}
 
 function certsRoot(): string { return path.join(registryDir(), "certs"); }
 function safeDomain(domain: string): string { return domain.trim().toLowerCase().replace(/[^a-z0-9.\-_*]/g, "_"); }
@@ -42,14 +50,17 @@ export function getCert(domain: string): CertBundle | null {
 
 export function metaOf(domain: string): CertMeta {
   const c = getCert(domain);
-  const m: CertMeta = { domain, hasChain: !!(c && c.chain) };
+  const m: CertMeta = { domain, hasChain: !!(c && c.chain), sans: [] };
   if (c) {
     try {
       const x = new X509Certificate(c.cert);
       m.subject = x.subject; m.issuer = x.issuer; m.notAfter = x.validTo;
       m.daysLeft = Math.round((new Date(x.validTo).getTime() - Date.now()) / 86_400_000);
+      // the FQDNs this cert actually serves (SAN), e.g. "DNS:auth.adpix.io, DNS:*.adpix.io"
+      m.sans = (x.subjectAltName || "").split(",").map((s) => s.trim().replace(/^DNS:/i, "")).filter((s) => /^[*a-z0-9.\-_]+$/i.test(s));
     } catch { /* unparseable — still listed */ }
   }
+  if (!m.sans.length) m.sans = [domain]; // fall back to the store key
   return m;
 }
 
@@ -57,6 +68,17 @@ export function listCerts(): CertMeta[] {
   try {
     return fs.readdirSync(certsRoot()).filter((d) => fs.existsSync(path.join(certsRoot(), d, "cert.pem"))).map(metaOf);
   } catch { return []; }
+}
+
+/** Find the stored cert that serves a given FQDN — exact or wildcard SAN match (e.g. *.adpix.io). */
+export function resolveCert(fqdn: string): { domain: string; sans: string[]; bundle: CertBundle } | null {
+  for (const meta of listCerts()) {
+    if (meta.sans.some((s) => dnsMatch(s, fqdn))) {
+      const bundle = getCert(meta.domain);
+      if (bundle) return { domain: meta.domain, sans: meta.sans, bundle };
+    }
+  }
+  return null;
 }
 
 export function deleteCert(domain: string): void { fs.rmSync(domDir(domain), { recursive: true, force: true }); }

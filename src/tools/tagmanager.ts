@@ -5,6 +5,7 @@ import type { Session } from "../ssh.js";
 import { uploadFile } from "../adpix.js";
 import { shq, redactSecrets, lastLines, parseComposePs, table } from "../util.js";
 import { ensureSharedDeployKey, sharedKeyInstructions, toSshUrl, gitSshEnv, coreSshCommand, diagnoseDeployKey, parseGithubRemote } from "../github.js";
+import { pushCertForFqdn } from "./certs.js";
 import type { ToolDef } from "./types.js";
 
 const serverParam = z.string().optional().describe("Registered server name. Omit to use the default server.");
@@ -69,7 +70,7 @@ const TM_CONSOLE_DOCKERFILE =
 
 // Console compose (project adpix-console). With `bundleCaddy` it also fronts <domain> on :80/:443
 // (auto Let's Encrypt) and path-strips /api/* to the host-published TM api (8686) via the host gateway.
-function consoleComposeYaml(opts: { dir: string; bundleCaddy: boolean }): string {
+function consoleComposeYaml(opts: { dir: string; bundleCaddy: boolean; tlsCertDir?: string }): string {
   const args = [
     `        NEXT_PUBLIC_API_URL: \${NEXT_PUBLIC_API_URL:?set in deploy/.env.console}`,
     `        NEXT_PUBLIC_AUTH_ISSUER: \${NEXT_PUBLIC_AUTH_ISSUER:?set in deploy/.env.console}`,
@@ -87,6 +88,7 @@ function consoleComposeYaml(opts: { dir: string; bundleCaddy: boolean }): string
       `    extra_hosts:\n      - "host.docker.internal:host-gateway"\n` +
       `    volumes:\n` +
       `      - ${opts.dir}/deploy/Caddyfile.console:/etc/caddy/Caddyfile:ro\n` +
+      (opts.tlsCertDir ? `      - ${opts.tlsCertDir}:${opts.tlsCertDir}:ro\n` : "") +
       `      - caddy_console_data:/data\n` +
       `      - caddy_console_config:/config\n`
     : "";
@@ -108,9 +110,10 @@ function consoleComposeYaml(opts: { dir: string; bundleCaddy: boolean }): string
 // generate one and embed it as a YAML literal block (env-files can't hold multi-line PEM). mode 600.
 // When `domain` is set we also add a Caddy front door (auto Let's Encrypt + auto-renew) on :80/:443
 // reverse-proxying to auth:9696 — so https://<domain> serves a real cert without manual TLS wiring.
-function authComposeYaml(pem: string, opts: { domain?: string; dir?: string } = {}): string {
+function authComposeYaml(pem: string, opts: { domain?: string; dir?: string; tlsCertDir?: string } = {}): string {
   const body = pem.trim().split(/\r?\n/).map((l) => "        " + l).join("\n");
   const caddyfile = `${opts.dir ?? "/opt/adpix-tagmanager"}/deploy/Caddyfile.account`;
+  const tlsMount = opts.tlsCertDir ? `      - ${opts.tlsCertDir}:${opts.tlsCertDir}:ro\n` : "";
   const caddy = opts.domain
     ? `  caddy:\n` +
       `    image: caddy:2-alpine\n` +
@@ -119,6 +122,7 @@ function authComposeYaml(pem: string, opts: { domain?: string; dir?: string } = 
       `    ports:\n      - "80:80"\n      - "443:443"\n` +
       `    volumes:\n` +
       `      - ${caddyfile}:/etc/caddy/Caddyfile:ro\n` +
+      tlsMount +
       `      - caddy_data:/data\n` +
       `      - caddy_config:/config\n`
     : "";
@@ -428,22 +432,27 @@ export const tagmanagerTools: ToolDef[] = [
         }
         if (!/BEGIN/.test(pem)) return sections.join("\n\n") + `\n\nCould not generate the OIDC signing key (openssl missing?). Install openssl on ${srv.name} and re-run.`;
 
+        // If the Certificate Manager has a cert covering this FQDN (incl. a *.adpix.io wildcard), push it
+        // and serve it from Caddy (manual TLS) instead of Let's Encrypt — the air-gap / internal-CA path.
+        const cert = a.domain ? await pushCertForFqdn(s, a.domain) : null;
         await uploadFile(s, `${dir}/deploy/Dockerfile.auth`, TM_AUTH_DOCKERFILE, "644");
-        await uploadFile(s, `${dir}/deploy/docker-compose.auth.yml`, authComposeYaml(pem, { domain: a.domain, dir }), "600");
+        await uploadFile(s, `${dir}/deploy/docker-compose.auth.yml`, authComposeYaml(pem, { domain: a.domain, dir, tlsCertDir: cert?.dir }), "600");
         const origins = [
           a.consoleOrigin ? `CONSOLE_ORIGIN=${a.consoleOrigin}` : "",
           a.analyticsOrigin ? `ANALYTICS_ORIGIN=${a.analyticsOrigin}` : "",
           a.analyticsApiOrigin ? `ANALYTICS_API_ORIGIN=${a.analyticsApiOrigin}` : "",
         ].filter(Boolean).join("\n");
         await uploadFile(s, `${dir}/deploy/.env.account`, `AUTH_ISSUER=${issuer}\nAUTH_PORT=${a.port}\n${origins ? origins + "\n" : ""}BOOTSTRAP_ADMIN_EMAIL=${adminEmail}\nBOOTSTRAP_ADMIN_PASSWORD=${adminPw}\n`, "600");
-        // With a domain, front the IdP with Caddy: automatic Let's Encrypt (HTTP-01/TLS-ALPN) + renew.
+        // With a domain, front the IdP with Caddy. A stored cert covering the FQDN → manual TLS (air-gap /
+        // internal CA); otherwise automatic Let's Encrypt (HTTP-01/TLS-ALPN) + renew.
         if (a.domain) {
-          await uploadFile(s, `${dir}/deploy/Caddyfile.account`, `${a.domain} {\n\treverse_proxy auth:9696\n}\n`, "644");
+          const tlsLine = cert ? `\ttls ${cert.dir}/fullchain.pem ${cert.dir}/key.pem\n` : "";
+          await uploadFile(s, `${dir}/deploy/Caddyfile.account`, `${a.domain} {\n${tlsLine}\treverse_proxy auth:9696\n}\n`, "644");
           // Open the host firewall (ufw, if active) for the ACME challenge + HTTPS. A cloud firewall
           // (Hetzner/AWS SG) is separate and must be opened in the provider console.
           await s.exec(`command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi active && { ufw allow 80/tcp; ufw allow 443/tcp; } || true`, { timeoutMs: 30_000 });
         }
-        sections.push(`## Config\nIssuer ${issuer} · admin ${adminEmail} · embedded PGlite (volume authdata) · stable signing key${a.domain ? ` · Caddy TLS front door (Let's Encrypt, auto-renew) for ${a.domain}` : ""}. Wire this issuer as AUTH_ISSUER in Tag Manager + Analytics.`);
+        sections.push(`## Config\nIssuer ${issuer} · admin ${adminEmail} · embedded PGlite (volume authdata) · stable signing key${a.domain ? (cert ? ` · Caddy TLS via your uploaded cert "${cert.via}" (${cert.sans.join(", ")})` : ` · Caddy TLS front door (Let's Encrypt, auto-renew) for ${a.domain}`) : ""}. Wire this issuer as AUTH_ISSUER in Tag Manager + Analytics.`);
 
         const AC = `cd ${shq(dir)} && docker compose -p adpix-account -f deploy/docker-compose.auth.yml --env-file deploy/.env.account`;
         const build = await s.exec(`${AC} build 2>&1`, { timeoutMs: a.timeoutSeconds * 1000 });
@@ -526,8 +535,10 @@ export const tagmanagerTools: ToolDef[] = [
         const held = a.domain ? /:443\s/.test((await s.exec(`ss -ltn 2>/dev/null | grep ':443 ' || true`)).stdout) : false;
         const bundleCaddy = !!a.domain && !held;
 
+        // A stored cert covering this FQDN → manual TLS in the bundled Caddy; else auto Let's Encrypt.
+        const cert = bundleCaddy && a.domain ? await pushCertForFqdn(s, a.domain) : null;
         await uploadFile(s, `${dir}/deploy/Dockerfile.console`, TM_CONSOLE_DOCKERFILE, "644");
-        await uploadFile(s, `${dir}/deploy/docker-compose.console.yml`, consoleComposeYaml({ dir, bundleCaddy }), "644");
+        await uploadFile(s, `${dir}/deploy/docker-compose.console.yml`, consoleComposeYaml({ dir, bundleCaddy, tlsCertDir: cert?.dir }), "644");
         await uploadFile(
           s,
           `${dir}/deploy/.env.console`,
@@ -535,7 +546,8 @@ export const tagmanagerTools: ToolDef[] = [
           "600"
         );
         if (bundleCaddy) {
-          await uploadFile(s, `${dir}/deploy/Caddyfile.console`, `${a.domain} {\n\tencode gzip\n\thandle_path /api/* {\n\t\treverse_proxy host.docker.internal:8686\n\t}\n\thandle {\n\t\treverse_proxy console:3000\n\t}\n}\n`, "644");
+          const tlsLine = cert ? `\ttls ${cert.dir}/fullchain.pem ${cert.dir}/key.pem\n` : "";
+          await uploadFile(s, `${dir}/deploy/Caddyfile.console`, `${a.domain} {\n\tencode gzip\n${tlsLine}\thandle_path /api/* {\n\t\treverse_proxy host.docker.internal:8686\n\t}\n\thandle {\n\t\treverse_proxy console:3000\n\t}\n}\n`, "644");
           await s.exec(`command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi active && { ufw allow 80/tcp; ufw allow 443/tcp; } || true`, { timeoutMs: 30_000 });
         }
         sections.push(`## Config\nConsole UI ${tagUrl} · api ${apiUrl} · issuer ${a.authIssuer} · client ${a.oidcClientId}${bundleCaddy ? " · bundled Caddy (Let's Encrypt) + /api path-strip" : a.domain ? " · :443 already in use → console-only (add the route below to your front door)" : ""}. NEXT_PUBLIC_* are baked at build time — a URL change needs a rebuild.`);
