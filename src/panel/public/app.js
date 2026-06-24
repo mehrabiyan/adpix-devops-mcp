@@ -161,7 +161,7 @@ function render() {
         <nav class="nav" style="padding:12px 10px">${NAV.map((g) => `<div class="nav-group"><div class="nav-group-label">${esc(STR[S.lang].grp[g.grp])}</div>${g.items.map((id) => navItem(id, aj)).join("")}</div>`).join("")}</nav>
         <div style="border-top:1px solid var(--c-border);padding:10px"><button class="nav-item" id="collapse" style="width:100%;color:var(--c-muted)"><span class="ic">${ic("chevL", 16)}</span><span class="label">${t("collapse")}</span></button></div>
       </aside>
-      <main class="main"><div class="content" id="content" style="padding:22px 30px 60px"></div></main>
+      <main class="main"><div class="content" id="content" style="padding:22px 30px 104px"></div></main>
     </div></div>`;
   app.querySelectorAll("[data-nav]").forEach((n) => (n.onclick = (e) => { e.preventDefault(); nav(n.dataset.nav, null); }));
   app.querySelector("#collapse").onclick = () => { S.collapsed = !S.collapsed; render(); };
@@ -636,11 +636,10 @@ function aiKeyCard() {
 }
 function smtpCard() {
   const servers = (S.fleet?.nodes || []).map((n) => n.name);
-  const srvField = servers.length ? selField("server", servers, "(default server)") : `<input class="input" data-k="server" placeholder="(default server)">`;
+  const srvField = selField("server", servers, "MCP host (default)");
   const card = el(`<div style="${cardOpen}"><div style="${cardHead}">Email · SMTP test</div><div class="card-pad">
-    <div class="muted" style="font-size:12px;line-height:1.5;margin-bottom:12px">Validate an SMTP server from a host — DNS → connect → TLS → auth → optional test send. Enter working values in the AdPix <b>admin → email</b> settings afterward (the app stores them encrypted).</div>
+    <div class="muted" style="font-size:12px;line-height:1.5;margin-bottom:12px">Validate an SMTP server: DNS → connect → TLS → auth → optional test send. The host/port/credentials are all you need — it runs from the MCP host by default. Pick a server only to also check THAT host's egress (firewall) to the SMTP server. Enter working values in the AdPix <b>admin → email</b> settings afterward (stored encrypted).</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-      <label class="fld" style="grid-column:1/3"><span class="lab">server</span>${srvField}</label>
       <label class="fld"><span class="lab">host</span><input class="input" data-k="host" placeholder="smtp.sendgrid.net"></label>
       <label class="fld"><span class="lab">port</span><input class="input" data-k="port" data-num="1" placeholder="587"></label>
       <label class="fld"><span class="lab">security</span>${selField("security", ["starttls", "tls", "none"], "starttls (default)")}</label>
@@ -648,6 +647,7 @@ function smtpCard() {
       <label class="fld"><span class="lab">username</span><input class="input" data-k="username" placeholder="(optional)"></label>
       <label class="fld"><span class="lab">password</span><input class="input" type="password" data-k="password" placeholder="(optional)"></label>
       <label class="fld" style="grid-column:1/3"><span class="lab">test recipient — send a real email</span><input class="input" data-k="to" placeholder="you@you.com — omit to stop after auth"></label>
+      <label class="fld" style="grid-column:1/3"><span class="lab">test from (optional — checks a server's egress)</span>${srvField}</label>
     </div>
     <div style="display:flex;justify-content:flex-end;margin-top:12px"><button class="btn btn-primary test">Run test</button></div>
     <div class="res" style="margin-top:12px"></div>
@@ -682,15 +682,32 @@ function certManagerCard() {
   refresh();
   return card;
 }
+// open a settings card in a slide-in panel (declutters the page; the card brings its own header)
+function settingsDrawer(build, width = 540) {
+  const { panel, close } = slideIn(width);
+  panel.style.overflowY = "auto";
+  const x = el(`<button class="icon-btn" style="position:absolute;top:13px;inset-inline-end:14px;z-index:2;background:var(--c-card)">${ic("x", 16)}</button>`);
+  panel.appendChild(x); x.onclick = close;
+  const card = build(); card.style.border = "0"; card.style.borderRadius = "0"; card.style.boxShadow = "none"; card.style.minHeight = "100%";
+  panel.appendChild(card);
+}
 SCREENS.settings = (c) => {
-  c.innerHTML = H(STR[S.lang].nav.settings, "Control-plane updates, admins, sessions, audit, secrets, certificates.");
+  const owner = S.me.role === "owner";
+  c.innerHTML = H(STR[S.lang].nav.settings, "Control-plane updates, admins, sessions. Tools + logs open in a panel.");
   c.appendChild(mcpUpdateCard());
+
+  // tool launchers — the heavy tools/views live in a slide-in panel instead of stacking on the page
+  const launch = el(`<div style="${cardOpen};padding:14px 16px;margin-bottom:16px"><div style="font-weight:600;font-size:14px;margin-bottom:10px">Tools & logs</div><div class="row" style="display:flex;flex-wrap:wrap;gap:10px"></div></div>`);
+  const row = launch.querySelector(".row");
+  const launchers = [["Test SMTP", smtpCard, 540], owner && ["Certificates", certManagerCard, 560], owner && ["Audit log", adminAudit, 620]].filter(Boolean);
+  for (const [label, build, w] of launchers) { const btn = el(`<button class="btn btn-sm">${esc(label)}</button>`); btn.onclick = () => settingsDrawer(build, w); row.appendChild(btn); }
+  c.appendChild(launch);
+
   const grid = el(`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px;align-items:start"></div>`); c.appendChild(grid);
   const a = el(`<div style="display:flex;flex-direction:column;gap:16px"></div>`), b = el(`<div style="display:flex;flex-direction:column;gap:16px"></div>`); grid.append(a, b);
   a.appendChild(aiKeyCard());
-  b.appendChild(smtpCard());
-  if (S.me.role === "owner") { a.append(adminUsers(), adminSessions(), certManagerCard()); b.append(adminAudit(), adminKill()); }
-  else a.appendChild(el(`<div style="${cardOpen};padding:16px" class="muted">Signed in as <b>${esc(S.me.username)}</b> · role <b>${esc(S.me.role)}</b>. Admin controls are owner-only.</div>`));
+  if (owner) { a.appendChild(adminUsers()); b.append(adminSessions(), adminKill()); }
+  else b.appendChild(el(`<div style="${cardOpen};padding:16px" class="muted">Signed in as <b>${esc(S.me.username)}</b> · role <b>${esc(S.me.role)}</b>. Admin controls are owner-only.</div>`));
 };
 
 // ============================================================ generic action card
@@ -729,7 +746,8 @@ function readArgs(af) { const a = {}; af.querySelectorAll("[data-k]").forEach((i
 function slideIn(width = 440) {
   let scrim = document.querySelector(".scrim"); if (!scrim) { scrim = el(`<div class="scrim"></div>`); document.body.appendChild(scrim); }
   const panel = el(`<aside class="drawer" style="width:${width}px"></aside>`); document.body.appendChild(panel);
-  const close = () => { scrim.classList.remove("show"); panel.classList.remove("show"); setTimeout(() => panel.remove(), 240); scrim.onclick = null; };
+  const fab = document.querySelector(".chat-fab"); if (fab) fab.style.display = "none"; // don't let the assistant overlap drawer content
+  const close = () => { scrim.classList.remove("show"); panel.classList.remove("show"); setTimeout(() => panel.remove(), 240); scrim.onclick = null; if (fab && !S.chatOpen) fab.style.display = "flex"; };
   scrim.onclick = close; requestAnimationFrame(() => { scrim.classList.add("show"); panel.classList.add("show"); });
   return { panel, close };
 }

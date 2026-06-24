@@ -66,7 +66,7 @@ export const smtpTools: ToolDef[] = [
       "entering them in the AdPix admin email settings (which the app stores DB-encrypted). The password is passed " +
       "via env, never argv, and redacted from output.",
     schema: {
-      server: z.string().optional().describe("Run the test from this registered server (its egress path). Omit for the default."),
+      server: z.string().optional().describe("Optional: run the test from this server's egress (firewall check). Omit → run from the MCP host (host:port:creds is all you need to validate an SMTP server)."),
       host: z.string().describe("SMTP server hostname, e.g. smtp.sendgrid.net"),
       port: z.number().int().min(1).max(65535).default(587),
       security: z.enum(["starttls", "tls", "none"]).default("starttls").describe("starttls (587), tls/SMTPS (465), or none (25, unencrypted)"),
@@ -78,18 +78,20 @@ export const smtpTools: ToolDef[] = [
     annotations: { openWorldHint: true },
     handler: async (deps, args) => {
       const a = args as { server?: string; host: string; port: number; security: string; username?: string; password?: string; from: string; to?: string };
-      return withSession(deps, a.server, async (s, srv) => {
-        if ((await s.exec("command -v python3 >/dev/null && echo ok || echo no")).stdout.trim() !== "ok") {
-          return `python3 is not available on ${srv.name} — install it (apt-get install -y python3) to run the SMTP diagnostic.`;
+      const env =
+        `SH=${shq(a.host)} SP=${shq(String(a.port))} SEC=${shq(a.security)} SF=${shq(a.from)}` +
+        (a.username ? ` SU=${shq(a.username)}` : "") +
+        (a.password ? ` SPW=${shq(a.password)}` : "") +
+        (a.to ? ` STO=${shq(a.to)}` : "");
+      // host:port:creds is all you need to validate an SMTP server — run from the MCP host by default;
+      // a `server` only matters to also check THAT host's egress (firewall) to the SMTP server.
+      const run = async (exec: (cmd: string, opts?: { timeoutMs?: number }) => Promise<{ code: number; stdout: string; stderr: string }>, where: string): Promise<string> => {
+        if ((await exec("command -v python3 >/dev/null && echo ok || echo no")).stdout.trim() !== "ok") {
+          return `python3 is not available on ${where} — install it (apt-get install -y python3) to run the SMTP diagnostic.`;
         }
-        const env =
-          `SH=${shq(a.host)} SP=${shq(String(a.port))} SEC=${shq(a.security)} SF=${shq(a.from)}` +
-          (a.username ? ` SU=${shq(a.username)}` : "") +
-          (a.password ? ` SPW=${shq(a.password)}` : "") +
-          (a.to ? ` STO=${shq(a.to)}` : "");
-        const r = await s.exec(`${env} python3 - <<'ADPIXSMTP'\n${PY}\nADPIXSMTP`, { timeoutMs: 60_000 });
+        const r = await exec(`${env} python3 - <<'ADPIXSMTP'\n${PY}\nADPIXSMTP`, { timeoutMs: 60_000 });
         const line = r.stdout.split("\n").reverse().find((l) => l.trim().startsWith("{"));
-        if (!line) return `SMTP test could not run on ${srv.name}:\n${(r.stderr || r.stdout).slice(0, 600) || "(no output)"}`;
+        if (!line) return `SMTP test could not run on ${where}:\n${(r.stderr || r.stdout).slice(0, 600) || "(no output)"}`;
         let steps: { step: string; ok: boolean; detail: string }[];
         try { steps = JSON.parse(line).steps; } catch { return `Unexpected diagnostic output:\n${line.slice(0, 600)}`; }
         const failed = steps.find((x) => !x.ok);
@@ -97,8 +99,10 @@ export const smtpTools: ToolDef[] = [
         const verdict = failed
           ? `FAIL at "${failed.step}". ${a.to ? "Email was NOT sent." : ""}`
           : a.to ? "PASS — test email accepted for delivery." : "PASS — connect + auth OK (no test send requested).";
-        return `# SMTP test → ${a.host}:${a.port} (${a.security}) from ${srv.name}\n${body}\n\n${verdict}`;
-      });
+        return `# SMTP test → ${a.host}:${a.port} (${a.security}) from ${where}\n${body}\n\n${verdict}`;
+      };
+      if (!a.server) return run((cmd, opts) => deps.local(cmd, opts), "the MCP host");
+      return withSession(deps, a.server, (s, srv) => run((cmd, opts) => s.exec(cmd, opts), srv.name));
     },
   },
 ];

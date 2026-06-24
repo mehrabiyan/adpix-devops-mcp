@@ -9,11 +9,10 @@ const tool = (n: string) => { const t = allTools.find((t) => t.name === n); if (
 
 function deps(responses: [RegExp, Partial<ExecResult>][]) {
   const calls: string[] = [];
-  const session: Session = {
-    server: SRV, authMethod: "publickey", close: () => {},
-    exec: async (cmd: string): Promise<ExecResult> => { calls.push(cmd); for (const [re, r] of responses) if (re.test(cmd)) return { code: 0, stdout: "", stderr: "", ...r }; return { code: 0, stdout: "", stderr: "" }; },
-  };
-  return { deps: { resolve: () => SRV, connect: async () => session, local: async () => ({ code: 0, stdout: "", stderr: "" }) } as Deps, calls };
+  const run = async (cmd: string): Promise<ExecResult> => { calls.push(cmd); for (const [re, r] of responses) if (re.test(cmd)) return { code: 0, stdout: "", stderr: "", ...r }; return { code: 0, stdout: "", stderr: "" }; };
+  const session: Session = { server: SRV, authMethod: "publickey", close: () => {}, exec: run };
+  // no `server` arg → smtp_test runs from the MCP host (deps.local); a server → the session
+  return { deps: { resolve: () => SRV, connect: async () => session, local: run } as Deps, calls };
 }
 
 const steps = (s: object[]) => JSON.stringify({ steps: s });
@@ -41,6 +40,19 @@ describe("smtp_test", () => {
     const out = await tool("smtp_test").handler(d, { host: "smtp.x", port: 587, security: "starttls", username: "u", password: "bad", from: "f@x.com" });
     expect(out).toContain("✗ Authenticate");
     expect(out).toMatch(/FAIL at "Authenticate"/);
+  });
+
+  it("runs from the MCP host by default (no server needed to validate an SMTP server)", async () => {
+    const { deps: d } = deps([[/command -v python3/, { stdout: "ok" }], [/python3 - <</, { stdout: steps([{ step: "Authenticate", ok: true, detail: "ok" }]) }]]);
+    const out = await tool("smtp_test").handler(d, { host: "smtp.x", port: 587, security: "starttls", from: "f@x.com" });
+    expect(out).toMatch(/from the MCP host/);
+    expect(out).toMatch(/PASS/);
+  });
+
+  it("runs from a server's egress when one is given", async () => {
+    const { deps: d } = deps([[/command -v python3/, { stdout: "ok" }], [/python3 - <</, { stdout: steps([{ step: "Authenticate", ok: true, detail: "ok" }]) }]]);
+    const out = await tool("smtp_test").handler(d, { server: "prod", host: "smtp.x", port: 587, security: "starttls", from: "f@x.com" });
+    expect(out).toMatch(/from prod/);
   });
 
   it("tells the user when python3 is missing", async () => {
