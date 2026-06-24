@@ -22,6 +22,8 @@ import { smtpTools } from "./smtp.js";
 import { doctorTools } from "./doctor.js";
 import { readinessTools } from "./readiness.js";
 import { relocateTools } from "./relocate.js";
+import { networkTools } from "./network.js";
+import { certTools } from "./certs.js";
 
 export const allTools: ToolDef[] = [
   ...serverTools,
@@ -47,4 +49,6 @@ export const allTools: ToolDef[] = [
   ...doctorTools,
   ...readinessTools,
   ...relocateTools,
+  ...networkTools,
+  ...certTools,
 ];

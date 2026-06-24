@@ -662,14 +662,34 @@ function smtpCard() {
   };
   return card;
 }
+function certManagerCard() {
+  const card = el(`<div style="${cardOpen}"><div style="${cardHead}">Certificate Manager</div><div style="padding:14px 16px"><div class="muted" style="font-size:12px;margin-bottom:10px">Upload a TLS cert (private key + leaf + optional intermediate chain) for the air-gap / internal-CA path. Push it to a server's front door with <span class="mono">cert_install</span>. When a server has internet, installs still issue a Let's Encrypt cert by default.</div><div class="certlist" style="margin-bottom:6px"><div class="skel" style="width:50%"></div></div><div style="border-top:1px solid var(--c-divider);margin-top:8px;padding-top:12px"><input class="input cdom" placeholder="domain (e.g. tag.internal)" style="margin-bottom:8px"><textarea class="input ckey" placeholder="-----BEGIN PRIVATE KEY-----" style="width:100%;height:60px;font-family:var(--font-mono);font-size:11px;margin-bottom:8px;resize:vertical"></textarea><textarea class="input ccert" placeholder="-----BEGIN CERTIFICATE----- (leaf)" style="width:100%;height:60px;font-family:var(--font-mono);font-size:11px;margin-bottom:8px;resize:vertical"></textarea><textarea class="input cchain" placeholder="intermediate chain (optional)" style="width:100%;height:50px;font-family:var(--font-mono);font-size:11px;margin-bottom:10px;resize:vertical"></textarea><button class="btn btn-primary btn-sm cadd">Store certificate</button></div></div></div>`);
+  const refresh = async () => {
+    try {
+      const { certs = [] } = await api("/api/certs");
+      const list = card.querySelector(".certlist");
+      list.innerHTML = certs.length ? certs.map((ct) => `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--c-divider)"><div style="flex:1;min-width:0"><div style="font-family:var(--font-mono);font-size:13px">${esc(ct.domain)}</div><div class="muted" style="font-size:11px">${ct.notAfter ? `expires ${esc(String(ct.notAfter))}${typeof ct.daysLeft === "number" ? ` · <span style="color:var(--c-${ct.daysLeft < 14 ? "neg" : ct.daysLeft < 30 ? "warn" : "pos"})">${ct.daysLeft}d</span>` : ""}` : "unparsed"} · ${ct.hasChain ? "chain ✓" : "no chain"}</div></div><button class="btn btn-sm cpush" data-d="${esc(ct.domain)}">Install…</button><button class="iconbtn-sm cdel" data-d="${esc(ct.domain)}" title="Delete">${ic("stop", 12)}</button></div>`).join("") : `<div class="muted" style="font-size:12px">No certificates stored.</div>`;
+      list.querySelectorAll(".cdel").forEach((b) => (b.onclick = async () => { if (!confirm(`Delete the stored cert for ${b.dataset.d}?`)) return; try { await api("/api/certs?domain=" + encodeURIComponent(b.dataset.d), { method: "DELETE" }); refresh(); } catch (e) { toast(e.message, true); } }));
+      list.querySelectorAll(".cpush").forEach((b) => (b.onclick = () => action("cert_install", { domain: b.dataset.d })));
+    } catch { /* */ }
+  };
+  card.querySelector(".cadd").onclick = async () => {
+    const domain = card.querySelector(".cdom").value.trim(), key = card.querySelector(".ckey").value, cert = card.querySelector(".ccert").value, chain = card.querySelector(".cchain").value;
+    if (!domain || !key.trim() || !cert.trim()) return toast("domain, private key + certificate are required", true);
+    try { await api("/api/certs", { method: "POST", body: JSON.stringify({ domain, key, cert, chain }) }); toast("Stored " + domain); for (const sel of [".cdom", ".ckey", ".ccert", ".cchain"]) card.querySelector(sel).value = ""; refresh(); }
+    catch (e) { toast(e.message, true); }
+  };
+  refresh();
+  return card;
+}
 SCREENS.settings = (c) => {
-  c.innerHTML = H(STR[S.lang].nav.settings, "Control-plane updates, admins, sessions, audit, secrets.");
+  c.innerHTML = H(STR[S.lang].nav.settings, "Control-plane updates, admins, sessions, audit, secrets, certificates.");
   c.appendChild(mcpUpdateCard());
   const grid = el(`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px;align-items:start"></div>`); c.appendChild(grid);
   const a = el(`<div style="display:flex;flex-direction:column;gap:16px"></div>`), b = el(`<div style="display:flex;flex-direction:column;gap:16px"></div>`); grid.append(a, b);
   a.appendChild(aiKeyCard());
   b.appendChild(smtpCard());
-  if (S.me.role === "owner") { a.append(adminUsers(), adminSessions()); b.append(adminAudit(), adminKill()); }
+  if (S.me.role === "owner") { a.append(adminUsers(), adminSessions(), certManagerCard()); b.append(adminAudit(), adminKill()); }
   else a.appendChild(el(`<div style="${cardOpen};padding:16px" class="muted">Signed in as <b>${esc(S.me.username)}</b> · role <b>${esc(S.me.role)}</b>. Admin controls are owner-only.</div>`));
 };
 

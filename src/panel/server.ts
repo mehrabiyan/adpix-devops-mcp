@@ -26,6 +26,7 @@ import { buildDeployView } from "./aggregate/deploy.js";
 import { buildMcpStatus } from "./aggregate/mcp.js";
 import { buildStacksStatus } from "./aggregate/stacks.js";
 import { buildContainers } from "./aggregate/containers.js";
+import { listCerts, saveCert, deleteCert } from "../certstore.js";
 import { runChat } from "./chat.js";
 import { anthropicKeyStatus, setAnthropicKey, clearAnthropicKey } from "./secrets.js";
 import { appsCatalog, distinctRepos, appById } from "./apps.js";
@@ -221,6 +222,19 @@ export function createPanelServer(opts: PanelOpts): Server {
         if (!az.ok) { sendJson(res, 403, { error: az.reason }); return; }
         sendJson(res, 200, await buildContainers(deps, url.searchParams.get("server") ?? undefined));
         return;
+      }
+      // ---- Certificate Manager: upload/list/delete TLS bundles (MCP-side store) ----
+      if (path === "/api/certs" && method === "GET") { sendJson(res, 200, { certs: listCerts() }); return; }
+      if (path === "/api/certs" && method === "POST") {
+        if (actor.role !== "owner") { sendJson(res, 403, { error: "owner only" }); return; }
+        const b = await readBody(req);
+        try { const meta = saveCert(String(b.domain || ""), { key: String(b.key || ""), cert: String(b.cert || ""), chain: b.chain ? String(b.chain) : undefined }); audit(actor, "cert.save", String(b.domain || ""), {}, "stored"); sendJson(res, 200, meta); }
+        catch (e) { sendJson(res, 400, { error: (e as Error).message }); }
+        return;
+      }
+      if (path === "/api/certs" && method === "DELETE") {
+        if (actor.role !== "owner") { sendJson(res, 403, { error: "owner only" }); return; }
+        const dom = url.searchParams.get("domain") || ""; deleteCert(dom); audit(actor, "cert.delete", dom, {}, "removed"); sendJson(res, 200, { ok: true }); return;
       }
       // ---- databases view (structured stat cards + tune diff) ----
       if (path === "/api/db" && method === "GET") {
