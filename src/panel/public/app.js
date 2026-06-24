@@ -5,7 +5,27 @@
 // ============================================================ api
 const TOKEN = (location.hash.match(/token=([a-f0-9]+)/) || [])[1] || sessionStorage.getItem("adpix_token") || "";
 if (TOKEN) sessionStorage.setItem("adpix_token", TOKEN);
-history.replaceState(null, "", location.pathname);
+// keep the path (for routing), only strip the #token= secret from the URL
+history.replaceState(null, "", location.pathname || "/");
+
+// ---- URL routing: real, refreshable links per screen (the nav was JS-only before) ----
+const PATHS = { dashboard: "/", servers: "/servers", ha: "/ha", databases: "/databases", backups: "/backups", deploys: "/deploys", dns: "/dns", monitoring: "/monitoring", jobs: "/jobs", security: "/security", settings: "/settings" };
+function screenPath(screen, sd) { return screen === "serverDetail" ? "/server/" + encodeURIComponent(sd || "") : (PATHS[screen] || "/"); }
+function parsePath() {
+  const p = location.pathname || "/";
+  const m = p.match(/^\/server\/(.+)$/);
+  if (m) return { screen: "serverDetail", sd: decodeURIComponent(m[1]) };
+  const hit = Object.entries(PATHS).find(([, v]) => v === p && v !== "/");
+  return { screen: hit ? hit[0] : "dashboard", sd: null };
+}
+// navigate: update state + the URL (pushState) so refresh/back/forward land on the same page
+function nav(screen, sd, replace) {
+  S.screen = screen; S.sd = sd || null;
+  const path = screenPath(screen, sd);
+  if (path !== location.pathname) (replace ? history.replaceState : history.pushState).call(history, null, "", path);
+  render();
+}
+window.addEventListener("popstate", () => { const r = parsePath(); S.screen = r.screen; S.sd = r.sd; render(); });
 function authHeaders(mut) { if (S.mode === "session") return mut ? { "x-adpix-csrf": S.csrf } : {}; return TOKEN ? { "x-adpix-token": TOKEN } : {}; }
 async function api(path, opts = {}) {
   // the silent 3s polls (jobs + version) shouldn't flicker the top loader; everything else does
@@ -49,6 +69,19 @@ function nudgeReload() {
   document.getElementById("reloadnow").onclick = () => location.reload();
 }
 function startJobPoll() { mountTopLoader(); pollJobs(); if (jobPollTimer) clearInterval(jobPollTimer); jobPollTimer = setInterval(pollJobs, 3000); }
+
+// ---- auto-refresh: keep the current screen live without a manual page reload ----
+let autoTimer = null;
+const REFRESHABLE = new Set(["dashboard", "servers", "jobs", "ha", "deploys", "dns", "security"]);
+async function autoRefresh() {
+  if (document.hidden) return;                                                   // tab not visible
+  const ae = document.activeElement; if (ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)) return; // user typing
+  if (document.querySelector(".scrim, .palette")) return;                         // a wizard/modal/palette is open
+  await loadFleet().catch(() => {});
+  if (typeof S.onTick === "function") { try { S.onTick(); } catch { /* */ } }     // in-place refresh (serverDetail)
+  else if (REFRESHABLE.has(S.screen)) render();                                   // re-render read-only list screens
+}
+function startAutoRefresh() { if (autoTimer) clearInterval(autoTimer); autoTimer = setInterval(autoRefresh, 10_000); }
 const runTool = (n, a = {}) => api(`/api/tools/${n}`, { method: "POST", body: JSON.stringify({ args: a }) });
 const startJob = (tool, a = {}) => api("/api/jobs", { method: "POST", body: JSON.stringify({ tool, args: a, idempotencyKey: `${tool}:${Date.now()}` }) });
 async function startDestructive(tool, a = {}) { const pv = await api("/api/preview", { method: "POST", body: JSON.stringify({ tool, args: a }) }); return api("/api/jobs", { method: "POST", body: JSON.stringify({ tool, args: a, nonce: pv.nonce, idempotencyKey: `${tool}:${Date.now()}` }) }); }
@@ -106,6 +139,7 @@ const whenLabel = (s) => ({ succeeded: "just now", canceled: "cancelled", failed
 
 // ============================================================ shell
 function render() {
+  S.onTick = null; // each screen may set an in-place auto-refresher; cleared on every (re)render
   document.documentElement.dataset.theme = S.theme; document.body.dir = S.lang === "fa" ? "rtl" : "ltr"; document.body.lang = S.lang;
   const aj = S.fleet ? S.fleet.counts.activeJobs : 0;
   const cl = S.fleet ? S.fleet.cluster : { name: "—" };
@@ -129,7 +163,7 @@ function render() {
       </aside>
       <main class="main"><div class="content" id="content" style="padding:22px 30px 60px"></div></main>
     </div></div>`;
-  app.querySelectorAll("[data-nav]").forEach((n) => (n.onclick = () => { S.screen = n.dataset.nav; S.sd = null; render(); }));
+  app.querySelectorAll("[data-nav]").forEach((n) => (n.onclick = (e) => { e.preventDefault(); nav(n.dataset.nav, null); }));
   app.querySelector("#collapse").onclick = () => { S.collapsed = !S.collapsed; render(); };
   app.querySelector("#theme").onclick = () => { S.theme = S.theme === "dark" ? "light" : "dark"; localStorage.setItem("adpix_theme", S.theme); render(); };
   app.querySelector("#lang").onclick = () => { S.lang = S.lang === "en" ? "fa" : "en"; localStorage.setItem("adpix_lang", S.lang); render(); };
@@ -144,7 +178,7 @@ function render() {
 function navItem(id, aj) {
   const count = id === "servers" && S.fleet ? S.fleet.nodes.length : id === "jobs" && aj ? aj : id === "deploys" && S.fleet ? 0 : "";
   const badge = count ? `<span class="nav-badge" style="display:flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;border-radius:999px;font-size:11px;font-weight:600;flex:none;background:${id === "jobs" ? "var(--c-warn-bg)" : "var(--c-sunken)"};color:${id === "jobs" ? "var(--c-warn)" : "var(--c-muted)"}">${count}</span>` : "";
-  return `<div class="nav-item ${S.screen === id ? "active" : ""}" data-nav="${id}"><span class="ic">${ic(id)}</span><span class="label" style="flex:1">${esc(STR[S.lang].nav[id])}</span>${badge}</div>`;
+  return `<a href="${screenPath(id)}" class="nav-item ${S.screen === id ? "active" : ""}" data-nav="${id}" style="text-decoration:none;color:inherit"><span class="ic">${ic(id)}</span><span class="label" style="flex:1">${esc(STR[S.lang].nav[id])}</span>${badge}</a>`;
 }
 // header block
 function H(title, sub, actions = "") { return `<div style="display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:20px"><div style="flex:1;min-width:220px"><h1 style="margin:0;font-size:22px;font-weight:500;letter-spacing:-.3px">${esc(title)}</h1>${sub ? `<div style="color:var(--c-muted);font-size:13px;margin-top:4px">${esc(sub)}</div>` : ""}</div><div style="display:flex;gap:8px;flex-wrap:wrap">${actions}</div></div>`; }
@@ -198,7 +232,7 @@ SCREENS.dashboard = async (c) => {
   // recent jobs + alerts
   const row3 = el(`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px"></div>`); c.appendChild(row3);
   const rj = el(`<div style="${cardOpen}"><div style="${cardHead};display:flex;align-items:center;justify-content:space-between">${t("recentJobs")}<button data-go style="border:0;background:transparent;color:var(--c-brand);font:inherit;font-size:12.5px;font-weight:500;cursor:pointer">${t("viewAll")} →</button></div><div></div></div>`);
-  rj.querySelector("[data-go]").onclick = () => { S.screen = "jobs"; render(); };
+  rj.querySelector("[data-go]").onclick = () => nav("jobs");
   rj.lastElementChild.innerHTML = f.recentJobs.length ? f.recentJobs.map((j) => `<div style="display:flex;align-items:center;gap:11px;padding:11px 16px;border-bottom:1px solid var(--c-divider)"><span style="width:8px;height:8px;border-radius:50%;background:var(--c-${sc(j.status)});flex:none;${j.status === "running" ? "animation:pulse-dot 1.4s infinite" : ""}"></span><div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:500">${esc(j.tool)}</div><div style="font-size:11.5px;color:var(--c-muted);font-family:var(--font-mono)">${esc(j.target)}</div></div><span style="font-size:11.5px;color:var(--c-hint)">${esc(whenLabel(j.status))}</span></div>`).join("") : `<div class="empty">${t("noJobs")}</div>`;
   const al = el(`<div style="${cardOpen}"><div style="${cardHead};display:flex;align-items:center;justify-content:space-between">${t("activeAlerts")}<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--c-warn-bg);color:var(--c-warn)">${f.alerts.length}</span></div><div></div></div>`);
   al.lastElementChild.innerHTML = f.alerts.length ? f.alerts.map((a) => `<div style="display:flex;gap:11px;padding:12px 16px;border-bottom:1px solid var(--c-divider)"><span style="width:3px;border-radius:999px;background:var(--c-${a.level});flex:none;align-self:stretch"></span><div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:500">${esc(a.title)}</div><div style="font-size:12px;color:var(--c-muted);margin-top:2px">${esc(a.why)}</div>${a.action ? `<button data-fix="${esc(a.action.tool)}" style="margin-top:7px;border:1px solid var(--c-border);background:var(--c-card);color:var(--c-text);border-radius:7px;padding:4px 10px;font:inherit;font-size:12px;font-weight:500;cursor:pointer">${esc(a.action.label)}</button>` : ""}</div></div>`).join("") : `<div class="empty">No active alerts.</div>`;
@@ -297,7 +331,7 @@ SCREENS.servers = (c) => {
   const tbl = el(`<div style="${cardOpen}"><div style="display:grid;grid-template-columns:${cols};gap:12px;padding:11px 18px;border-bottom:1px solid var(--c-border);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--c-hint)"><span>Name</span><span>Role</span><span>Host</span><span>OS</span><span>Status</span><span style="text-align:end">Last seen</span></div><div class="rows"></div></div>`);
   c.appendChild(tbl);
   tbl.querySelector(".rows").innerHTML = f.nodes.length ? f.nodes.map((n) => `<button class="srvrow" data-n="${esc(n.name)}" style="width:100%;display:grid;grid-template-columns:${cols};gap:12px;align-items:center;padding:13px 18px;border:0;border-bottom:1px solid var(--c-divider);background:transparent;cursor:pointer;color:inherit;font:inherit;text-align:start"><span style="display:flex;align-items:center;gap:9px"><span style="width:8px;height:8px;border-radius:50%;background:var(--c-${sc(n.status)})"></span><span style="font-family:var(--font-mono);font-size:13px;font-weight:500">${esc(n.name)}</span></span><span style="font-size:12.5px;color:var(--c-muted)">${esc(n.role)}</span><span style="font-family:var(--font-mono);font-size:12.5px;color:var(--c-muted)">${esc(n.host)}</span><span style="font-size:12.5px;color:var(--c-muted)">${esc(n.os)}</span><span>${pill(cap(n.status), n.status)}</span><span style="text-align:end;font-size:12px;color:var(--c-hint);font-family:var(--font-mono)">${esc(n.lastSeen)}</span></button>`).join("") : `<div class="empty">No servers registered. Click “Add server”.</div>`;
-  tbl.querySelectorAll(".srvrow").forEach((r) => (r.onclick = () => { S.sd = r.dataset.n; S.screen = "serverDetail"; render(); }));
+  tbl.querySelectorAll(".srvrow").forEach((r) => (r.onclick = () => nav("serverDetail", r.dataset.n)));
 };
 
 // ============================================================ SERVER DETAIL
@@ -305,7 +339,7 @@ SCREENS.serverDetail = (c) => {
   const name = S.sd; const n = (S.fleet?.nodes || []).find((x) => x.name === name) || { name, host: "", os: "", status: "idle", cpu: 0, mem: 0, disk: 0 };
   c.innerHTML = `<button data-back style="display:inline-flex;align-items:center;gap:6px;border:0;background:transparent;color:var(--c-muted);font:inherit;font-size:12.5px;cursor:pointer;margin-bottom:12px;padding:0">${ic("chevL", 15)} ${STR[S.lang].nav.servers}</button>`
     + `<div style="display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:18px"><div style="flex:1;min-width:220px"><div style="display:flex;align-items:center;gap:10px"><h1 style="margin:0;font-size:22px;font-weight:500;font-family:var(--font-mono)">${esc(name)}</h1>${pill(cap(n.status), n.status)}</div><div style="color:var(--c-muted);font-size:13px;margin-top:5px;font-family:var(--font-mono)">${esc(n.host)} · ${esc(n.os)}</div></div><div style="display:flex;gap:8px">${bigBtn("diag", "Diagnose")}${bigBtn("backup", "Backup now")}${bigBtn("restart", "Restart all")}<button data-act="remove" style="display:inline-flex;align-items:center;gap:7px;height:38px;padding-inline:15px;border:1px solid var(--c-neg);background:transparent;color:var(--c-neg);border-radius:8px;cursor:pointer;font:inherit;font-size:13px;font-weight:500">${ic("stop", 14)} Remove</button></div></div>`;
-  c.querySelector("[data-back]").onclick = () => { S.screen = "servers"; S.sd = null; render(); };
+  c.querySelector("[data-back]").onclick = () => nav("servers");
   c.querySelector('[data-act="backup"]').onclick = () => action("adpix_backup", { server: name });
   c.querySelector('[data-act="restart"]').onclick = () => verifyAction({ name: "adpix_restart", title: `Restart all services on ${name}`, destructive: true }, { server: name });
   c.querySelector('[data-act="diag"]').onclick = () => {
@@ -314,9 +348,10 @@ SCREENS.serverDetail = (c) => {
     panel.querySelector(".dc").onclick = close;
     (async () => { try { const r = await runTool("stack_doctor", { server: name }); panel.querySelector(".diagout").textContent = String(r.result); } catch (e) { panel.querySelector(".diagout").textContent = e.message; } })();
   };
-  c.querySelector('[data-act="remove"]').onclick = () => confirmDanger("Remove server", `Remove <b class="mono">${esc(name)}</b> from the registry. This does <b>not</b> touch the machine or its data — it only stops AdPix from managing it. The MCP key stays authorized on the host until you revoke it.`, name, async () => { await startJob("server_remove", { name }); toast(`Removed ${name}`); await loadClusters(); await loadFleet(); S.screen = "servers"; S.sd = null; render(); }, "Remove server");
-  // gauges
-  c.appendChild(el(`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:16px">${[["CPU", n.cpu], ["MEMORY", n.mem], ["DISK", n.disk]].map(([l, v]) => `<div style="${cardOpen};padding:14px 16px"><div style="font-size:11.5px;color:var(--c-muted);text-transform:uppercase;letter-spacing:.5px">${l}</div><div style="font-size:26px;font-weight:400;margin:6px 0 8px;color:${metColor(v)}">${v}%</div><div style="height:5px;border-radius:999px;background:var(--c-sunken);overflow:hidden"><div style="height:100%;width:${v}%;background:${metColor(v)};border-radius:999px"></div></div></div>`).join("")}</div>`));
+  c.querySelector('[data-act="remove"]').onclick = () => confirmDanger("Remove server", `Remove <b class="mono">${esc(name)}</b> from the registry. This does <b>not</b> touch the machine or its data — it only stops AdPix from managing it. The MCP key stays authorized on the host until you revoke it.`, name, async () => { await startJob("server_remove", { name }); toast(`Removed ${name}`); await loadClusters(); await loadFleet(); nav("servers"); }, "Remove server");
+  // gauges (data-gv/data-gb so the auto-refresh updates them in place — no full re-render)
+  c.appendChild(el(`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:16px">${[["CPU", "cpu", n.cpu], ["MEMORY", "mem", n.mem], ["DISK", "disk", n.disk]].map(([l, k, v]) => `<div style="${cardOpen};padding:14px 16px"><div style="font-size:11.5px;color:var(--c-muted);text-transform:uppercase;letter-spacing:.5px">${l}</div><div data-gv="${k}" style="font-size:26px;font-weight:400;margin:6px 0 8px;color:${metColor(v)}">${v}%</div><div style="height:5px;border-radius:999px;background:var(--c-sunken);overflow:hidden"><div data-gb="${k}" style="height:100%;width:${v}%;background:${metColor(v)};border-radius:999px;transition:width .3s"></div></div></div>`).join("")}</div>`));
+  const refreshGauges = () => { const nn = (S.fleet?.nodes || []).find((x) => x.name === name); if (!nn) return; for (const k of ["cpu", "mem", "disk"]) { const gv = c.querySelector(`[data-gv="${k}"]`), gb = c.querySelector(`[data-gb="${k}"]`); if (gv) { gv.textContent = nn[k] + "%"; gv.style.color = metColor(nn[k]); } if (gb) { gb.style.width = nn[k] + "%"; gb.style.background = metColor(nn[k]); } } };
   const grid = el(`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;align-items:start"></div>`); c.appendChild(grid);
   const known = SERVICES;
   const cont = el(`<div style="${cardOpen}"><div style="${cardHead}">${t("containers")}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--c-divider)" class="cc"></div></div>`);
@@ -333,6 +368,7 @@ SCREENS.serverDetail = (c) => {
     } catch { /* leave dots grey */ }
   };
   loadContainers();
+  S.onTick = () => { loadContainers(); refreshGauges(); };  // auto-refresh this page in place (no reload)
   const logc = el(`<div style="${cardOpen};display:flex;flex-direction:column"><div style="${cardHead};display:flex;align-items:center;justify-content:space-between">${t("logs")}<button class="btn btn-sm" data-load>${t("refresh")}</button></div><div class="log-view" style="height:420px">click refresh to tail logs…</div></div>`);
   logc.querySelector("[data-load]").onclick = async () => { const lv = logc.querySelector(".log-view"); lv.textContent = "loading…"; try { const r = await runTool("adpix_logs", { server: name, lines: 120 }); lv.innerHTML = String(r.result).split("\n").map((l) => `<div class="row"><span style="color:var(--c-text)">${esc(l)}</span></div>`).join(""); lv.scrollTop = lv.scrollHeight; } catch (e) { lv.textContent = e.message; } };
   grid.append(cont, logc);
@@ -389,7 +425,7 @@ function renderResult(text, body) {
   body.innerHTML = `<pre class="out"${/^ERROR \(/.test(s) ? ' style="color:var(--c-neg)"' : ""}>${esc(s)}</pre>`;
 }
 function emptyState(title, sub, goto) { return `<div class="empty"><div style="font-weight:600;color:var(--c-text);margin-bottom:4px">${esc(title)}</div><div style="margin-bottom:14px">${esc(sub)}</div><button class="btn btn-primary btn-sm" data-empty="${goto}">${goto === "add" ? "+ Add server" : "Go to " + (STR[S.lang].nav[goto] || goto)}</button></div>`; }
-function wireEmpty(body) { const b = body.querySelector("[data-empty]"); if (b) b.onclick = () => { if (b.dataset.empty === "add") addServerWizard(); else { S.screen = b.dataset.empty; render(); } }; }
+function wireEmpty(body) { const b = body.querySelector("[data-empty]"); if (b) b.onclick = () => { if (b.dataset.empty === "add") addServerWizard(); else nav(b.dataset.empty); }; }
 
 function toolPanel(title, tool, args = {}) {
   const card = el(`<div style="${cardOpen}"><div style="${cardHead};display:flex;align-items:center;justify-content:space-between">${esc(title)}<button class="btn btn-sm refresh">${t("refresh")}</button></div><div class="card-pad"><div class="body"><div class="skel" style="width:70%"></div><div class="skel" style="width:50%;margin-top:8px"></div></div></div></div>`);
@@ -1071,7 +1107,7 @@ function openPalette() {
   const pal = el(`<div class="palette"><div class="box"><input placeholder="${esc(t("search"))}"><div class="opts"></div></div></div>`);
   const inp = pal.querySelector("input"), opts = pal.querySelector(".opts"); let sel = 0, fil = items;
   const drw = () => { opts.innerHTML = fil.slice(0, 8).map((o, k) => `<div class="opt ${k === sel ? "sel" : ""}" data-i="${k}">${ic(o.kind === "screen" ? o.id : "play", 16)}<span>${esc(o.label)}</span></div>`).join(""); opts.querySelectorAll("[data-i]").forEach((e) => (e.onclick = () => pick(fil[+e.dataset.i]))); };
-  const pick = (o) => { pal.remove(); if (!o) return; if (o.kind === "screen") { S.screen = o.id; S.sd = null; render(); } else action(o.id); };
+  const pick = (o) => { pal.remove(); if (!o) return; if (o.kind === "screen") nav(o.id); else action(o.id); };
   inp.oninput = () => { const q = inp.value.toLowerCase(); fil = items.filter((o) => o.label.toLowerCase().includes(q)); sel = 0; drw(); };
   inp.onkeydown = (e) => { if (e.key === "ArrowDown") { sel = Math.min(sel + 1, Math.min(fil.length, 8) - 1); drw(); } else if (e.key === "ArrowUp") { sel = Math.max(sel - 1, 0); drw(); } else if (e.key === "Enter") pick(fil[sel]); else if (e.key === "Escape") pal.remove(); };
   pal.onclick = (e) => { if (e.target === pal) pal.remove(); };
@@ -1132,7 +1168,7 @@ function renderSetup(msg = "") { authShell(`<p class="muted" style="margin-top:0
 // ============================================================ boot
 async function boot() {
   let me = null; try { me = await api("/api/me"); } catch {}
-  if (me) { S.me = me.actor; S.mode = me.mode; S.buildId = me.buildId; if (me.csrf) S.csrf = me.csrf; if (me.killed) { authShell(`<div class="badge b-neg"><span class="dot"></span>Kill-switch engaged</div><p class="muted">Destructive ops disabled, sessions revoked. An owner must release it.</p><button class="btn" id="r" style="width:100%;justify-content:center;margin-top:8px">Reload</button>`); document.getElementById("r").onclick = () => location.reload(); return; } try { const { tools } = await api("/api/catalog"); S.catalog = tools; } catch (e) { authShell(`<div class="empty">Failed to load: ${esc(e.message)}</div>`); return; } await loadClusters(); await loadFleet(); render(); startJobPoll(); return; }
+  if (me) { S.me = me.actor; S.mode = me.mode; S.buildId = me.buildId; if (me.csrf) S.csrf = me.csrf; if (me.killed) { authShell(`<div class="badge b-neg"><span class="dot"></span>Kill-switch engaged</div><p class="muted">Destructive ops disabled, sessions revoked. An owner must release it.</p><button class="btn" id="r" style="width:100%;justify-content:center;margin-top:8px">Reload</button>`); document.getElementById("r").onclick = () => location.reload(); return; } try { const { tools } = await api("/api/catalog"); S.catalog = tools; } catch (e) { authShell(`<div class="empty">Failed to load: ${esc(e.message)}</div>`); return; } await loadClusters(); await loadFleet(); const r0 = parsePath(); S.screen = r0.screen; S.sd = r0.sd; render(); startJobPoll(); startAutoRefresh(); return; }
   let status = {}; try { status = await fetch("/api/status").then((r) => r.json()); } catch {}
   if (status.adminsExist) return renderLogin();
   if (TOKEN) return renderSetup();
