@@ -1,11 +1,24 @@
 import { describe, expect, it } from "vitest";
 import { allTools } from "../src/tools/index.js";
+import { gitSyncCmd } from "../src/adpix.js";
 import type { Deps } from "../src/deps.js";
 import type { ExecResult, Session } from "../src/ssh.js";
 import type { ServerConfig } from "../src/registry.js";
 
 const SRV: ServerConfig = { name: "node-a", host: "10.0.0.11", port: 22, username: "root", adpixDir: "/opt/adpix" };
 const tool = (n: string) => { const t = allTools.find((t) => t.name === n); if (!t) throw new Error(n); return t; };
+
+describe("gitSyncCmd (updates survive local on-box edits to tracked files)", () => {
+  it("stashes tracked edits → fast-forwards → re-applies; resets to upstream on conflict; propagates exit", () => {
+    const c = gitSyncCmd("/opt/adpix", "main");
+    expect(c).toContain("git status --porcelain -uno");        // only TRACKED mods trigger a stash (not untracked backups/)
+    expect(c).toContain("git stash push -m adpix-update");
+    expect(c).toContain("git pull --ff-only origin 'main'");
+    expect(c).toContain("git stash pop");                       // re-apply local edits on top
+    expect(c).toContain("git reset --hard HEAD");               // pop conflict → keep the new upstream version
+    expect(c).toMatch(/git rev-parse HEAD; exit \$_p/);         // ends with HEAD; exits with the pull's status
+  });
+});
 
 // fake deps; `head` controls the two `rev-parse --short HEAD` answers (before, after); `fail` forces a command to exit 1
 function stackDeps(opts: { before?: string; after?: string; fail?: RegExp } = {}) {

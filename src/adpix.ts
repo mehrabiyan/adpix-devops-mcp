@@ -110,6 +110,24 @@ export function waitHealthyCmd(timeoutSec = 120): string {
   );
 }
 
+/**
+ * Fast-forward `dir` to origin/<branch>, surviving local on-box edits to TRACKED files (e.g. an operator
+ * patching ops/clickhouse/users.d/allow-network.xml on the server) which would otherwise abort the pull
+ * with "Your local changes would be overwritten by merge". Stash → pull → re-apply (pop). On a pop
+ * conflict (upstream changed the same file — a fix landed), reset to the new upstream version but keep
+ * the edits recoverable in the stash. Ends with `git rev-parse HEAD`; exits with the pull's status.
+ * `kEnv` is an optional `GIT_SSH_COMMAND=… ` prefix for fetch/pull.
+ */
+export function gitSyncCmd(dir: string, branch: string, kEnv = ""): string {
+  return (
+    `cd ${shq(dir)} && _st=0; ` +
+    `if [ -n "$(git status --porcelain -uno 2>/dev/null)" ]; then git stash push -m adpix-update >/dev/null 2>&1 && _st=1; fi; ` +
+    `${kEnv}git fetch origin ${shq(branch)} 2>&1 && git checkout ${shq(branch)} 2>&1 && ${kEnv}git pull --ff-only origin ${shq(branch)} 2>&1; _p=$?; ` +
+    `if [ "$_st" = 1 ]; then if git stash pop >/dev/null 2>&1; then echo '(re-applied local on-box edits on top of the update)'; else git reset --hard HEAD >/dev/null 2>&1; echo 'NOTE: local on-box edits to tracked files conflicted with the update and were reset to the new upstream version (recover with: git stash show -p stash@{0}). Re-land such fixes upstream so they survive updates — see docs/upstream-app-fixes.md.'; fi; fi; ` +
+    `git rev-parse HEAD; exit $_p`
+  );
+}
+
 /** Upload arbitrary file content via base64 (immune to shell quoting issues). */
 export async function uploadFile(
   s: Session,

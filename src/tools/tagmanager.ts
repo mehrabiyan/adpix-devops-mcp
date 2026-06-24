@@ -2,7 +2,7 @@ import { z } from "zod";
 import { withSession } from "../deps.js";
 import type { Deps } from "../deps.js";
 import type { Session } from "../ssh.js";
-import { uploadFile } from "../adpix.js";
+import { uploadFile, gitSyncCmd } from "../adpix.js";
 import { shq, redactSecrets, lastLines, parseComposePs, table } from "../util.js";
 import { ensureSharedDeployKey, sharedKeyInstructions, toSshUrl, gitSshEnv, coreSshCommand, diagnoseDeployKey, parseGithubRemote } from "../github.js";
 import { pushCertForFqdn } from "./certs.js";
@@ -728,10 +728,7 @@ export const tagmanagerTools: ToolDef[] = [
         const prev = (await s.exec(`cd ${shq(dir)} && git rev-parse HEAD`)).stdout.trim();
         const curBranch = (await s.exec(`cd ${shq(dir)} && git rev-parse --abbrev-ref HEAD`)).stdout.trim();
         const branch = a.branch || curBranch;
-        const pull = await s.exec(
-          `cd ${shq(dir)} && git fetch origin ${shq(branch)} && git checkout ${shq(branch)} && git pull --ff-only origin ${shq(branch)} && git rev-parse HEAD`,
-          { timeoutMs: 300_000 }
-        );
+        const pull = await s.exec(gitSyncCmd(dir, branch), { timeoutMs: 300_000 });
         if (pull.code !== 0) return `Git update failed (exit ${pull.code}):\n${lastLines(pull.stderr || pull.stdout, 25)}`;
         const next = pull.stdout.trim().split("\n").pop() ?? "";
         sections.push(`## Code\n${prev.slice(0, 10)} → ${next.slice(0, 10)} on ${branch}`);

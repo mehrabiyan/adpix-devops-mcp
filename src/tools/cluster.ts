@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { loadRegistry, saveRegistry, registryPath, resolveCluster, resolveServer } from "../registry.js";
 import { withSession } from "../deps.js";
-import { waitHealthyCmd } from "../adpix.js";
+import { waitHealthyCmd, gitSyncCmd } from "../adpix.js";
 import { shq, lastLines, redactSecrets, table } from "../util.js";
 import { DEFAULT_LAUNCH_HOSTS } from "../launch/hosts.js";
 import { tmCompose, tmHealthGate } from "./tagmanager.js";
@@ -187,11 +187,8 @@ export const clusterTools: ToolDef[] = [
             const isRepo = (await s.exec(`test -d ${shq(dir + "/.git")} && echo yes || echo no`)).stdout.trim() === "yes";
             if (!isRepo) return { ok: false, detail: `no ${a.stack} checkout at ${dir}` };
             const branch = a.branch || (await s.exec(`cd ${shq(dir)} && git rev-parse --abbrev-ref HEAD`)).stdout.trim();
-            const pull = await s.exec(
-              `cd ${shq(dir)} && git fetch origin ${shq(branch)} && git checkout ${shq(branch)} && git pull --ff-only origin ${shq(branch)} 2>&1`,
-              { timeoutMs: 300_000 }
-            );
-            if (pull.code !== 0) return { ok: false, detail: `git update failed:\n${lastLines(pull.stdout, 8)}` };
+            const pull = await s.exec(gitSyncCmd(dir, branch), { timeoutMs: 300_000 });
+            if (pull.code !== 0) return { ok: false, detail: `git update failed (local edits stashed/safe):\n${lastLines(pull.stdout, 8)}` };
 
             if (a.stack === "adpix") {
               const dep = await s.exec(`cd ${shq(dir)} && ./scripts/deploy.sh 2>&1`, { timeoutMs: a.timeoutSeconds * 1000 });

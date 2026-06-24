@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { withSession } from "../deps.js";
 import type { Session } from "../ssh.js";
-import { ADPIX_REPO_URL, composeCmd, requireStack, stackState, waitHealthyCmd } from "../adpix.js";
+import { ADPIX_REPO_URL, composeCmd, gitSyncCmd, requireStack, stackState, waitHealthyCmd } from "../adpix.js";
 import { tmCompose, tmHealthGate } from "./tagmanager.js";
 import { shq, lastLines } from "../util.js";
 import type { ToolDef } from "./types.js";
@@ -151,8 +151,8 @@ export const stackTools: ToolDef[] = [
         if (ni) return ni;
         const branch = a.branch || (await git("rev-parse --abbrev-ref HEAD")).stdout.trim() || "main";
         const before = (await git("rev-parse --short HEAD")).stdout.trim();
-        const pull = await git(`fetch origin ${shq(branch)} 2>&1 && git checkout ${shq(branch)} 2>&1 && git pull --ff-only origin ${shq(branch)} 2>&1`);
-        if (pull.code !== 0) return `git pull failed:\n${lastLines(pull.stdout, 15)}`;
+        const pull = await s.exec(gitSyncCmd(dir, branch), { timeoutMs: 300_000 });
+        if (pull.code !== 0) return `git pull failed (local on-box edits are stashed/safe):\n${lastLines(pull.stdout, 15)}`;
         const after = (await git("rev-parse --short HEAD")).stdout.trim();
         if (before === after && !a.force) return `${a.stack} already up to date (${before}). Pass force:true to rebuild anyway.`;
 

@@ -4,6 +4,7 @@ import type { Session } from "../ssh.js";
 import {
   ADPIX_REPO_URL,
   composeCmd,
+  gitSyncCmd,
   requireStack,
   stackState,
   readEnvVar,
@@ -333,13 +334,11 @@ export const lifecycleTools: ToolDef[] = [
           sections.push(`## Backup\n${lastLines(bk.stdout.trim(), 12)}`);
         }
 
-        const pull = await s.exec(
-          `cd ${shq(dir)} && git fetch origin ${shq(branch)} && git checkout ${shq(branch)} && git pull --ff-only origin ${shq(branch)} && git rev-parse HEAD`,
-          { timeoutMs: 300_000 }
-        );
+        const pull = await s.exec(gitSyncCmd(dir, branch), { timeoutMs: 300_000 });
         if (pull.code !== 0) {
           return sections.concat(`Git update failed (exit ${pull.code}):\n${lastLines(pull.stderr || pull.stdout, 30)}`).join("\n\n");
         }
+        if (/NOTE: local on-box edits/.test(pull.stdout)) sections.push(`## Local edits\n${pull.stdout.split("\n").find((l) => /NOTE:/.test(l))}`);
         const next = pull.stdout.trim().split("\n").pop() ?? "";
         sections.push(`## Code\n${prev.slice(0, 10)} → ${next.slice(0, 10)} on ${branch}`);
         if (next === prev && !a.force) {
