@@ -84,64 +84,59 @@ export interface ConnectOpts {
   privateKeyPathOverride?: string;
 }
 
-export async function connect(server: ServerConfig, opts: ConnectOpts = {}): Promise<Session> {
-  const auth = buildAuth(server, opts);
-  const conn = new Client();
-  // Host-key verification: TOFU-pin by default, strict on demand. Before this the MCP
-  // verified NOTHING and accepted any host key — MITM-able.
-  const hk: { value?: HostKeyOutcome } = {};
-  const tofu = opts.strictHostKey ? false : undefined;
+// ─── connection pool ────────────────────────────────────────────────────────────────────────────
+// connect() used to open a fresh SSH connection (TCP + handshake + auth, ~1–3s) on EVERY call. The
+// panel fires many sequential calls per server, so each one paid that cost. We now reuse one live
+// ssh2 client per server (ssh2 multiplexes many exec channels over one connection); close() releases
+// it to the pool, idle connections are evicted after a TTL, and a broken/timed-out one is dropped so
+// the next connect() reconnects. Password connects are NOT pooled (one-shot, per the secret convention).
+interface Pooled { client: Client; key: string; server: ServerConfig; authMethod: Session["authMethod"]; refs: number; idle?: ReturnType<typeof setTimeout>; broken: boolean }
+const POOL = new Map<string, Pooled>();
+const POOL_IDLE_MS = 120_000;
 
-  await new Promise<void>((resolve, reject) => {
-    conn
-      .once("ready", () => resolve())
-      .once("error", (err) => {
-        const o = hk.value;
-        if (o && (o.status === "mismatch" || o.status === "unpinned-strict")) {
-          return reject(new Error(hostKeyError(server.host, server.port, o)));
-        }
-        reject(new Error(`SSH connect to ${server.username}@${server.host}:${server.port} failed: ${err.message}`));
-      })
-      .connect({
-        host: server.host,
-        port: server.port,
-        username: server.username,
-        readyTimeout: 20_000,
-        keepaliveInterval: 10_000,
-        keepaliveCountMax: 12,
-        hostVerifier: makeHostVerifier(server.host, server.port, tofu === false ? { tofu: false } : {}, hk),
-        ...auth.config,
-      });
-  });
+function evictPooled(p: Pooled): void {
+  if (p.idle) { clearTimeout(p.idle); p.idle = undefined; }
+  if (POOL.get(p.key) === p) POOL.delete(p.key);
+  if (!p.broken) { p.broken = true; try { p.client.end(); } catch { /* already gone */ } }
+}
+function releasePooled(p: Pooled): void {
+  p.refs = Math.max(0, p.refs - 1);
+  if (p.refs === 0 && !p.broken) {
+    if (p.idle) clearTimeout(p.idle);
+    p.idle = setTimeout(() => { if (p.refs === 0) evictPooled(p); }, POOL_IDLE_MS);
+    if (typeof p.idle.unref === "function") p.idle.unref(); // don't keep the process alive
+  }
+}
+/** End every pooled connection — clean shutdown / between tests. */
+export function closeAllSessions(): void { for (const p of [...POOL.values()]) evictPooled(p); }
 
-  let closed = false;
-  const close = () => {
-    if (!closed) {
-      closed = true;
-      conn.end();
-    }
+function makeSession(pooled: Pooled): Session {
+  const { server } = pooled;
+  let released = false;
+  const close = (): void => {
+    if (released) return;
+    released = true;
+    if (POOL.get(pooled.key) === pooled) releasePooled(pooled); // pooled → return for reuse
+    else if (!pooled.broken) { try { pooled.client.end(); } catch { /* */ } } // one-shot (password) → end
   };
 
   const exec = (cmd: string, opts: ExecOpts = {}): Promise<ExecResult> => {
     const timeoutMs = opts.timeoutMs ?? 120_000;
     const sudo = opts.sudo ?? true;
-    // Run through bash for a consistent shell; non-root users get `sudo -n`
-    // (passwordless sudo is a documented requirement for non-root accounts).
     const wrapped =
       server.username !== "root" && sudo ? `sudo -n bash -c ${shq(cmd)}` : `bash -c ${shq(cmd)}`;
 
     return new Promise<ExecResult>((resolve, reject) => {
-      conn.exec(wrapped, (err, stream) => {
-        if (err) return reject(new Error(`exec failed on ${server.name}: ${err.message}`));
+      pooled.client.exec(wrapped, (err, stream) => {
+        if (err) { evictPooled(pooled); return reject(new Error(`exec failed on ${server.name}: ${err.message}`)); }
         let stdout = "";
         let stderr = "";
         let done = false;
         const timer = setTimeout(() => {
           if (done) return;
           done = true;
-          // A stuck remote command holds the channel — drop the connection.
-          conn.end();
-          closed = true;
+          // A stuck remote command holds the channel — drop the connection (and evict from the pool).
+          evictPooled(pooled);
           reject(
             new Error(
               `Command timed out after ${Math.round(timeoutMs / 1000)}s on ${server.name}.\n` +
@@ -174,5 +169,54 @@ export async function connect(server: ServerConfig, opts: ConnectOpts = {}): Pro
     });
   };
 
-  return { server, authMethod: auth.method, exec, close };
+  return { server, authMethod: pooled.authMethod, exec, close };
+}
+
+export async function connect(server: ServerConfig, opts: ConnectOpts = {}): Promise<Session> {
+  const auth = buildAuth(server, opts);
+  const poolable = auth.method !== "password"; // never reuse a password connection
+  const key = `${server.username}@${server.host}:${server.port}|${opts.privateKeyPathOverride ?? server.privateKeyPath ?? auth.method}|${opts.strictHostKey ? "strict" : "tofu"}`;
+  if (poolable) {
+    const hit = POOL.get(key);
+    if (hit && !hit.broken) {
+      if (hit.idle) { clearTimeout(hit.idle); hit.idle = undefined; }
+      hit.refs++;
+      return makeSession(hit);
+    }
+  }
+
+  const conn = new Client();
+  // Host-key verification: TOFU-pin by default, strict on demand. Before this the MCP
+  // verified NOTHING and accepted any host key — MITM-able.
+  const hk: { value?: HostKeyOutcome } = {};
+  const tofu = opts.strictHostKey ? false : undefined;
+
+  await new Promise<void>((resolve, reject) => {
+    conn
+      .once("ready", () => resolve())
+      .once("error", (err) => {
+        const o = hk.value;
+        if (o && (o.status === "mismatch" || o.status === "unpinned-strict")) {
+          return reject(new Error(hostKeyError(server.host, server.port, o)));
+        }
+        reject(new Error(`SSH connect to ${server.username}@${server.host}:${server.port} failed: ${err.message}`));
+      })
+      .connect({
+        host: server.host,
+        port: server.port,
+        username: server.username,
+        readyTimeout: 20_000,
+        keepaliveInterval: 10_000,
+        keepaliveCountMax: 12,
+        hostVerifier: makeHostVerifier(server.host, server.port, tofu === false ? { tofu: false } : {}, hk),
+        ...auth.config,
+      });
+  });
+
+  const pooled: Pooled = { client: conn, key, server, authMethod: auth.method, refs: 1, broken: false };
+  // A dropped/errored connection must leave the pool so the next connect() makes a fresh one.
+  conn.on("error", () => { pooled.broken = true; if (POOL.get(key) === pooled) POOL.delete(key); });
+  conn.on("close", () => { pooled.broken = true; if (POOL.get(key) === pooled) POOL.delete(key); });
+  if (poolable) POOL.set(key, pooled);
+  return makeSession(pooled);
 }

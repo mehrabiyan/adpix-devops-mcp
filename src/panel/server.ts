@@ -25,6 +25,7 @@ import { buildQuorumView } from "./aggregate/cluster.js";
 import { buildDeployView } from "./aggregate/deploy.js";
 import { buildMcpStatus } from "./aggregate/mcp.js";
 import { buildStacksStatus } from "./aggregate/stacks.js";
+import { buildContainers } from "./aggregate/containers.js";
 import { runChat } from "./chat.js";
 import { anthropicKeyStatus, setAnthropicKey, clearAnthropicKey } from "./secrets.js";
 import { appsCatalog, distinctRepos, appById } from "./apps.js";
@@ -212,6 +213,13 @@ export function createPanelServer(opts: PanelOpts): Server {
         const az = authorize(actor.role, actor.scopes, catByName.get("stack_status")!, {});
         if (!az.ok) { sendJson(res, 403, { error: az.reason }); return; }
         sendJson(res, 200, await buildStacksStatus(deps, url.searchParams.get("server") ?? undefined));
+        return;
+      }
+      // ---- per-container status for the server-detail dots ----
+      if (path === "/api/containers" && method === "GET") {
+        const az = authorize(actor.role, actor.scopes, catByName.get("adpix_status")!, {});
+        if (!az.ok) { sendJson(res, 403, { error: az.reason }); return; }
+        sendJson(res, 200, await buildContainers(deps, url.searchParams.get("server") ?? undefined));
         return;
       }
       // ---- databases view (structured stat cards + tune diff) ----
