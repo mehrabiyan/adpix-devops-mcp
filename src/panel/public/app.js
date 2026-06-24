@@ -128,6 +128,24 @@ const NAV = [{ grp: "overview", items: ["dashboard"] }, { grp: "fleet", items: [
 const S = { lang: localStorage.getItem("adpix_lang") || "en", theme: localStorage.getItem("adpix_theme") || "light", screen: "dashboard", collapsed: false, catalog: [], mode: "token", csrf: "", me: { username: "local", role: "owner" }, sd: null, fleet: null, cluster: "", clusters: [], chat: [], chatOpen: false, chatMax: false };
 const el = (h) => { const d = document.createElement("div"); d.innerHTML = h.trim(); return d.firstElementChild; };
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+// ---- AdpixLoader: the one brand loading indicator (logomark — 5 staggered bars). Sized by context. ----
+// tone: brand (orange/ink/amber on light surfaces; ink → --c-text so it stays visible in both themes),
+// light (all white, for dark/colored bg), current (inherit currentColor, for inside buttons).
+function adpixLoader({ size = 28, tone = "brand", label = "Loading" } = {}) {
+  const h = Math.round((size * 130) / 150); // viewBox 150×130 → height auto
+  const f = tone === "light" ? ["#fff", "#fff", "#fff", "#fff", "#fff"]
+    : tone === "current" ? ["currentColor", "currentColor", "currentColor", "currentColor", "currentColor"]
+    : ["#F07C4A", "var(--c-text)", "#F07C4A", "#F2AF4E", "var(--c-text)"];
+  const R = [[6, 44, 48], [36, 10, 116], [66, 30, 76], [96, 10, 116], [126, 48, 40]];
+  const rects = R.map(([x, y, hh], i) => `<rect x="${x}" y="${y}" width="22" height="${hh}" rx="11" fill="${f[i]}"></rect>`).join("");
+  return `<svg class="adpix-loader run" viewBox="0 0 150 130" width="${size}" height="${h}" role="img" aria-label="${esc(label)}" style="vertical-align:middle">${rects}</svg>`;
+}
+const SPIN = adpixLoader({ size: 18, tone: "current" }); // inline / button (matches the text color)
+// centered loader for a section/card that's fetching while the rest of the page is usable
+function loaderBlock(label = "Loading", size = 48) { return `<div role="status" aria-live="polite" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:30px 0;color:var(--c-muted)">${adpixLoader({ size, tone: "brand", label })}<div style="font-size:12.5px">${esc(label)}</div></div>`; }
+// full-page loader for boot / hard route change (nothing meaningful to show yet)
+function fullPageLoader(label = "Loading…") { return `<div role="status" aria-live="polite" style="position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;background:var(--c-bg);z-index:500">${adpixLoader({ size: 110, tone: "brand", label })}<div style="font-size:13px;color:var(--c-muted)">${esc(label)}</div></div>`; }
 function toast(m, err = false) { let w = document.querySelector(".toasts"); if (!w) { w = el(`<div class="toasts"></div>`); document.body.appendChild(w); } const tt = el(`<div class="toast ${err ? "err" : ""}">${esc(m)}</div>`); w.appendChild(tt); setTimeout(() => tt.remove(), 4200); }
 const SK = { healthy: "pos", up: "pos", ok: "pos", running: "warn", queued: "idle", degraded: "warn", down: "neg", failed: "neg", canceled: "idle", interrupted: "warn", succeeded: "pos" };
 const sc = (s) => SK[s] || (/heal|up|ok|pass|succ|done/i.test(s) ? "pos" : /degrad|warn|run/i.test(s) ? "warn" : /down|fail|err|crit|unreach/i.test(s) ? "neg" : "idle");
@@ -260,7 +278,7 @@ function chatBubble(m, mi) {
   const me = m.role === "user";
   const steps = m.steps && m.steps.length ? `<div class="muted" style="font-size:11px;margin-top:7px;border-top:1px dashed var(--c-divider);padding-top:5px">looked up: ${m.steps.map((s) => `<span class="mono">${esc(s.tool)}</span>`).join(", ")}</div>` : "";
   const props = !m.pending && m.proposed && m.proposed.length ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:9px">${m.proposed.map((p, pi) => `<button class="btn btn-sm ${p.destructive ? "btn-danger" : "btn-primary"} cprop" data-mi="${mi}" data-pi="${pi}">${ic("play", 13)} ${esc(p.title)}</button>`).join("")}</div>` : "";
-  return `<div style="display:flex;justify-content:${me ? "flex-end" : "flex-start"}"><div style="max-width:84%;background:${me ? "var(--c-brand-tint)" : "var(--c-sunken)"};border:1px solid ${me ? "var(--c-brand)" : "var(--c-border)"};border-radius:12px;padding:9px 12px;font-size:13px;line-height:1.55;white-space:pre-wrap;${m.pending ? "color:var(--c-muted)" : ""}">${m.pending ? `<span class="spin"></span> thinking…` : esc(m.content)}${steps}${props}</div></div>`;
+  return `<div style="display:flex;justify-content:${me ? "flex-end" : "flex-start"}"><div style="max-width:84%;background:${me ? "var(--c-brand-tint)" : "var(--c-sunken)"};border:1px solid ${me ? "var(--c-brand)" : "var(--c-border)"};border-radius:12px;padding:9px 12px;font-size:13px;line-height:1.55;white-space:pre-wrap;${m.pending ? "color:var(--c-muted)" : ""}">${m.pending ? `${SPIN} thinking…` : esc(m.content)}${steps}${props}</div></div>`;
 }
 function drawChat() {
   const log = document.querySelector(".chat-panel .chatlog"); if (!log) return;
@@ -344,7 +362,7 @@ SCREENS.serverDetail = (c) => {
   c.querySelector('[data-act="restart"]').onclick = () => verifyAction({ name: "adpix_restart", title: `Restart all services on ${name}`, destructive: true }, { server: name });
   c.querySelector('[data-act="diag"]').onclick = () => {
     const { panel, close } = slideIn(540);
-    panel.innerHTML = `<div class="drawer-head"><strong style="display:flex;align-items:center;gap:8px">${ic("wave", 17)} Diagnose ${esc(name)}</strong><button class="icon-btn dc">${ic("x", 16)}</button></div><div class="drawer-body" style="padding:16px"><div class="muted" style="font-size:12.5px;margin-bottom:10px">Read-only end-to-end check: host, Docker daemon, disk/RAM, repo + version, containers, front-door health, Postgres + ClickHouse, watchdog.</div><pre class="out diagout" style="white-space:pre-wrap"><span class="spin"></span> running…</pre></div>`;
+    panel.innerHTML = `<div class="drawer-head"><strong style="display:flex;align-items:center;gap:8px">${ic("wave", 17)} Diagnose ${esc(name)}</strong><button class="icon-btn dc">${ic("x", 16)}</button></div><div class="drawer-body" style="padding:16px"><div class="muted" style="font-size:12.5px;margin-bottom:10px">Read-only end-to-end check: host, Docker daemon, disk/RAM, repo + version, containers, front-door health, Postgres + ClickHouse, watchdog.</div><pre class="out diagout" style="white-space:pre-wrap;min-height:120px">${loaderBlock("Running diagnostics…")}</pre></div>`;
     panel.querySelector(".dc").onclick = close;
     (async () => { try { const r = await runTool("stack_doctor", { server: name }); panel.querySelector(".diagout").textContent = String(r.result); } catch (e) { panel.querySelector(".diagout").textContent = e.message; } })();
   };
@@ -370,7 +388,7 @@ SCREENS.serverDetail = (c) => {
   loadContainers();
   S.onTick = () => { loadContainers(); refreshGauges(); };  // auto-refresh this page in place (no reload)
   const logc = el(`<div style="${cardOpen};display:flex;flex-direction:column"><div style="${cardHead};display:flex;align-items:center;justify-content:space-between">${t("logs")}<button class="btn btn-sm" data-load>${t("refresh")}</button></div><div class="log-view" style="height:420px">click refresh to tail logs…</div></div>`);
-  logc.querySelector("[data-load]").onclick = async () => { const lv = logc.querySelector(".log-view"); lv.textContent = "loading…"; try { const r = await runTool("adpix_logs", { server: name, lines: 120 }); lv.innerHTML = String(r.result).split("\n").map((l) => `<div class="row"><span style="color:var(--c-text)">${esc(l)}</span></div>`).join(""); lv.scrollTop = lv.scrollHeight; } catch (e) { lv.textContent = e.message; } };
+  logc.querySelector("[data-load]").onclick = async () => { const lv = logc.querySelector(".log-view"); lv.innerHTML = loaderBlock("Loading logs…"); try { const r = await runTool("adpix_logs", { server: name, lines: 120 }); lv.innerHTML = String(r.result).split("\n").map((l) => `<div class="row"><span style="color:var(--c-text)">${esc(l)}</span></div>`).join(""); lv.scrollTop = lv.scrollHeight; } catch (e) { lv.textContent = e.message; } };
   grid.append(cont, logc);
 };
 
@@ -550,7 +568,7 @@ SCREENS.monitoring = (c) => {
   };
   probesCard.querySelector(".refresh").onclick = load; load();
   const m = el(`<div style="${cardOpen}"><div style="${cardHead};display:flex;align-items:center;justify-content:space-between">PromQL query<span style="font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;background:var(--c-warn-bg);color:var(--c-warn)">metrics_query</span></div><div class="card-pad"><label class="fld"><span class="lab">PromQL (against the witness Prometheus)</span><input class="input mono" id="pq" value="up"></label><button class="btn btn-primary btn-sm" id="pr">Run</button><div class="po" style="margin-top:10px"></div></div></div>`);
-  c.appendChild(m); m.querySelector("#pr").onclick = async () => { const o = m.querySelector(".po"); o.innerHTML = `<span class="spin"></span>`; try { const r = await runTool("metrics_query", { query: m.querySelector("#pq").value }); o.innerHTML = `<pre class="out">${esc(r.result)}</pre>`; } catch (e) { o.innerHTML = `<pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre>`; } };
+  c.appendChild(m); m.querySelector("#pr").onclick = async () => { const o = m.querySelector(".po"); o.innerHTML = `${SPIN}`; try { const r = await runTool("metrics_query", { query: m.querySelector("#pq").value }); o.innerHTML = `<pre class="out">${esc(r.result)}</pre>`; } catch (e) { o.innerHTML = `<pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre>`; } };
 };
 SCREENS.security = (c) => {
   c.innerHTML = H(STR[S.lang].nav.security, "Audit findings, hardening, patching, launch gate.", `${bigBtn("h", "Harden (dry-run)")}${bigBtn("p", "Apply patches", null, true)}`);
@@ -561,7 +579,7 @@ SCREENS.security = (c) => {
   const rc = el(`<div style="${cardOpen}"><div style="${cardHead}">Launch readiness · go / no-go</div><div class="card-pad"><div class="muted" style="font-size:12.5px;margin-bottom:10px">Scores the live deployment against the launch-critical invariants for your target scale (capacity, replication, shared Redis, ingest replicas, secrets, backups, monitoring, the P1 gate, TLS).</div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><label style="font-size:12.5px;color:var(--c-muted)">Target sites</label><input class="input rsites" value="200000" style="width:120px"><button class="btn btn-primary rrun">Run readiness check</button></div><div class="rres" style="margin-top:12px"></div></div></div>`);
   rc.querySelector(".rrun").onclick = async () => {
     const sites = Number(rc.querySelector(".rsites").value) || 200000;
-    const res = rc.querySelector(".rres"), b = rc.querySelector(".rrun"); b.disabled = true; b.innerHTML = `<span class="spin"></span>`;
+    const res = rc.querySelector(".rres"), b = rc.querySelector(".rrun"); b.disabled = true; b.innerHTML = `${SPIN}`;
     try { const r = await runTool("launch_readiness", { sites }); res.innerHTML = `<pre class="out" style="white-space:pre-wrap">${esc(String(r.result))}</pre>`; }
     catch (e) { res.innerHTML = `<pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre>`; }
     finally { b.disabled = false; b.textContent = "Run readiness check"; }
@@ -655,7 +673,7 @@ function smtpCard() {
   card.querySelector(".test").onclick = async () => {
     const a = {}; card.querySelectorAll("[data-k]").forEach((i) => { const v = i.value.trim(); if (v) a[i.dataset.k] = i.dataset.num ? Number(v) : v; });
     if (!a.host || !a.from) return toast("host and from are required", true);
-    const res = card.querySelector(".res"); const b = card.querySelector(".test"); b.disabled = true; b.innerHTML = `<span class="spin"></span>`;
+    const res = card.querySelector(".res"); const b = card.querySelector(".test"); b.disabled = true; b.innerHTML = `${SPIN}`;
     try { const r = await runTool("smtp_test", a); res.innerHTML = `<pre class="out">${esc(String(r.result))}</pre>`; }
     catch (e) { res.innerHTML = `<pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre>`; }
     finally { b.disabled = false; b.textContent = "Run test"; }
@@ -768,7 +786,7 @@ function wizard(title, steps, onFinish) {
     const werr = panel.querySelector(".werr");
     const fail = (msg) => { werr.textContent = msg; werr.style.display = "block"; const nb = panel.querySelector(".nextb"); nb.disabled = false; nb.textContent = i === steps.length - 1 ? "Finish" : t("next"); };
     panel.querySelector(".nextb").onclick = async () => {
-      werr.style.display = "none"; const nb = panel.querySelector(".nextb"); nb.disabled = true; nb.innerHTML = `<span class="spin"></span>`;
+      werr.style.display = "none"; const nb = panel.querySelector(".nextb"); nb.disabled = true; nb.innerHTML = `${SPIN}`;
       try { const r = steps[i].onNext ? await steps[i].onNext(ctx) : true; if (r === true) { if (i === steps.length - 1) { await onFinish(ctx); close(); } else { i++; draw(); } } else { fail(typeof r === "string" ? r : "Please complete this step."); } }
       catch (e) { fail(e.message); }
     };
@@ -800,7 +818,7 @@ function addServerWizard() {
       return true;
     } },
     { label: "Diagnose", body: async (ctx, b) => {
-      b.innerHTML = `<div style="font-weight:600;font-size:15px;margin-bottom:14px">Diagnosing ${esc(ctx.host)}…</div><div class="dres"><span class="spin"></span> running connectivity checks…</div>`;
+      b.innerHTML = `<div style="font-weight:600;font-size:15px;margin-bottom:14px">Diagnosing ${esc(ctx.host)}…</div><div class="dres">${SPIN} running connectivity checks…</div>`;
       try {
         const d = await api("/api/wizard/diagnose", { method: "POST", body: JSON.stringify({ name: ctx.name || ctx.host, host: ctx.host, port: Number(ctx.port), username: ctx.user, password: ctx.password || undefined, privateKey: ctx.privateKey || undefined, privateKeyPath: ctx.privateKeyPath || undefined }) });
         ctx.canAdd = d.canAdd;
@@ -839,7 +857,7 @@ function confirmDanger(title, message, target, onConfirm, okLabel = "Confirm") {
     ${target ? `<div style="display:flex;gap:10px;background:var(--c-neg-bg);border:1px solid var(--c-neg);border-radius:10px;padding:13px 14px;margin-bottom:16px"><span style="color:var(--c-neg);flex:none">${ic("warn", 18)}</span><div style="font-size:12.5px;line-height:1.5">Type <b class="mono">${esc(target)}</b> to confirm.</div></div><input class="input ci" placeholder="${esc(target)}">` : ""}</div>
     <div style="display:flex;justify-content:flex-end;gap:10px;padding:14px 18px;border-top:1px solid var(--c-divider);background:var(--c-sunken)"><button class="btn dc2">Cancel</button><button class="btn btn-danger run">${esc(okLabel)}</button></div>`;
   panel.querySelector(".dc").onclick = close; panel.querySelector(".dc2").onclick = close;
-  panel.querySelector(".run").onclick = async () => { if (target && panel.querySelector(".ci").value.trim() !== target) return toast(`Type "${target}" to confirm`, true); const btn = panel.querySelector(".run"); btn.disabled = true; btn.innerHTML = `<span class="spin"></span>`; try { await onConfirm(); close(); } catch (e) { toast(e.message, true); btn.disabled = false; btn.textContent = okLabel; } };
+  panel.querySelector(".run").onclick = async () => { if (target && panel.querySelector(".ci").value.trim() !== target) return toast(`Type "${target}" to confirm`, true); const btn = panel.querySelector(".run"); btn.disabled = true; btn.innerHTML = `${SPIN}`; try { await onConfirm(); close(); } catch (e) { toast(e.message, true); btn.disabled = false; btn.textContent = okLabel; } };
 }
 
 // destructive action → slide-in verify (impact → type-to-confirm → run)
@@ -854,7 +872,7 @@ function verifyAction(tool, args) {
     <input class="input ci" placeholder="${esc(target || "confirm")}"></div>
     <div style="display:flex;justify-content:flex-end;gap:10px;padding:14px 18px;border-top:1px solid var(--c-divider);background:var(--c-sunken)"><button class="btn dc2">${t("cancel")}</button><button class="btn btn-danger run">Run action</button></div>`;
   panel.querySelector(".dc").onclick = close; panel.querySelector(".dc2").onclick = close;
-  panel.querySelector(".run").onclick = async () => { if (target && panel.querySelector(".ci").value.trim() !== target) return toast(`Type "${target}" to confirm`, true); const b = panel.querySelector(".run"); b.disabled = true; b.innerHTML = `<span class="spin"></span>`; try { const r = await startDestructive(tool.name, args); toast(`Started ${tool.name}`); close(); openDrawer(r.job.id); } catch (e) { toast(e.message, true); b.disabled = false; b.textContent = "Run action"; } };
+  panel.querySelector(".run").onclick = async () => { if (target && panel.querySelector(".ci").value.trim() !== target) return toast(`Type "${target}" to confirm`, true); const b = panel.querySelector(".run"); b.disabled = true; b.innerHTML = `${SPIN}`; try { const r = await startDestructive(tool.name, args); toast(`Started ${tool.name}`); close(); openDrawer(r.job.id); } catch (e) { toast(e.message, true); b.disabled = false; b.textContent = "Run action"; } };
 }
 
 let STACKS_STATUS = [];
@@ -953,7 +971,7 @@ async function setupWizard() {
   const nlabel = () => ({ review: "Deploy", done: "Finish" }[STEPS[W.step][0]] || "Next");
   const seterr = (m) => { const e = card.querySelector(".we"); if (e) e.textContent = m || ""; };
   async function next() {
-    seterr(""); const k = STEPS[W.step][0]; const b = card.querySelector(".wn"); b.disabled = true; const t0 = b.textContent; b.innerHTML = `<span class="spin"></span>`;
+    seterr(""); const k = STEPS[W.step][0]; const b = card.querySelector(".wn"); b.disabled = true; const t0 = b.textContent; b.innerHTML = `${SPIN}`;
     try { const r = VALID[k] ? await VALID[k]() : true; if (r === true) { if (W.step === STEPS.length - 1) close(); else { W.step++; shell(); } } else { seterr(typeof r === "string" ? r : "Complete this step."); b.disabled = false; b.textContent = t0; } }
     catch (e) { seterr(e.message); b.disabled = false; b.textContent = t0; }
   }
@@ -987,7 +1005,7 @@ async function setupWizard() {
       const usePass = w.querySelector("[value=pass]").checked;
       const auth = usePass ? { password: w.querySelector(".wsap").value } : { privateKey: w.querySelector(".wsak").value };
       const role = W.topology === "cluster" ? (g("#wsr") || "node") : "node";
-      const sd = w.querySelector(".wsd"); const btn = w.querySelector(".wsadd"); btn.disabled = true; btn.innerHTML = `<span class="spin"></span>`;
+      const sd = w.querySelector(".wsd"); const btn = w.querySelector(".wsadd"); btn.disabled = true; btn.innerHTML = `${SPIN}`;
       try {
         const body = { name, host: hostv, port: Number(g("#wsp")) || 22, username: g("#wsu").trim() || "root", ...auth };
         const diag = await api("/api/wizard/diagnose", { method: "POST", body: JSON.stringify(body) });
@@ -1205,6 +1223,7 @@ function renderSetup(msg = "") { authShell(`<p class="muted" style="margin-top:0
 
 // ============================================================ boot
 async function boot() {
+  const app0 = document.getElementById("app"); if (app0 && !app0.firstElementChild) app0.innerHTML = fullPageLoader("Loading your dashboard…");
   let me = null; try { me = await api("/api/me"); } catch {}
   if (me) { S.me = me.actor; S.mode = me.mode; S.buildId = me.buildId; if (me.csrf) S.csrf = me.csrf; if (me.killed) { authShell(`<div class="badge b-neg"><span class="dot"></span>Kill-switch engaged</div><p class="muted">Destructive ops disabled, sessions revoked. An owner must release it.</p><button class="btn" id="r" style="width:100%;justify-content:center;margin-top:8px">Reload</button>`); document.getElementById("r").onclick = () => location.reload(); return; } try { const { tools } = await api("/api/catalog"); S.catalog = tools; } catch (e) { authShell(`<div class="empty">Failed to load: ${esc(e.message)}</div>`); return; } await loadClusters(); await loadFleet(); const r0 = parsePath(); S.screen = r0.screen; S.sd = r0.sd; render(); startJobPoll(); startAutoRefresh(); return; }
   let status = {}; try { status = await fetch("/api/status").then((r) => r.json()); } catch {}
