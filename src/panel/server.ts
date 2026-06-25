@@ -26,6 +26,7 @@ import { buildDeployView } from "./aggregate/deploy.js";
 import { buildMcpStatus } from "./aggregate/mcp.js";
 import { buildStacksStatus } from "./aggregate/stacks.js";
 import { buildContainers } from "./aggregate/containers.js";
+import { buildServerMetrics, buildServerInventory } from "./aggregate/server.js";
 import { listCerts, saveCert, deleteCert } from "../certstore.js";
 import { runChat } from "./chat.js";
 import { anthropicKeyStatus, setAnthropicKey, clearAnthropicKey } from "./secrets.js";
@@ -223,6 +224,27 @@ export function createPanelServer(opts: PanelOpts): Server {
         sendJson(res, 200, await buildContainers(deps, url.searchParams.get("server") ?? undefined));
         return;
       }
+      // ---- detailed host resources (cores/load/RAM/disk/uptime) ----
+      if (path === "/api/server-metrics" && method === "GET") {
+        const az = authorize(actor.role, actor.scopes, catByName.get("system_metrics")!, {});
+        if (!az.ok) { sendJson(res, 403, { error: az.reason }); return; }
+        sendJson(res, 200, await buildServerMetrics(deps, url.searchParams.get("server") ?? undefined));
+        return;
+      }
+      // ---- inventory: which AdPix products are deployed (incl. ones set up outside this panel) ----
+      if (path === "/api/server-inventory" && method === "GET") {
+        const az = authorize(actor.role, actor.scopes, catByName.get("adpix_status")!, {});
+        if (!az.ok) { sendJson(res, 403, { error: az.reason }); return; }
+        sendJson(res, 200, await buildServerInventory(deps, url.searchParams.get("server") ?? undefined));
+        return;
+      }
+      // ---- a registered server's connection metadata (for the Edit drawer; no secrets) ----
+      if (path === "/api/server-config" && method === "GET") {
+        const reg = loadRegistry(); const s = reg.servers[url.searchParams.get("name") || ""];
+        if (!s) { sendJson(res, 404, { error: "no such server" }); return; }
+        sendJson(res, 200, { host: s.host, port: s.port, username: s.username, privateKeyPath: s.privateKeyPath || "", adpixDir: s.adpixDir, webhookUrl: s.webhookUrl || "" });
+        return;
+      }
       // ---- Certificate Manager: upload/list/delete TLS bundles (MCP-side store) ----
       if (path === "/api/certs" && method === "GET") { sendJson(res, 200, { certs: listCerts() }); return; }
       if (path === "/api/certs" && method === "POST") {
@@ -339,6 +361,43 @@ export function createPanelServer(opts: PanelOpts): Server {
           }
           audit(actor, "panel.add-server", name, { host, role, cluster: clusterName }, "added");
           sendJson(res, 200, { ok: true, result });
+        } catch (e) { sendJson(res, 400, { error: classifyError(e).message }); }
+        return;
+      }
+
+      // ---- edit a server's connection (host/port/user/key/password/dir/webhook) + re-verify ----
+      // Updates the registry FIRST, so a server that's "down" because its SSH details changed is fixable.
+      if (path === "/api/wizard/edit-server" && method === "POST") {
+        if (actor.role !== "owner") { sendJson(res, 403, { error: "owner only" }); return; }
+        const b = await readBody(req);
+        const name = String(b.name || "");
+        const reg = loadRegistry(); const cur = reg.servers[name];
+        if (!cur) { sendJson(res, 404, { error: `no such server "${name}"` }); return; }
+        const next = { ...cur };
+        if (b.host !== undefined) next.host = String(b.host) || cur.host;
+        if (b.port !== undefined) next.port = Number(b.port) || 22;
+        if (b.username !== undefined) next.username = String(b.username) || cur.username;
+        if (b.adpixDir !== undefined) next.adpixDir = String(b.adpixDir) || cur.adpixDir;
+        if (b.webhookUrl !== undefined) next.webhookUrl = String(b.webhookUrl) || undefined;
+        // a host can be registered once — guard against colliding with another entry
+        const dup = findServerByHost(reg, next.host, next.port, name);
+        if (dup) { sendJson(res, 409, { error: `${next.host}:${next.port} is already registered as "${dup}".` }); return; }
+        try {
+          if (b.privateKey) next.privateKeyPath = saveUploadedKey(name, String(b.privateKey));
+          else if (b.privateKeyPath !== undefined) next.privateKeyPath = String(b.privateKeyPath) || undefined;
+          if (b.password) {
+            // re-bootstrap the MCP key over the new password, then store the KEY PATH (password never persisted)
+            const mcp = await ensureMcpKey(deps);
+            const pub = (await deps.local(`cat ${shq(mcp + ".pub")} 2>/dev/null || true`)).stdout.trim();
+            if (!pub.startsWith("ssh-")) { sendJson(res, 400, { error: `could not read the MCP public key at ${panelMcpKeyPath()}.pub` }); return; }
+            const s = await deps.connect({ name, host: next.host, port: next.port, username: next.username, adpixDir: next.adpixDir }, { password: String(b.password) });
+            try { await s.exec(`umask 077; mkdir -p ~/.ssh; touch ~/.ssh/authorized_keys; grep -qxF ${shq(pub)} ~/.ssh/authorized_keys || echo ${shq(pub)} >> ~/.ssh/authorized_keys; echo OK`, { timeoutMs: 15000 }); } finally { s.close(); }
+            next.privateKeyPath = mcp;
+          }
+          reg.servers[name] = next; saveRegistry(reg);   // persist before re-testing — fixes a down server
+          const diagnosis = await diagnoseServer(deps, { host: next.host, port: next.port, username: next.username, privateKeyPath: next.privateKeyPath });
+          audit(actor, "panel.edit-server", name, { host: next.host, port: next.port, username: next.username }, "updated");
+          sendJson(res, 200, { ok: true, diagnosis });
         } catch (e) { sendJson(res, 400, { error: classifyError(e).message }); }
         return;
       }

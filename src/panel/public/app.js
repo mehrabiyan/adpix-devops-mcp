@@ -353,11 +353,41 @@ SCREENS.servers = (c) => {
 };
 
 // ============================================================ SERVER DETAIL
+async function editConnectionDrawer(name) {
+  const { panel, close } = slideIn(480);
+  panel.innerHTML = `<div class="drawer-head"><strong>Edit connection · ${esc(name)}</strong><button class="icon-btn dc">${ic("x", 16)}</button></div><div class="drawer-body" style="padding:18px">${loaderBlock("Loading…", 40)}</div>`;
+  panel.querySelector(".dc").onclick = close;
+  const body = panel.querySelector(".drawer-body");
+  let cfg = {}; try { cfg = await api("/api/server-config?name=" + encodeURIComponent(name)); } catch (e) { body.innerHTML = `<pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre>`; return; }
+  body.innerHTML = `<div class="muted" style="font-size:12px;line-height:1.5;margin-bottom:14px">If the server's SSH details changed (port, user, key, or password) it shows DOWN — fix them here. Saved to the registry first, then re-verified.</div>
+    <label class="fld"><span class="lab">host</span><input class="input" data-k="host" value="${esc(cfg.host || "")}"></label>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><label class="fld"><span class="lab">port</span><input class="input" data-k="port" value="${esc(cfg.port || 22)}"></label><label class="fld"><span class="lab">username</span><input class="input" data-k="username" value="${esc(cfg.username || "root")}"></label></div>
+    <label class="fld"><span class="lab">private key path</span><input class="input" data-k="privateKeyPath" value="${esc(cfg.privateKeyPath || "")}" placeholder="~/.ssh/id_ed25519 — blank = agent/default"></label>
+    <label class="fld"><span class="lab">password (one-shot — re-authorizes the MCP key; never stored)</span><input class="input" type="password" data-k="password" placeholder="only if the key changed or is missing"></label>
+    <label class="fld"><span class="lab">AdPix dir</span><input class="input" data-k="adpixDir" value="${esc(cfg.adpixDir || "/opt/adpix")}"></label>
+    <label class="fld"><span class="lab">alert webhook (optional)</span><input class="input" data-k="webhookUrl" value="${esc(cfg.webhookUrl || "")}"></label>
+    <button class="btn btn-primary save" style="width:100%;justify-content:center;margin-top:8px">Save + re-verify</button>
+    <div class="res" style="margin-top:14px"></div>`;
+  body.querySelector(".save").onclick = async () => {
+    const a = { name }; body.querySelectorAll("[data-k]").forEach((i) => { a[i.dataset.k] = i.value.trim(); });
+    const sb = body.querySelector(".save"); sb.disabled = true; sb.innerHTML = SPIN;
+    try {
+      const r = await api("/api/wizard/edit-server", { method: "POST", body: JSON.stringify(a) });
+      const d = r.diagnosis || {};
+      body.querySelector(".res").innerHTML = `<div style="font-weight:600;font-size:13px;color:var(--c-${d.reachable ? "pos" : "neg"});margin-bottom:6px">${d.reachable ? "✓ Reachable" : "✗ " + esc(d.summary || "Still unreachable")}</div><pre class="out" style="white-space:pre-wrap">${esc((d.checks || []).map((ch) => `${ch.ok ? "✓" : "✗"} ${ch.name} — ${ch.detail}`).join("\n"))}</pre>`;
+      toast("Connection saved");
+      await loadFleet().catch(() => {});
+      if (d.reachable) { close(); render(); }   // reflect the recovered status on the page
+    } catch (e) { body.querySelector(".res").innerHTML = `<pre class="out" style="color:var(--c-neg)">${esc(e.message)}</pre>`; }
+    finally { sb.disabled = false; sb.textContent = "Save + re-verify"; }
+  };
+}
 SCREENS.serverDetail = (c) => {
   const name = S.sd; const n = (S.fleet?.nodes || []).find((x) => x.name === name) || { name, host: "", os: "", status: "idle", cpu: 0, mem: 0, disk: 0 };
   c.innerHTML = `<button data-back style="display:inline-flex;align-items:center;gap:6px;border:0;background:transparent;color:var(--c-muted);font:inherit;font-size:12.5px;cursor:pointer;margin-bottom:12px;padding:0">${ic("chevL", 15)} ${STR[S.lang].nav.servers}</button>`
-    + `<div style="display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:18px"><div style="flex:1;min-width:220px"><div style="display:flex;align-items:center;gap:10px"><h1 style="margin:0;font-size:22px;font-weight:500;font-family:var(--font-mono)">${esc(name)}</h1>${pill(cap(n.status), n.status)}</div><div style="color:var(--c-muted);font-size:13px;margin-top:5px;font-family:var(--font-mono)">${esc(n.host)} · ${esc(n.os)}</div></div><div style="display:flex;gap:8px">${bigBtn("diag", "Diagnose")}${bigBtn("backup", "Backup now")}${bigBtn("restart", "Restart all")}<button data-act="remove" style="display:inline-flex;align-items:center;gap:7px;height:38px;padding-inline:15px;border:1px solid var(--c-neg);background:transparent;color:var(--c-neg);border-radius:8px;cursor:pointer;font:inherit;font-size:13px;font-weight:500">${ic("stop", 14)} Remove</button></div></div>`;
+    + `<div style="display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:18px"><div style="flex:1;min-width:220px"><div style="display:flex;align-items:center;gap:10px"><h1 style="margin:0;font-size:22px;font-weight:500;font-family:var(--font-mono)">${esc(name)}</h1>${pill(cap(n.status), n.status)}</div><div style="color:var(--c-muted);font-size:13px;margin-top:5px;font-family:var(--font-mono)">${esc(n.host)} · ${esc(n.os)}</div></div><div style="display:flex;gap:8px;flex-wrap:wrap">${bigBtn("edit", "Edit connection")}${bigBtn("diag", "Diagnose")}${bigBtn("backup", "Backup now")}${bigBtn("restart", "Restart all")}<button data-act="remove" style="display:inline-flex;align-items:center;gap:7px;height:38px;padding-inline:15px;border:1px solid var(--c-neg);background:transparent;color:var(--c-neg);border-radius:8px;cursor:pointer;font:inherit;font-size:13px;font-weight:500">${ic("stop", 14)} Remove</button></div></div>`;
   c.querySelector("[data-back]").onclick = () => nav("servers");
+  c.querySelector('[data-act="edit"]').onclick = () => editConnectionDrawer(name);
   c.querySelector('[data-act="backup"]').onclick = () => action("adpix_backup", { server: name });
   c.querySelector('[data-act="restart"]').onclick = () => verifyAction({ name: "adpix_restart", title: `Restart all services on ${name}`, destructive: true }, { server: name });
   c.querySelector('[data-act="diag"]').onclick = () => {
@@ -370,6 +400,41 @@ SCREENS.serverDetail = (c) => {
   // gauges (data-gv/data-gb so the auto-refresh updates them in place — no full re-render)
   c.appendChild(el(`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:16px">${[["CPU", "cpu", n.cpu], ["MEMORY", "mem", n.mem], ["DISK", "disk", n.disk]].map(([l, k, v]) => `<div style="${cardOpen};padding:14px 16px"><div style="font-size:11.5px;color:var(--c-muted);text-transform:uppercase;letter-spacing:.5px">${l}</div><div data-gv="${k}" style="font-size:26px;font-weight:400;margin:6px 0 8px;color:${metColor(v)}">${v}%</div><div style="height:5px;border-radius:999px;background:var(--c-sunken);overflow:hidden"><div data-gb="${k}" style="height:100%;width:${v}%;background:${metColor(v)};border-radius:999px;transition:width .3s"></div></div></div>`).join("")}</div>`));
   const refreshGauges = () => { const nn = (S.fleet?.nodes || []).find((x) => x.name === name); if (!nn) return; for (const k of ["cpu", "mem", "disk"]) { const gv = c.querySelector(`[data-gv="${k}"]`), gb = c.querySelector(`[data-gb="${k}"]`); if (gv) { gv.textContent = nn[k] + "%"; gv.style.color = metColor(nn[k]); } if (gb) { gb.style.width = nn[k] + "%"; gb.style.background = metColor(nn[k]); } } };
+
+  // Resources (real numbers) + Detected products (incl. setups not done via this panel)
+  const detailRow = el(`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:16px;align-items:start;margin-bottom:16px"></div>`); c.appendChild(detailRow);
+  const resCard = el(`<div style="${cardOpen}"><div style="${cardHead}">Resources</div><div class="rdetail" style="padding:6px 0">${loaderBlock("Reading…", 40)}</div></div>`);
+  const invCard = el(`<div style="${cardOpen}"><div style="${cardHead}">Detected on this server</div><div class="invbody" style="padding:6px 0">${loaderBlock("Scanning…", 40)}</div></div>`);
+  detailRow.append(resCard, invCard);
+  const dRow = (l, v, sub) => `<div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:9px 16px;border-bottom:1px solid var(--c-divider)"><span style="font-size:12.5px;color:var(--c-muted)">${l}</span><span style="font-family:var(--font-mono);font-size:13px;text-align:end">${v}${sub ? `<div style="font-size:11px;color:var(--c-hint)">${sub}</div>` : ""}</span></div>`;
+  const gb = (mb) => (mb / 1024).toFixed(mb >= 10240 ? 0 : 1);
+  const dur = (s) => { const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600); return d ? `${d}d ${h}h` : `${h}h ${Math.floor((s % 3600) / 60)}m`; };
+  const loadMetrics = async () => {
+    try {
+      const m = await api("/api/server-metrics?server=" + encodeURIComponent(name));
+      if (!m.reachable) { resCard.querySelector(".rdetail").innerHTML = `<div class="muted" style="padding:14px 16px;font-size:12.5px">Unreachable${m.error ? " — " + esc(m.error) : ""}. Use <b>Edit connection</b> to fix the SSH details.</div>`; return; }
+      const memPct = m.mem.totalMB ? Math.round((m.mem.usedMB / m.mem.totalMB) * 100) : 0;
+      const diskPct = m.disk.totalMB ? Math.round((m.disk.usedMB / m.disk.totalMB) * 100) : 0;
+      resCard.querySelector(".rdetail").innerHTML =
+        dRow("CPU", `${m.cores} cores`, `load ${m.load.map((x) => x.toFixed(2)).join(" · ")}`) +
+        dRow("Memory", `${gb(m.mem.usedMB)} / ${gb(m.mem.totalMB)} GB`, `${memPct}% used · ${gb(m.mem.availMB)} GB free`) +
+        dRow("Disk (/)", `${gb(m.disk.usedMB)} / ${gb(m.disk.totalMB)} GB`, `${diskPct}% used · ${gb(m.disk.availMB)} GB free`) +
+        dRow("Uptime", dur(m.uptimeSec), "") +
+        dRow("Kernel", esc(m.kernel), "");
+    } catch (e) { resCard.querySelector(".rdetail").innerHTML = `<div class="muted" style="padding:14px 16px;font-size:12px;color:var(--c-neg)">${esc(e.message)}</div>`; }
+  };
+  const loadInventory = async () => {
+    try {
+      const v = await api("/api/server-inventory?server=" + encodeURIComponent(name));
+      const body = invCard.querySelector(".invbody");
+      if (v.error && !v.products.length) { body.innerHTML = `<div class="muted" style="padding:14px 16px;font-size:12.5px">${esc(v.error)}</div>`; return; }
+      const rows = v.products.map((p) => `<div style="display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--c-divider)"><span style="width:8px;height:8px;border-radius:50%;flex:none;background:var(--c-${p.up ? "pos" : "neg"})"></span><div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:500">${esc(p.product)}</div><div class="mono muted" style="font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.project)} · ${esc(p.dir)}</div></div><span class="muted" style="font-size:11.5px;white-space:nowrap">${p.running}/${p.total} up</span>${p.external ? pill("outside this panel", "warn") : ""}</div>`).join("");
+      const unk = v.unknown.length ? `<div style="padding:10px 16px;font-size:11.5px;color:var(--c-hint)">Other compose projects: ${v.unknown.map((u) => esc(u.project)).join(", ")}</div>` : "";
+      body.innerHTML = (rows || `<div class="muted" style="padding:14px 16px;font-size:12.5px">No AdPix products detected (nothing deployed, or the host is unreachable).</div>`) + unk;
+    } catch (e) { invCard.querySelector(".invbody").innerHTML = `<div class="muted" style="padding:14px 16px;font-size:12px;color:var(--c-neg)">${esc(e.message)}</div>`; }
+  };
+  loadMetrics(); loadInventory();
+
   const grid = el(`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;align-items:start"></div>`); c.appendChild(grid);
   const known = SERVICES;
   const cont = el(`<div style="${cardOpen}"><div style="${cardHead}">${t("containers")}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--c-divider)" class="cc"></div></div>`);
@@ -386,7 +451,7 @@ SCREENS.serverDetail = (c) => {
     } catch { /* leave dots grey */ }
   };
   loadContainers();
-  S.onTick = () => { loadContainers(); refreshGauges(); };  // auto-refresh this page in place (no reload)
+  S.onTick = () => { loadContainers(); refreshGauges(); loadMetrics(); };  // auto-refresh this page in place (no reload)
   const logc = el(`<div style="${cardOpen};display:flex;flex-direction:column"><div style="${cardHead};display:flex;align-items:center;justify-content:space-between">${t("logs")}<button class="btn btn-sm" data-load>${t("refresh")}</button></div><div class="log-view" style="height:420px">click refresh to tail logs…</div></div>`);
   logc.querySelector("[data-load]").onclick = async () => { const lv = logc.querySelector(".log-view"); lv.innerHTML = loaderBlock("Loading logs…"); try { const r = await runTool("adpix_logs", { server: name, lines: 120 }); lv.innerHTML = String(r.result).split("\n").map((l) => `<div class="row"><span style="color:var(--c-text)">${esc(l)}</span></div>`).join(""); lv.scrollTop = lv.scrollHeight; } catch (e) { lv.textContent = e.message; } };
   grid.append(cont, logc);
