@@ -35,7 +35,7 @@ secrets → rebuild from a clean image.
 |---|---|---|
 | 2.1 | RCE in the Next.js app (`child_process` sink / CVE) | **App repo** — the MCP can't patch app code. `predeploy_gate` runs an adversarial review; grep source for `child_process`/`exec`/`spawn`/`eval`, upgrade Next.js off 15.1.0, `npm audit`. Until shipped, any host serving the app is re-exploitable over 443 — firewalls don't close it. |
 | 3.4 | Unrestricted container egress (enabled the `wget` payload pull) | `quarantine blockIp` blocks a known C2; a general default-deny-egress-with-allow-list tool is **not yet built** (high break-risk; needs per-stack allow-lists). Stopgap: the iptables DROP rule. |
-| 3.5 | Rotate all exfiltrated secrets (CH/PG/Redis/MinIO/OIDC/SMTP + IdP signing keys) | **No one-shot rotation tool yet.** Manual today: rotate at each store, update `.env`, `stack_update`/redeploy, force global re-auth on the IdP (new `kid`). Biggest remaining automation gap. |
+| 3.5 | Rotate all exfiltrated secrets (CH/PG/Redis/MinIO/OIDC/SMTP + IdP signing keys) | **Partly built — `secret_rotate`.** Dry-run inventories + classifies the stack `.env` (values redacted); execute rotates **Postgres** (`ALTER ROLE` + rewrite `DATABASE_URL`), **Redis** (`CONFIG SET requirepass` + `.env`), and **self-sourced app secrets** (`*_SECRET`/API keys) in place — each value is generated AND applied on the server, so the MCP never sees it; `.env` is backed up, consumers restarted, health verified. **Still assisted** (reported with steps, not auto-rotated to avoid a stateful break): ClickHouse (`ch_redeploy`), MinIO, IdP signing key (new `kid` → force re-auth), OIDC client secret, SMTP/Brevo. |
 | 2.3 | OIDC cold-start cache race ("identity provider unavailable") | App repo (lazy discovery + retry). Workaround: restart `web` after the IdP is up. |
 | 2.4 | Ingest → ClickHouse auth failure (data loss) | App/config — correct ingest CH creds (coordinate with 3.5 rotation). |
 | 2.5 | Health checks reported green during the outage | App repo (real dependency probes). |
@@ -44,6 +44,6 @@ secrets → rebuild from a clean image.
 
 1. `threat_scan server=<host>` → if COMPROMISED, note the container + C2 IP.
 2. `quarantine server=<host> container=<name> stop:true blockIp:<C2> confirm:true` → evidence saved, payload killed, egress blocked. Copy `/root/ir-<ts>/` off-box.
-3. Rotate every secret the container's env held (assume exfiltrated). Force IdP re-auth.
+3. Rotate every secret the container's env held (assume exfiltrated): `secret_rotate stack=<s>` (dry-run plan) → `scope=all confirm:true` rotates Postgres/Redis/app secrets; follow the assisted steps it prints for ClickHouse/MinIO/IdP-signing-key (then force IdP re-auth).
 4. Rebuild from a clean, **non-root, minimal** image (not the cleaned container).
 5. `harden_server` + `security_audit` + re-run `threat_scan` to confirm CLEAN.

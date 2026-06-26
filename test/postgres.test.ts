@@ -86,7 +86,7 @@ describe("postgres tools registered", () => {
     for (const n of ["pg_health", "pg_tune", "pg_optimize", "pg_harden", "pg_backup", "pg_restore_db", "pg_replication", "pg_redeploy"])
       expect(names).toContain(n);
     expect(new Set(names).size).toBe(names.length);
-    expect(allTools.length).toBe(93);
+    expect(allTools.length).toBe(94);
   });
 });
 

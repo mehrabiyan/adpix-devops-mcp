@@ -156,6 +156,7 @@ const FIXTURES: Record<string, Record<string, unknown>> = {
   security_audit: {},
   threat_scan: { server: "prod" },
   quarantine: { server: "prod", container: "adanalytics-web-1" },
+  secret_rotate: { server: "prod", stack: "analytics" },
   harden_server: { apply: false },
   patch_system: { confirm: false },
   watchdog_install: {},

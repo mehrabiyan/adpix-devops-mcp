@@ -26,6 +26,7 @@ import { networkTools } from "./network.js";
 import { certTools } from "./certs.js";
 import { offlineTools } from "./offline.js";
 import { threatTools } from "./threat.js";
+import { secretsTools } from "./secrets.js";
 
 export const allTools: ToolDef[] = [
   ...serverTools,
@@ -55,4 +56,5 @@ export const allTools: ToolDef[] = [
   ...certTools,
   ...offlineTools,
   ...threatTools,
+  ...secretsTools,
 ];
