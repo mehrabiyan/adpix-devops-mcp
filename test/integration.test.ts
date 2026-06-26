@@ -154,6 +154,8 @@ const FIXTURES: Record<string, Record<string, unknown>> = {
   performance_report: { runs: 1 },
   tls_status: {},
   security_audit: {},
+  threat_scan: { server: "prod" },
+  quarantine: { server: "prod", container: "adanalytics-web-1" },
   harden_server: { apply: false },
   patch_system: { confirm: false },
   watchdog_install: {},

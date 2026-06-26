@@ -70,7 +70,7 @@ const TM_CONSOLE_DOCKERFILE =
 
 // Console compose (project adpix-console). With `bundleCaddy` it also fronts <domain> on :80/:443
 // (auto Let's Encrypt) and path-strips /api/* to the host-published TM api (8686) via the host gateway.
-function consoleComposeYaml(opts: { dir: string; bundleCaddy: boolean; tlsCertDir?: string }): string {
+export function consoleComposeYaml(opts: { dir: string; bundleCaddy: boolean; tlsCertDir?: string }): string {
   const args = [
     `        NEXT_PUBLIC_API_URL: \${NEXT_PUBLIC_API_URL:?set in deploy/.env.console}`,
     `        NEXT_PUBLIC_AUTH_ISSUER: \${NEXT_PUBLIC_AUTH_ISSUER:?set in deploy/.env.console}`,
@@ -101,7 +101,8 @@ function consoleComposeYaml(opts: { dir: string; bundleCaddy: boolean; tlsCertDi
     `      dockerfile: deploy/Dockerfile.console\n` +
     `      args:\n${args}\n` +
     `    restart: unless-stopped\n` +
-    `    ports:\n      - "\${CONSOLE_PORT:-3000}:3000"\n` +
+    // bundled Caddy reaches console on the compose network → host port is LOOPBACK only (not 0.0.0.0)
+    `    ports:\n      - "${opts.bundleCaddy ? "127.0.0.1:" : ""}\${CONSOLE_PORT:-3000}:3000"\n` +
     caddy +
     vols
   );
@@ -110,7 +111,7 @@ function consoleComposeYaml(opts: { dir: string; bundleCaddy: boolean; tlsCertDi
 // generate one and embed it as a YAML literal block (env-files can't hold multi-line PEM). mode 600.
 // When `domain` is set we also add a Caddy front door (auto Let's Encrypt + auto-renew) on :80/:443
 // reverse-proxying to auth:9696 — so https://<domain> serves a real cert without manual TLS wiring.
-function authComposeYaml(pem: string, opts: { domain?: string; dir?: string; tlsCertDir?: string } = {}): string {
+export function authComposeYaml(pem: string, opts: { domain?: string; dir?: string; tlsCertDir?: string } = {}): string {
   const body = pem.trim().split(/\r?\n/).map((l) => "        " + l).join("\n");
   const caddyfile = `${opts.dir ?? "/opt/adpix-tagmanager"}/deploy/Caddyfile.account`;
   const tlsMount = opts.tlsCertDir ? `      - ${opts.tlsCertDir}:${opts.tlsCertDir}:ro\n` : "";
@@ -148,8 +149,10 @@ function authComposeYaml(pem: string, opts: { domain?: string; dir?: string; tls
     `      BOOTSTRAP_ADMIN_EMAIL: \${BOOTSTRAP_ADMIN_EMAIL:-}\n` +
     `      BOOTSTRAP_ADMIN_PASSWORD: \${BOOTSTRAP_ADMIN_PASSWORD:-}\n` +
     `      OIDC_PRIVATE_KEY_PEM: |\n${body}\n` +
+    // Security: when Caddy fronts the domain it reaches auth on the compose network (auth:9696), so the
+    // host port only needs LOOPBACK (health gate + local curl) — never 0.0.0.0 (that's the IR 1.2 leak).
     `    ports:\n` +
-    `      - "\${AUTH_PORT:-9696}:9696"\n` +
+    `      - "${opts.domain ? "127.0.0.1:" : ""}\${AUTH_PORT:-9696}:9696"\n` +
     `    volumes:\n` +
     `      - authdata:/data\n` +
     `    healthcheck:\n` +

@@ -40,6 +40,7 @@ export async function runAudit(s: Session, srv: ServerConfig): Promise<AuditFind
       `echo ===REBOOT; test -f /var/run/reboot-required && echo yes || echo no`,
       `echo ===DOCKERPORTS; docker ps --format '{{.Names}} -> {{.Ports}}' 2>/dev/null | grep -E '0\\.0\\.0\\.0|:::' || echo none`,
       `echo ===ENVPERM; stat -c '%a %U' ${shq(srv.adpixDir + "/.env")} 2>/dev/null || echo missing`,
+      `echo ===CTNROOT; for c in $(docker ps -q 2>/dev/null|head -20); do n=$(docker inspect -f '{{.Name}}' $c 2>/dev/null|tr -d /); u=$(docker inspect -f '{{.Config.User}}' $c 2>/dev/null); t=$(docker exec $c sh -c 'command -v wget curl 2>/dev/null' 2>/dev/null|tr '\\n' ','); if [ -z "$u" ] && [ -n "$t" ]; then echo "$n ships $t as root"; fi; done 2>/dev/null`,
       `echo ===BRUTE; journalctl --since '24 hours ago' 2>/dev/null | grep -c 'Failed password' || true`,
     ].join("; "),
     { timeoutMs: 240_000 }
@@ -99,6 +100,10 @@ export async function runAudit(s: Session, srv: ServerConfig): Promise<AuditFind
   else if (/^[64]00 root/.test(envPerm)) f.push({ level: "PASS", what: `.env permissions tight (${envPerm})` });
   else f.push({ level: "WARN", what: `.env is ${envPerm} — should be 600 root (chmod 600, chown root)` });
 
+  const ctnRoot = g("CTNROOT");
+  if (ctnRoot) f.push({ level: "WARN", what: `container(s) run as ROOT and ship wget/curl — a code-exec bug then downloads + runs a payload (this is exactly IR 2.2 → the XMRig drop):\n      ${ctnRoot.split("\n").filter(Boolean).join("\n      ")}\n      Fix: non-root USER, minimal/distroless image (no wget/curl/shell), /tmp noexec.` });
+  else f.push({ level: "PASS", what: "no running container ships wget/curl as root" });
+
   const brute = Number(g("BRUTE") || 0);
   if (brute > 200) f.push({ level: "WARN", what: `${brute} failed SSH password attempts in 24h — enable fail2ban + disable password auth` });
   else f.push({ level: "PASS", what: `${brute} failed SSH login attempts in last 24h` });
@@ -125,7 +130,9 @@ export const securityTools: ToolDef[] = [
     description:
       "Read-only security posture check: SSH config, firewall, publicly listening ports (catches a " +
       "dev stack exposing Postgres/ClickHouse), fail2ban, unattended upgrades, pending security " +
-      "patches, reboot-required, docker-published ports, .env permissions, and 24h brute-force volume.",
+      "patches, reboot-required, docker-published ports, containers running as root that ship wget/curl, " +
+      ".env permissions, and 24h brute-force volume. For active-compromise hunting (miners, droppers, bad " +
+      "egress) use threat_scan; to contain a hit use quarantine.",
     schema: { server: serverParam },
     annotations: { readOnlyHint: true },
     handler: async (deps, args) => {
