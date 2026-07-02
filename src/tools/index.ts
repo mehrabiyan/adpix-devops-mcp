@@ -27,6 +27,8 @@ import { certTools } from "./certs.js";
 import { offlineTools } from "./offline.js";
 import { threatTools } from "./threat.js";
 import { secretsTools } from "./secrets.js";
+import { honeypotTools } from "./honeypot.js";
+import { egressTools } from "./egress.js";
 
 export const allTools: ToolDef[] = [
   ...serverTools,
@@ -57,4 +59,6 @@ export const allTools: ToolDef[] = [
   ...offlineTools,
   ...threatTools,
   ...secretsTools,
+  ...honeypotTools,
+  ...egressTools,
 ];

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { withSession } from "../deps.js";
 import { openReverseProxy, activeTunnel, closeTunnel } from "../ssh.js";
-import { lastLines } from "../util.js";
+import { lastLines, shq } from "../util.js";
 import type { ToolDef } from "./types.js";
 
 const serverParam = z.string().optional().describe("Target server name. Omit to use the default.");
@@ -143,6 +143,56 @@ export const networkTools: ToolDef[] = [
             ? `→ The target now reaches the internet via the MCP. Install normally (adpix_install / tm_install / account_install), then run net_bridge action:down to restore direct egress.`
             : `→ GitHub still not reachable through the bridge. Check the MCP host's own internet + the target's sshd AllowTcpForwarding. Details:\n${lastLines(cfg.stdout || cfg.stderr, 8)}`,
         ].join("\n");
+      });
+    },
+  },
+
+  {
+    name: "net_diag",
+    title: "Advanced network diagnostics (latency, route, MTU, DNS, surface)",
+    description:
+      "Read-only deep network read-out from the target: default route + interface + MTU, DNS resolution + timing, " +
+      "TCP reachability + round-trip latency to each host:port you give (defaults cover the internet + GitHub), path " +
+      "hops (traceroute/mtr if present), and the public-vs-loopback listening surface. Use to diagnose slow/broken " +
+      "cross-node links, MTU black-holes, DNS issues, and unexpected exposure.",
+    schema: {
+      server: serverParam,
+      hosts: z.array(z.string()).default(["1.1.1.1:443", "github.com:443"]).describe("host:port targets to test reachability + latency"),
+      trace: z.boolean().default(false).describe("Also run a path trace (traceroute/mtr) to the first host"),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+    handler: async (deps, args) => {
+      const a = args as { server?: string; hosts: string[]; trace: boolean };
+      return withSession(deps, a.server, async (s, srv) => {
+        const parsed = a.hosts.map((h) => { const i = h.lastIndexOf(":"); return i > 0 ? { host: h.slice(0, i), port: parseInt(h.slice(i + 1), 10) || 443 } : { host: h, port: 443 }; });
+        const reach = parsed.map((t, i) =>
+          `S=$(date +%s%N); (exec 3<>/dev/tcp/${t.host}/${t.port}) 2>/dev/null && echo "R${i}|ok|$(( ($(date +%s%N)-S)/1000000 ))" || echo "R${i}|FAIL|-"`
+        ).join("; ");
+        const first = parsed[0]?.host || "1.1.1.1";
+        const probe = [
+          `echo ===ROUTE; ip route show default 2>/dev/null | head -1 || echo none`,
+          `echo ===IFACE; EXT=$(ip route show default 2>/dev/null|awk '/default/{print $5;exit}'); ip -o link show "$EXT" 2>/dev/null | grep -oE 'mtu [0-9]+'; ip -o -4 addr show "$EXT" 2>/dev/null | awk '{print $4}'`,
+          `echo ===DNS; S=$(date +%s%N); getent hosts ${shq(first)} >/dev/null 2>&1 && echo "$(( ($(date +%s%N)-S)/1000000 ))ms $(getent hosts ${shq(first)} 2>/dev/null | head -1 | awk '{print $1}')" || echo "resolve FAILED"`,
+          `echo ===REACH; ${reach}`,
+          `echo ===PUBSURFACE; ss -ltnH 2>/dev/null | awk '{print $4}' | grep -E '(0\\.0\\.0\\.0|\\[::\\]|\\*):' | grep -oE '[0-9]+$' | sort -un | tr '\\n' ' '`,
+          a.trace ? `echo ===TRACE; (command -v mtr >/dev/null && mtr -n -r -c 3 ${shq(first)} 2>/dev/null || traceroute -n -m 12 -w 2 ${shq(first)} 2>/dev/null || echo "no traceroute/mtr")` : `echo ===TRACE; echo skipped`,
+        ].join("; ");
+        const r = await s.exec(probe, { timeoutMs: 90_000 });
+        const sec: Record<string, string> = {}; let cur = "";
+        for (const ln of r.stdout.split("\n")) { const m = ln.match(/^===(\w+)/); if (m) { cur = m[1]; sec[cur] = ""; } else if (cur) sec[cur] += ln + "\n"; }
+        const reachLines = (sec.REACH || "").split("\n").map((l) => l.trim()).filter((l) => /^R\d+\|/.test(l));
+        const reachOut = reachLines.map((l) => { const [idx, st, ms] = l.split("|"); const t = parsed[parseInt(idx.slice(1), 10)]; return `  ${(t ? `${t.host}:${t.port}` : idx).padEnd(24)} ${st === "ok" ? `reachable (${ms}ms)` : "UNREACHABLE"}`; }).join("\n");
+        const pub = (sec.PUBSURFACE || "").trim();
+        const extra = pub && pub.split(/\s+/).some((p) => !["22", "80", "443", String(srv.port)].includes(p));
+        return [
+          `# Network diagnostics — ${srv.name} (${srv.host})`,
+          `Default route: ${(sec.ROUTE || "?").trim() || "none"}`,
+          `Interface: ${(sec.IFACE || "?").trim().replace(/\n/g, " · ") || "?"}`,
+          `DNS (${first}): ${(sec.DNS || "?").trim() || "?"}`,
+          `Reachability + latency:\n${reachOut || "  (none tested)"}`,
+          `Public-facing ports: ${pub || "none"}${extra ? "  ⚠ more than SSH/80/443 exposed — run security_audit" : ""}`,
+          a.trace ? `Path trace to ${first}:\n${lastLines((sec.TRACE || "").trim(), 14)}` : ``,
+        ].filter(Boolean).join("\n");
       });
     },
   },
