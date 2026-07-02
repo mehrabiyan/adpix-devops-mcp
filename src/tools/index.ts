@@ -29,6 +29,7 @@ import { threatTools } from "./threat.js";
 import { secretsTools } from "./secrets.js";
 import { honeypotTools } from "./honeypot.js";
 import { egressTools } from "./egress.js";
+import { kafkaTools } from "./kafka.js";
 
 export const allTools: ToolDef[] = [
   ...serverTools,
@@ -61,4 +62,5 @@ export const allTools: ToolDef[] = [
   ...secretsTools,
   ...honeypotTools,
   ...egressTools,
+  ...kafkaTools,
 ];
