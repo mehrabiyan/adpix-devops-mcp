@@ -93,6 +93,11 @@ EOF
   chown -R "$SVC_USER:$SVC_USER" "$INSTALL_DIR" 2>/dev/null || true
 fi
 
+# The tree is owned by $SVC_USER but git here runs as root (public-repo path) → git's
+# dubious-ownership guard would abort the update. Mark it safe system-wide (idempotent).
+git config --system --get-all safe.directory 2>/dev/null | grep -qxF "$INSTALL_DIR" \
+  || git config --system --add safe.directory "$INSTALL_DIR"
+
 if [ -d "$INSTALL_DIR/.git" ]; then
   say "Updating existing install…"
   if [ "${REPO_SSH:-0}" = "1" ]; then
