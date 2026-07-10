@@ -129,6 +129,12 @@ BIND_HOST=127.0.0.1
   echo "MCP_HTTP_PORT=$MCP_PORT"
   echo "MCP_AUTH_TOKEN=$TOKEN"
   echo "ADPIX_DEVOPS_HOME=$STATE_DIR"
+  # Public URL (used by OAuth for absolute endpoints/redirects). Harmless when OAuth is off.
+  [ -n "$MCP_DOMAIN" ] && echo "MCP_PUBLIC_URL=https://$MCP_DOMAIN"
+  # OAuth 2.1 authorization server for clients that require it (e.g. web chatbots).
+  # Opt-in: ENABLE_OAUTH=1 on the installer, OR a pre-existing setting is preserved.
+  if [ "${ENABLE_OAUTH:-}" = "1" ] || [ "${ENABLE_OAUTH:-}" = "true" ]; then echo "MCP_OAUTH_ENABLED=true";
+  else grep '^MCP_OAUTH_ENABLED=' "$ENV_FILE" 2>/dev/null || true; fi
   if [ -n "${ANTHROPIC_API_KEY:-}" ]; then echo "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY"; else
     grep '^ANTHROPIC_API_KEY=' "$ENV_FILE" 2>/dev/null || true
   fi

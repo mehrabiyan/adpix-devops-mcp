@@ -329,6 +329,16 @@ claude mcp add --transport http adpix-devops https://mcp.example.com/mcp \
 
 Without `MCP_DOMAIN` it serves plain HTTP on port 8930 (token-protected — only use on a trusted network, or keep `MCP_HTTP_HOST=127.0.0.1` and connect through an SSH tunnel). Update later by re-running the installer or calling the `mcp_self_update` tool. The server **refuses to start** on a non-loopback address without `MCP_AUTH_TOKEN`.
 
+### Connecting OAuth-only clients (web chatbots)
+
+Header-capable clients (Claude Code/Desktop) use `Authorization: Bearer <MCP_AUTH_TOKEN>`. Clients that **require OAuth** — many web chatbot "custom connector" flows — need the built-in OAuth 2.1 authorization server. Enable it with `ENABLE_OAUTH=1` on the installer (or set `MCP_OAUTH_ENABLED=true` + `MCP_PUBLIC_URL=https://your-domain` in the env file and restart):
+
+- Implements RFC 8414/9728 discovery, RFC 7591 **dynamic client registration**, and authorization-code + **PKCE (S256)** — so a compliant client just needs the base URL `https://your-domain/mcp` and self-registers; no Client ID to paste. For a manual form: Authorization Endpoint `https://your-domain/authorize`, Token Endpoint `https://your-domain/token`, Token Auth Method `none (PKCE)`.
+- **Human-gated:** every authorization shows a consent screen that requires your `MCP_AUTH_TOKEN` to approve, and there you pick the granted scope: **`mcp:read`** (read-only tools only — health/status/consult/capacity) or **`mcp:full`** (every tool, incl. root `run_command`, deploys, secret rotation). Default is read-only, so an external chatbot gets least privilege unless you explicitly grant more.
+- The static `MCP_AUTH_TOKEN` keeps working for header clients (full scope) alongside OAuth.
+
+Requires `MCP_PUBLIC_URL` (for absolute endpoints) and `MCP_AUTH_TOKEN` (the consent secret); the server refuses to enable OAuth without both.
+
 ## Configuration
 
 Servers normally come from the registry (`server_add`). For a single-server setup you can skip it and set env vars in the MCP client config instead:
@@ -347,7 +357,9 @@ Servers normally come from the registry (`server_add`). For a single-server setu
 | `ANTHROPIC_API_KEY` | Used by `ai_setup`/`ai_fix` when no key is given/stored | — |
 | `MCP_TRANSPORT` | `http` switches to hosted mode (same as `--http`) | stdio |
 | `MCP_HTTP_HOST` / `MCP_HTTP_PORT` | Hosted-mode bind address | `127.0.0.1` / `8930` |
-| `MCP_AUTH_TOKEN` | Bearer token for `/mcp` (required off-loopback) | — |
+| `MCP_AUTH_TOKEN` | Bearer token for `/mcp` + OAuth consent secret (required off-loopback) | — |
+| `MCP_OAUTH_ENABLED` | Enable the OAuth 2.1 authorization server (for OAuth-only clients) | `false` |
+| `MCP_PUBLIC_URL` | Public base URL for OAuth endpoints, e.g. `https://dev.adpix.io` (required with OAuth) | — |
 
 ## Security model
 

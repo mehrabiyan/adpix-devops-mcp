@@ -6,20 +6,23 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { realDeps, type Deps } from "./deps.js";
 import { allTools } from "./tools/index.js";
 import { serveHttp } from "./http.js";
+import { OAuthProvider, scopeAllows, type Scope } from "./oauth.js";
 
-export const VERSION = "0.4.0";
+export const VERSION = "0.5.0";
 
 // stdout is the stdio protocol channel — all logging goes to stderr.
 const log = (...a: unknown[]) => console.error("[adpix-devops-mcp]", ...a);
 
 /**
- * Build the MCP server with every tool registered. `deps` is the dependency seam
+ * Build the MCP server with tools registered. `deps` is the dependency seam
  * (SSH/registry/local exec) — defaults to the real implementation; integration
- * tests pass a fake so the protocol layer can be exercised without a network.
+ * tests pass a fake. `scope` filters the exposed tools: mcp:read exposes only
+ * read-only tools (for a least-privilege OAuth client); omitted/mcp:full exposes all.
  */
-export function buildServer(deps: Deps = realDeps): McpServer {
+export function buildServer(deps: Deps = realDeps, opts: { scope?: Scope } = {}): McpServer {
   const server = new McpServer({ name: "adpix-devops-mcp", version: VERSION });
   for (const tool of allTools) {
+    if (opts.scope && !scopeAllows(opts.scope, tool.annotations?.readOnlyHint === true)) continue;
     server.registerTool(
       tool.name,
       {
@@ -81,8 +84,29 @@ async function main() {
       log(`access to your servers to the whole network. Set MCP_AUTH_TOKEN, or bind 127.0.0.1.`);
       process.exit(1);
     }
-    await serveHttp(buildServer, { port, host, token });
-    log(`HTTP mode: ${allTools.length} tools on http://${host}:${port}/mcp (auth: ${token ? "Bearer token" : "none — loopback only"})`);
+
+    // OAuth 2.1 authorization server — opt-in, for clients that require OAuth
+    // (e.g. web chatbots doing dynamic client registration). Needs the public
+    // URL (for absolute metadata/redirects) and the admin token (consent gate).
+    let oauth: OAuthProvider | undefined;
+    if (args.includes("--oauth") || process.env.MCP_OAUTH_ENABLED === "true") {
+      const issuer = process.env.MCP_PUBLIC_URL ?? "";
+      if (!issuer) {
+        log("FATAL: OAuth needs MCP_PUBLIC_URL (e.g. https://dev.adpix.io) to form its endpoints.");
+        process.exit(1);
+      }
+      if (!token) {
+        log("FATAL: OAuth needs MCP_AUTH_TOKEN — it's the admin secret that gates the consent screen.");
+        process.exit(1);
+      }
+      oauth = new OAuthProvider({ issuer, adminToken: token });
+    }
+
+    await serveHttp((scope) => buildServer(realDeps, { scope }), { port, host, token, oauth });
+    log(
+      `HTTP mode: ${allTools.length} tools on http://${host}:${port}/mcp ` +
+        `(auth: ${oauth ? "OAuth + " : ""}${token ? "Bearer token" : "none — loopback only"})`
+    );
     return;
   }
 
